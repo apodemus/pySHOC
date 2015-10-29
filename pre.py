@@ -1,14 +1,25 @@
 # -*- coding: utf-8 -*-
 
-# execute this script in the iraf working directory, or in day directory
-# does pre-reductions using pyfits and pyraf
+# SHOC pre-reductions (with bells and whistles)
 
-#NECESARY IMPROVEMENTS
-#option for verbose output / logfile / TRIM EXCECUTION OPTION
+#TODO:
+#IO:
+    #option for verbosity level
+    #option to log to file
+    #decorate warnings to contain issuing function info
 
-#PYFITS COMBINE ALGORITHM ----> REJECTION ALGORITHM / SIGMA CLIPPING
+#IMAGE COMBINE ALGORITHM 
+    #----> PIXEL REJECTION / SIGMA CLIPPING
 
-#NEED MULTIPROCESSING!!!!!!!!!!!!!!!!!!!!!!
+#(optional) MULTIPROCESSING!!!!!!!!!!!!!!!!!!!!!!
+
+#IMPROVE DOCSTRINGS
+
+#MAKE EXTENSIBLE
+
+#OPTIONS FOR DISPLAYING COMPUTED IMAGES + STATS
+
+
 
 from types import ModuleType
 def tsktsk(s):
@@ -23,6 +34,7 @@ t1 = time.time()
 
 import numpy as np
 import pyfits
+#import astropy.io.fits as pyfits
 
 #import matplotlib.animation as ani
 #import matplotlib.pyplot as plt
@@ -30,6 +42,7 @@ import pyfits
 import os
 import re
 import datetime
+import subprocess
 #from glob import glob
 
 import collections as coll
@@ -39,11 +52,15 @@ from copy import copy
 
 from astropy.time import TimeDelta
 from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.table import Table as aTable
+from astropy.table import Column
 
 from misc import *#interleave, getTerminalSize
 from myio import warn, iocheck, parsetolist
-from superstring import SuperString, ProgressBar, Table, rreplace
+from superstring import SuperString, ProgressBar, rreplace
+from superstring import Table as sTable
 
+from irafhacks import make_iraf_slicemap
 
 from obstools.airmass   import Young94, altitude
 
@@ -53,12 +70,17 @@ from pySHOC.io          import Input
 from pySHOC.io          import ValidityTests as validity
 from pySHOC.io          import Conversion as convert
 
+#import matplotlib.pyplot as plt
+#from imagine import supershow
+
+import textwrap
+
+#from decor import profile
+
+from IPython import embed
+
 tsktsk('modules')
 print( 'Done!\n\n' )
-
-
-#ipshell = make_ipshell()
-from IPython import embed
 
 #################################################################################################################################################################################################################
 #Function definitions
@@ -83,6 +105,12 @@ from IPython import embed
     #readline.set_completer(comp.complete)                                                   #sets the autocomplete function to look for filename matches
 #else:
     #print('\n\nRunning in IPython...\n\n')
+
+def link_to_short_name_because_iraf_sux(filename, count, ext):
+    #HACK! BECAUSE IRAF SUX
+    linkname = args.dir + '/s{}.{}'.format(count, ext)
+    print( 'LINKING:', 'ln -f', os.path.basename(filename), os.path.basename(linkname) )
+    subprocess.call( ['ln', '-f', filename, linkname] )
 
 
 #################################################################################################################################################################################################################
@@ -111,9 +139,9 @@ class FilenameGenerator(object):
  #====================================================================================================
     def __call__(self, maxcount=None, **kw):
         '''Generator of filenames of unpacked cube.'''
-        path = kw['path']               if 'path' in kw         else self.path
-        sep = kw['sep']                 if 'sep' in kw          else self.sep
-        extension = kw['extension']     if 'extension' in kw    else self.extension
+        path            = kw.get('path', self.path)
+        sep             = kw.get('sep', self.sep)
+        extension       = kw.get('extension', self.extension)
         
         base = os.path.join(path, self.basename)
         
@@ -151,11 +179,11 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
     def __init__(self, hdus=[], file=None):
 
         super(SHOC_Cube, self).__init__(hdus, file)
-        self._needs_flip = 0
-        self._needs_sub = 0
-        self._is_master = 0
-        self._is_unpacked = 0
-        self._is_subframed = 0
+        self._needs_flip        = False
+        self._needs_sub         = []
+        self._is_master         = False
+        self._is_unpacked       = False
+        self._is_subframed      = False
         
         self.path, self.basename = os.path.split( self.filename() )
         if self.basename:
@@ -165,7 +193,10 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         self.trigger = None
     #====================================================================================================
     def __repr__(self):
-        return '{} ==> {}'.format( self.__class__.__name__, self.get_instrumental_setup() )
+        name, dattrs, values = self.get_instrumental_setup()
+        ref = tuple( interleave(dattrs, values) )
+        r = name + ':\t' + '%s = %s;\t'*len(values) %ref
+        return '{} ==> {}'.format( self.__class__.__name__, r )
     
     #====================================================================================================
     def get_filename(self, with_path=0, with_ext=1, suffix=(), sep='.'):
@@ -177,6 +208,7 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         *stuff, ext = filename.split(sep)
         ext = [ext] if with_ext else ['']
         suffix = [suffix] if isinstance(suffix,str) else list(suffix)
+        suffix = [s.strip(sep) for s in suffix]
         
         return sep.join( filter(None, stuff+suffix+ext) )
     
@@ -197,16 +229,18 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         #image binning
         self.binning =  tuple(header[s+'BIN'] for s in ['H','V'])
         
+        #gain
+        self.gain = header.get( 'gain', None )
+        
         #image dimensions
         self.ndims = header['NAXIS']                                                    #Number of image dimensions
         self.shape = tuple( header['NAXIS'+str(i)] for i in range(1, self.ndims+1) )
-        if self.ndims==2:
-            self.dimension = self.shape                                                      #Pixel dimensions for 2D images
-        elif self.ndims==3:
-            self.dimension = self.shape[:-1]
+        self.dimension = self.shape[:2]                                                      #Pixel dimensions for 2D images
+        
         
         #sub-framing
         xb,xe,ye,yb = map( int, header['SUBRECT'].split(',') )
+        self.subrect = xb,xe,ye,yb
         xb //= self.binning[0]; xe //= self.binning[0]
         yb //= self.binning[1]; ye //= self.binning[1]
         self.sub = xb,xe,yb,ye
@@ -244,11 +278,12 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
     #====================================================================================================
     def get_instrumental_setup(self, attrs=None):                                                                                                  #YOU CAN MAKE THIS __REPR__????????
         attrs =  attrs  or ['binning', 'dimension', 'mode', 'acqmode', 'kct']
+        dattrs = [at[:(3 if len(at)>5 else None)].upper() for at in attrs]        #for display
         vals = [ getattr(self, attr, '??') for attr in attrs ]
-        dattrs = map( str.upper, ['bin', 'dim', 'mode', 'acq. mode', 'kct'] )        #for display
-        ref = tuple( interleave( dattrs, vals ) )
+    
+        name = self.get_filename() or 'Unsaved'
         
-        return self.get_filename() + ':\t' + '%s = %s;\t'*len(attrs) %ref
+        return name, dattrs, vals
     
     #====================================================================================================
     def get_pixel_scale(self, telescope):
@@ -281,7 +316,7 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         '''check fits headers in this image agains frame2 for consistency of key attribute 
         Parameters
         ----------
-        key : The attribute to be checked (binning / instrument mode / dimensions / flip state /
+        key : The attribute to be checked (binning / instrument mode / dimensions / flip state)
         frame2 : SHOC_Cube Objects to check agains
         
         Returns
@@ -298,52 +333,88 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
     #====================================================================================================
     def flip(self):
         flipx, flipy = self.flip_state
+        data = self[0].data 
+        header = self[0].header
         if flipx:
-            print( 'Flipping {} in X.'.format(self.filename()) )
+            print( 'Flipping {} in X.'.format(self.get_filename()) )
             self[0].data = np.fliplr(self[0].data)
-            self[0].header['FLIPX'] = int(not flipx)
+            header['FLIPX'] = int(not flipx)
+            self.flip_state = tuple(header['FLIP'+s] for s in ['X','Y'])
         if flipy:
-            print( 'Flipping {} in Y.'.format(self.filename()) )
-            self[0].data = np.flipud(self[0].data)
-            self[0].header['FLIPY'] = int(not flipy)
+            print( 'Flipping {} in Y.'.format(self.get_filename()) )
+            data = np.flipud(data)
+            header['FLIPY'] = int(not flipy)
+            self.flip_state = tuple(header['FLIP'+s] for s in ['X','Y'])
 
     #====================================================================================================
     def subframe(self, subreg, write=1):
         if self._is_subframed:
             raise TypeError( '{} is already sub-framed!'.format(self.filename()) )
         
+        embed()
+        
         cb,ce, rb,re = subreg
         print( 'subframing {} to {}'.format( self.filename(), [rb,re,cb,ce]) )
-        self[0].data = self[0].data[rb:re,cb:ce]
-        self._is_subframed = 1
-        self._needs_sub = 0
+        
+        data = self[0].data[rb:re,cb:ce]
+        header = self[0].header
+        #header['SUBRECT']??
+        
+        print( '!'*8,  self.sub )
         
         subext = 'sub{}x{}'.format(re-rb, ce-cb)
-        fn_out = '{}{}.fits'.format( self.get_filename(1,0), subext )
+        outname = self.get_filename(1,1, subext )
+        fileobj = pyfits.file._File(outname, mode='ostream', clobber=True)
+        
+        hdu = pyfits.hdu.PrimaryHDU( data=data, header=header  )
+        #embed()
+        
+        stack = SHOC_Cube(hdu, fileobj)
+        stack.instrumental_setup()
+        
+        #stack._is_subframed = 1
+        #stack._needs_sub = []
+        #stack.sub = subreg
         
         if write:
-            self.writeto( fn_out, output_verify='warn', clobber=True )
+            stack.writeto( outname, output_verify='warn' )
         
-        return fn_out
+        return stack
 
     #====================================================================================================
-    def combine(self):
-        ''' Median combines the stack using pyfits. '''
+    def combine(self, func):
+        ''' Mean/Median combines the stack using pyfits.
+        
+        "Median combining can completely remove cosmic ray hits and radioactive decay trails
+        from the result, which cannot be done by standard mean combining. However, median 
+        combining achieves an ultimate signal to noise ratio about 80% that of mean combining
+        the same number of frames. The difference in signal to noise ratio can be compensated 
+        by median combining 57% more frames than if mean combining were used. In addition, 
+        variants on mean combining, such as sigma clipping, can remove deviant pixels while 
+        improving the S/N somewhere between that of median combining and ordinary mean 
+        combining. In a nutshell, if all images are "clean", use mean combining. If the 
+        images have mild to severe contamination by radiation events such as cosmic rays, 
+        use the median or sigma clipping method." - Newberry
+        '''
 
         imnr = '001'                                                                                  #HMMMMMMMMMMMMMMM       #THIS WILL NEED TO CHANGE FOR MULTIPLE SINGLE IMAGES AS INPUT
         header = copy( self[0].header )
-        data = np.median(self[0].data, 0)                                                             #median across images              MULTIPROCESSING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+        data = func(self[0].data, 0)                                                             #median across images              MULTIPROCESSING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        
         ncomb = header.pop('NUMKIN') if 'numkin' in  header else 0                  #Delete the NUMKIN header keyword
         if 'naxis3' in header:          header.remove( 'NAXIS3' )
         header['NAXIS'] = 2
         header['NCOMBINE'] = ( ncomb, 'Number of images combined' )
         header['ICMB'+imnr] = ( self.filename(), 'Contributors to combined output image' )                               #THIS WILL NEED TO CHANGE FOR MULTIPLE SINGLE IMAGES AS INPUT
         
-        outname = list( self.filename_gen() )[0]        #generate the filename
-        pyfits.writeto(outname, data, header=header, output_verify='warn', clobber=True)
+        #Load the stack as a SHOC_Cube
+        hdu = pyfits.PrimaryHDU( data, header )
+        outname = next( self.filename_gen() )        #generate the filename
+        fileobj = pyfits.file._File(outname, mode='ostream', clobber=True)
+        stack = SHOC_Cube(hdu, fileobj)                 #initialise the Cube with target file
+        stack.instrumental_setup()
         
-        return outname
+        return stack
     
     #====================================================================================================
     def unpack(self, count=1, padw=None, dryrun=0, w2f=1):                              #MULTIPROCESSING!!!!!!!!!!!!
@@ -485,24 +556,34 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         #For 'External Start'   :       
         
         utf = Time( stack_header['DATE'], format='isot', scale='utc', precision=9, location=sutherland )                   #  datetime_str.split('T')
-        utdate = Time( stack_header['DATE'], out_subfmt='date' )     #this should at least be the correct date!
+        date_str = stack_header['DATE'].split('T')[0]
+        utdate = Time( date_str )     #this should at least be the correct date!
         t_exp, t_kct = self.get_kct()
         td_kct = TimeDelta(t_kct, format='sec')
         
         if self.trigger_mode == 'Internal':
-            t0 = utf - 0.5*td_kct                                       #mid time of first frame
             #Initial time set to middle of first frame exposure        #NOTE: this hardly matters for sub-second t_exp, as the time recorded in header FRAME is rounded to the nearest second
+            t0 = utf - 0.5*td_kct                                       #mid time of first frame
             
         if self.trigger_mode.startswith('External'):
             if self.trigger:                                        #trigger provided by user at terminal through -g  (args.gps)
-                datetime_str = 'T'.join([str(utdate), self.trigger])     #Correct the time in the datetime_str
-                t0 = Time( datetime_str, format='isot', scale='utc', precision=9, location=sutherland)
-                t0 += 0.5*td_kct                                        #set t0 to mid time of first frame
                 #NOTE: GPS triggers are provided in SAST!!!!  If they are provided in UT, comment out the following lines
                 warn( 'Assuming GPS triggers provided in SAST' )
                 tz = -2
                 tzd = TimeDelta(tz*3600, format='sec')
-                t0 += tzd
+                
+                hms = np.array( self.trigger.split(':'), float)
+                trigsec = sum( hms * (3600, 60, 1))
+                ttrig = TimeDelta( trigsec, format='sec' )
+                ttrig += tzd                                    #trigger now in UTC
+                if ttrig.value < 0:
+                    ttrig += TimeDelta( 1, format='jd' )        #adjust to positive value -- this needs to be done so we don't accidentally shift the date!
+
+                t0 = utdate + ttrig
+                #datetime_str = 'T'.join([str(utdate), self.trigger])     #Correct the time in the datetime_str
+                t0 = Time( t0.isot, format='isot', scale='utc', precision=9, location=sutherland)
+                t0 += 0.5*td_kct                                        #set t0 to mid time of first frame
+                
             else:
                 raise ValueError( 'No GPS triggers provided!' )
                     #datetime_str = utdate    
@@ -532,7 +613,7 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         #Sutherland lattitude, longitude
         lat, lon = -32.376006, 20.810678
         
-        t_exp, t_kct = self.get_kct()
+        texp, t_kct = self.get_kct()
         t_kct = round(t_kct, 9)                     #numerical kinetic cycle time in sec (nanosec precision)
         td_kct = td_kct * np.arange( self.shape[-1], dtype=float )
         t = t0 + td_kct                                         #Time object containing time stamps for all frames in the cube
@@ -542,111 +623,198 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
             warn( 'Using predicted leap-second values from IERS.' )
         
         t.delta_ut1_utc = delta
-            
+        
+        #initialize array for timing data
+        self.timedata = timedata = np.recarray( (len(t)), 
+                                                dtype=[ ('utdate', 'U20'),
+                                                        ('uth', float), 
+                                                        ('utsec', float),
+                                                        ('utc', 'U30'),
+                                                        ('utstr', 'U20'),
+                                                        ('lmst', float),
+                                                        ('jd', float),
+                                                        ('gjd', float),
+                                                        ('bjd', float),
+                                                        ('altitude', float),
+                                                        ('airmass', float)]  )
         #compute timestamps for various scales
-        self.texp       = t_exp 
-        self.kct        = t_kct
-        self.utsec      = td_kct.value
-        self.uth        = t.utc.hours                #UTC in decimal hours for each frame
-        self.utc        = t.utc.iso
-        self.utdate     = np.fromiter( map(lambda x: x.split()[0], t.utc.iso), dtype='U10' )        #SURELY THERE IS A NEATER MORE MEMORY EFFIECIENT WAY!
-        self.lmst       = t.sidereal_time('mean', longitude=lon)                    #LMST for each frame
-        self.last       = t.sidereal_time('apparent', longitude=lon)
+        timedata.texp           = texp
+        timedata.utc            = t.utc.isot
+        timedata.uth            = t.utc.hours                   #UTC in decimal hours for each frame
+        timedata.utsec          = timedata.uth * 3600.              #td_kct.value
+        utdata = np.fromiter( map(lambda x: tuple(x.split('T')), timedata.utc),
+                                                 [('utdate','U20'),('utc','U20')] )
+        timedata.utdate = utdata['utdate']
+        timedata.utstr = utdata['utc']
+        lmst       = t.sidereal_time('mean', longitude=lon)  #LMST for each frame
+        timedata.lmst = lmst
+        #timedata.last       = t.sidereal_time('apparent', longitude=lon)
         
-        self.jd         = t.jd
-        self.ljd        = np.floor(self.jd)
-        self.gjd        = t.tcg.jd                     #geocentric julian date
+        timedata.jd         = t.jd
+        #timedata.ljd        = np.floor(timedata.jd)
+        timedata.gjd        = t.tcg.jd                  #geocentric julian date
         
-        if not coords is None:
-            self.bjd = t.bjd( coords, precess=0, abcorr=None )                 #barycentric julian date
-        else:
-            warn( 'Barycentrization cannot be done without knowing target coordinates!' )
-        
+        self.has_coords = not coords is None
+        if self.has_coords:
+            bjd_offset = t[:1].bjd( coords, precess=1, abcorr=None ) - timedata.jd[0]
+            
+            timedata.bjd[:] = timedata.jd +  bjd_offset               #barycentric julian date
+            timedata.altitude = altitude( coords.ra.radian,
+                                            coords.dec.radian,
+                                            lmst.radian,
+                                            np.radians(lat) )
+                                          
+            timedata.airmass = Young94( np.pi/2 - timedata.altitude )
+                
         #print( 'Updating the starting times for datacube {} ...'.format(self.get_filename()) )
         self.time_worker( 0 )
         self.flush( output_verify='warn', verbose=1 )
     
     #====================================================================================================    
-    def export_times(self, single_file=True):
-        '''write the timing data for the stack to files.'''
+    def export_times(self, with_slices=True, count=0):  #single_file=True,
+        '''write the timing data for the stack to file(s).'''
+        def make_header_line(info, fmt, delimiter):
+            import re
+            matcher = re.compile( '%-?(\d{1,2})' )
+            padwidths = [int(matcher.match(f).groups()[0]) for f in fmt]
+            padwidths[0] -= 2
+            colheads = [ s.ljust(p) for s,p in zip(info, padwidths) ]
+            return delimiter.join( colheads )
         
         #print( 'Writing timing data to file...' )
-        TKW_sf = ['uth', 'lmst', 'jd', 'gjd', 'bjd']                    #FIXME:  BJD NOT DEFINED IF COORDINATES NOT PROVIDED AS COMMAND LINE ARG!!
-        TKW = ['utdate', 'uth', 'utsec', 'lmst', 'last', 'jd', 'gjd', 'bjd']
-        T = []
-        for tkw in TKW:
-            fn = '{}.{}'.format(self.get_filename(1,0), tkw)
-            t = getattr(self,tkw)
-            T.append( t )
-            if not single_file:
-                if tkw in TKW_sf:
-                    if fn.endswith('uth'): fn.replace('uth', 'utc')
-                    np.savetxt( fn, t, fmt='%.10f' )
+        TKW = ['utdate', 'uth', 'utsec', 'lmst', 'altitude', 'airmass', 'jd', 'gjd', 'bjd']
+        fmt = ('%-10s', '%-12.9f', '%-12.6f', '%-12.9f', '%-12.9f', '%-12.9f', '%-18.9f', '%-18.9f', '%-18.9f')
+        formats = dict(zip(TKW, fmt))
         
-        if single_file:
-            fn = '{}.time'.format(self.get_filename(1,0))
-            T = np.array(T, dtype=object).T
-            fmt = ('%10s', '%12.9f', '%12.6f', '%12.9f', '%12.9f', '%18.9f', '%18.9f', '%18.9f')
+        table = aTable( self.timedata[TKW] )
+        
+        if with_slices:
+            #TKW     = ['filename'] + TKW
+            #fmt     = ('%-35s',) + fmt
+            slices = np.fromiter( map(os.path.basename, self.real_slices), 'U35' )
+            formats['filename'] = '%-35s'
+            table.add_column( Column(slices, 'filename'), 0 )
+        
+        delimiter = '\t'
+        timefile = self.get_filename(1, 0, 'time')
+        table.write( timefile ,
+                     delimiter='\t',
+                     format='ascii.commented_header', 
+                     formats=formats )
+        
+        #if single_file:
+        #Write all timing data to a single file
+        #delimiter = ' '
+        #timefile = self.get_filename(1, 0, 'time')
+        #header = make_header_line( TKW, fmt, delimiter )
+        #np.savetxt(timefile, T, fmt=fmt, header=header )
+        
+        #HACK! BECAUSE IRAF SUX
+        link_to_short_name_because_iraf_sux(timefile, count, 'time')
             
-            header = (''.join(fmt).replace('f','s') % tuple(map(str.upper,TKW))).strip()
-            np.savetxt(fn , T, fmt=fmt, header=header )
-        
+            
+        #else:
+            #for i, tkw in enumerate(TKW):
+                ##write each time sequence to a separate file...
+                #fn = '{}.{}'.format(self.get_filename(1,0), tkw)
+                #if tkw in TKW_sf:
+                    #if fn.endswith('uth'): fn.replace('uth', 'utc')
+                    #np.savetxt( fn, T[i], fmt='%.10f' )
+    
     #====================================================================================================
     def time_worker(self, j):
         
         header = self[0].header
 
-        header['utc-obs'] = ( self.uth[j], 'Start of frame exposure in UTC' )                       #imutil.hedit(imls[j], 'utc-obs', ut.hours(), add=1, ver=0)                       # update timestamp in header
-        header['LMST'] = ( self.lmst[j].hour, 'Local Mean Sidereal Time' )                              #imutil.hedit(imls[j], 'LMST', lmst, add=1, ver=0)                           
-        header['UTDATE'] = ( self.utdate[j], 'Universal Time Date' )                           #imutil.hedit(imls[j], 'UTDATE', ut.iso.split()[0], add=1, ver=0)
+        header['utc-obs'] = ( self.timedata.uth[j], 'Start of frame exposure in UTC' )                       #imutil.hedit(imls[j], 'utc-obs', ut.hours(), add=1, ver=0)                       # update timestamp in header
+        header['LMST'] = ( self.timedata.lmst[j], 'Local Mean Sidereal Time' )                              #imutil.hedit(imls[j], 'LMST', lmst, add=1, ver=0)                           
+        header['UTDATE'] = ( self.timedata.utdate[j], 'Universal Time Date' )                           #imutil.hedit(imls[j], 'UTDATE', ut.iso.split()[0], add=1, ver=0)
 
-        header['JD'] = ( self.jd[j], 'Julian Date (UTC)' )
-        header['LJD'] = ( self.ljd[j], 'Local Julian Date' )
-        header['GJD'] = ( self.gjd[j], 'Geocentric Julian Date (TCG)' )
+        header['JD'] = ( self.timedata.jd[j], 'Julian Date (UTC)' )
+        #header['LJD'] = ( self.timedata.ljd[j], 'Local Julian Date' )
+        header['GJD'] = ( self.timedata.gjd[j], 'Geocentric Julian Date (TCG)' )
         
-        if hasattr(self, 'bjd'):
-            header['BJD'] = ( float(self.bjd[j]), 'Barycentric Julian Date (TDB)' )
+        if self.has_coords:
+            header['BJD'] = ( self.timedata.bjd[j], 'Barycentric Julian Date (TDB)' )
+            header['AIRMASS'] = self.timedata.airmass[j]
         
-        if hasattr( self, 'airmass' ):
-            header['AIRMASS'] = self.airmass[j]
-        elif j!=0:
-            warn( 'Airmass not yet set for {}!\n'.format( self.get_filename() ) )
+        #elif j!=0:
+            #warn( 'Airmass not yet set for {}!\n'.format( self.get_filename() ) )
         
         #header['TIMECORR'] = ( True, 'Timing correction done' )        #imutil.hedit(imls[j], 'TIMECORR', True, add=1, ver=0)                                       #Adds the keyword 'TIMECORR' to the image header to indicate that timing correction has been done
         #header.add_history('Timing information corrected at %s' %str(datetime.datetime.now()), before='HEAD' )            #Adds the time of timing correction to header HISTORY
     
     
     #====================================================================================================
-    def set_airmass( self, coords=None, lat=-32.376006 ):
-        '''Airmass'''
-        if coords is None:
-            header = self[0].header
-            ra, dec = header['ra'], header['dec']
-            coords = SkyCoord( ra, dec, unit=('h', 'deg') )     #, system='icrs'
+    #def set_airmass( self, coords=None, lat=-32.376006 ):
+        #'''Airmass'''
+        #if coords is None:
+            #header = self[0].header
+            #ra, dec = header['ra'], header['dec']
+            #coords = SkyCoord( ra, dec, unit=('h', 'deg') )     #, system='icrs'
         
-        ra_r, dec_r = coords.ra.radian, coords.dec.radian
-        lmst_r = self.lmst.radian
-        lat_r = np.radians(lat)
+        #ra_r, dec_r = coords.ra.radian, coords.dec.radian
+        #lmst_r = self.timedata.lmst.radian
+        #lat_r = np.radians(lat)
         
-        self.altitude = altitude(ra_r, dec_r, lmst_r, lat_r)
-        z = np.pi/2 - self.altitude
-        self.airmass = Young94(z)
+        #self.timedata.altitude = altitude( coords.ra.radian,
+                                           #coords.dec.radian,
+                                           #self.timedata.lmst.radian,
+                                           
+                                          #dec_r, lmst_r, lat_r)
+        #z = np.pi/2 - self.altitude
+        #self.timedata.airmass = Young94(z)
     
     #====================================================================================================
-    def make_obsparams(self):
-        pass
-        #filename = cube.get_filename(1, 1, suffix)
-        #naxis3 = self.shape[-1]
-        #slices = list(map(slicemap, range(1,naxis3+1)))
-        #filter_info = itt.repeat( filtr )
-        #txs = itt.repeat(cube.texp)
-        #np.savetxt( , lzip(filter_info, cube.airmass), fmt='%s' )
+    def make_slices(self, suffix, i):
+        #HACK! BECAUSE IRAF SUX
+        #generate file with cube name and slices in iraf slice syntax.  This is a clever way of
+        #sidestepping splitting the cubes and having thousands of fits files to deal with, but it
+        #remains an ungly, unncessary, and outdated way of doing things.  IMHO (BRAAK!!!)
+        #NOTE: This also means that the airmass correction done by phot is done with the airmass of
+        #the first frame only... One has to generate an obsparams file for mkapfile COG with the 
+        #airmasses and observation times etc...
+        
+        source = self.get_filename(1, 0, (suffix,'fits'))
+        link_to_short_name_because_iraf_sux(source, i, 'fits')
+        
+        unpacked = self.get_filename(1, 0, (suffix, 'slice'))
+        naxis3 = self.shape[-1]
+        
+        self.real_slices = make_iraf_slicemap( source, naxis3, unpacked )
+        
+        linkname = args.dir + '/s{}{}'.format(i, '.fits')
+        slicefile = args.dir + '/s{}{}'.format(i, '.slice')
+        slices = make_iraf_slicemap( linkname, naxis3, slicefile )
+        #link_to_short_name_because_iraf_sux(unpacked, i, 'slice')
+        self.link_slices = np.array( slices )
+        
+        #filename = self.get_filename(0, 0, (suffix,'fits'))
+        #self.real_slices = make_iraf_slicemap( filename, naxis3 )
     
+    #====================================================================================================
+    def make_obsparams_file(self, suffix, count):
+        slices = np.fromiter( map(os.path.basename, self.real_slices), 'U23' )
+        texp = np.ones( self.shape[-1] ) * self.timedata.texp
+        Filt = np.empty( self.shape[-1], 'U2')
+        Filt[:] = head_info.filter
+        data = np.array([slices, Filt, texp, self.timedata.airmass, self.timedata.utstr], object).T
+        fmt = ('%-23s', '%-2s', '%-9.6f', '%-9.6f', '%s')
+        filename = self.get_filename(1, 0, (suffix, 'obspar'))
+        np.savetxt( filename, data, fmt, delimiter='\t' )       
+        
+        #HACK! BECAUSE IRAF SUX
+        slices = np.fromiter( map(os.path.basename, self.link_slices), 'U23' )
+        data = np.array([slices, Filt, texp, self.timedata.airmass, self.timedata.utstr], object).T
+        filename = args.dir + '/s{}.obspar'.format(count)
+        np.savetxt( filename, data, fmt, delimiter='\t' )
+        
+        #link_to_short_name_because_iraf_sux(filename, count, 'obspar')
         
 #################################################################################################################################################################################################################
 class SHOC_Run( object ):
     '''
-    Class to perform comparitive tests between cubes to see if they are compatible.
+    Class to perform comparitive tests between cubes to see if they are compatable.
     '''
     #====================================================================================================
     MAX_CHECK = 25                                                         #Maximal length for input list if validity checks is to be performed
@@ -654,8 +822,8 @@ class SHOC_Run( object ):
     
     #Naming convension defaults
     NAMES = type( 'Names', (), 
-                {   'flat'  :       'f[{date}{sep}]{binning}[{sep}sub{sub}][{sep}filt{filter}]',
-                    'bias'  :       'b[{date}{sep}]{binning}[{sep}m{mode}][{sep}t{kct}]',
+                {   'flat'  :       'f{date}{sep}{binning}[{sep}sub{sub}][{sep}filt{filter}]',
+                    'bias'  :       'b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]',
                     'sci'   :       '{basename}' }
                 )
 
@@ -663,15 +831,18 @@ class SHOC_Run( object ):
     #====================================================================================================
     def __init__(self, hdus=None, filenames=None, label=None, sep_by=None):
         
-        self.cubes = hdus if hdus else []
+        #WARNING:  filenames may contain None as well as duplicate entries.....??????
+                    #ot sure if uplicates is desireable wrt efficiency.....
+        
+        self.cubes = list(filter(None, hdus)) if hdus else []
         
         self.sep_by = sep_by
         self.label = label
         
-        if filenames!=None:
-            self.filenames = filenames
-            self.load( filenames )
-        elif hdus!=None:
+        if not filenames is None:
+            self.filenames = list( filter(None, filenames) )            #filter None
+            self.load( self.filenames )
+        elif not hdus is None:
             self.filenames =  [hdulist.filename() for hdulist in self]
         
     #====================================================================================================
@@ -718,8 +889,8 @@ class SHOC_Run( object ):
         return self.join( other )
     
     #====================================================================================================
-    def __eq__(self, other):
-        return vars(self) == vars(other)
+    #def __eq__(self, other):
+        #return vars(self) == vars(other)
     
     #====================================================================================================
     def pullattr(self, attr, return_as=list):
@@ -739,12 +910,14 @@ class SHOC_Run( object ):
     #====================================================================================================
     def join(self, *runs):
         
+        runs = list( filter(None, runs) )       #Filter empty runs (None)
+        labels = [r.label for r in runs]
         hdus = sum([r.cubes for r in runs], self.cubes )
         
-        if np.all( self.label == np.array([r.label for r in runs]) ):
+        if np.all( self.label == np.array(labels) ):
             label = self.label
         else:
-            warn( "Labels don't match!" )
+            warn( "Labels {} don't match {}!".format(labels, self.label) )
             label = None
         
         return SHOC_Run( hdus, label=label )
@@ -766,13 +939,25 @@ class SHOC_Run( object ):
     
     #====================================================================================================
     def print_instrumental_setup(self):
-        print( 'Instrumental setup ({} cubes):'.format(len(self)) )     #SPANNING DATES?
-        for i, stack in enumerate(self):
-            if i < self.MAX_LS:
-                print( stack )
-            else:
-                print( '.\n'*3 )
-                break
+        '''Print the instrumental setup for this run as a table.'''
+        names, dattrs, vals = zip( *(stack.get_instrumental_setup() for stack in self) )
+        
+        bgcolours       = {'flat' : 'cyan', 'bias' : 'magenta', 'science' : 'green' }
+        table = sTable( vals, 
+                        title = 'Instrumental Setup: {} frames'.format(self.label.title()),
+                        title_props = { 'text':'bold', 'bg': bgcolours[self.label] },
+                        col_headers = dattrs[0], 
+                        row_headers = ['filename'] + list(names), 
+                        enumera=True)
+        
+        print( table )
+        #print( 'Instrumental setup ({} cubes):'.format(len(self)) )     #SPANNING DATES?
+        #for i, stack in enumerate(self):
+            #if i < self.MAX_LS:
+                #print( stack )
+            #else:
+                #print( '.\n'*3 )
+                #break
     
     #====================================================================================================
     def reload(self, filenames=None, mode='update', memmap=True, save_backup=False, **kwargs):
@@ -792,9 +977,9 @@ class SHOC_Run( object ):
         #Cached IERS table will be used if only some of the times are outside the range of the current
         #table.  For the remaining values the predicted leap second values will be used.  If all times
         #are beyond the current table a new table will be grabbed online.
-        cache = np.any(status) and not np.all(status)
+        #cache = np.any(status) and not np.all(status)
         try:
-            iers_a = t_test.get_updated_iers_table( cache=cache )        #update the IERS table and set the leap-second offset
+            iers_a = t_test.get_updated_iers_table( cache=True )        #update the IERS table and set the leap-second offset
         except Exception as err:
             warn( 'Unable to update IERS table.' )
             print( err )
@@ -809,17 +994,36 @@ class SHOC_Run( object ):
             stack.set_times(t0, td, iers_a, coords)
 
     #====================================================================================================
-    def export_times(self):
-        [stack.export_times() for stack in self]
+    def export_times(self, with_slices=True):
+        for i, stack in enumerate(self):
+            stack.export_times(with_slices, i)
     
+    #====================================================================================================
+    def export_headers(self):
+        '''save fits headers as a text file'''
+        for stack in self:
+            headfile = stack.get_filename( with_path=1, with_ext=0, suffix='.head' )
+            print('\nWriting header to file: {}'.format(os.path.basename(headfile)) )
+            stack[0].header.totextfile( headfile )
+        
+    #====================================================================================================
+    def make_slices(self, suffix):
+        for i, cube in enumerate(self):
+            cube.make_slices(suffix, i)
+    
+    #====================================================================================================
+    def make_obsparams_file(self, suffix):
+        for i,cube in enumerate(self):
+            cube.make_obsparams_file(suffix, i)
+            
     #====================================================================================================
     def set_gps_triggers(self, triggers):
         if len(triggers)!=len(self):
             if self.check_rollover_state():
                 triggers = self.get_rolled_triggers( triggers )
-            
+        
         for j, stack in enumerate(self):
-                stack.trigger = triggers[j]
+            stack.trigger = triggers[j]
             
     #====================================================================================================
     def get_rolled_triggers(self, first_trigger):
@@ -867,7 +1071,6 @@ class SHOC_Run( object ):
         
         #check which keys help in generating unique set of filenames - these won't be used
         #print( 'Check that this function is actually producing minimal unique filenames!!' )
-        #ipshell()
         non_unique_keys = [ key for key in self[0].name_dict.keys() 
                         if all([self[0].name_dict[key] == stack.name_dict[key] for stack in self]) ]
         non_unique_keys.pop( non_unique_keys.index('sep') )
@@ -915,8 +1118,6 @@ class SHOC_Run( object ):
             
             stack.filename_gen = FilenameGenerator( fn, reduction_path, padwidth, sep, extension )
         
-        #print( 'unique filenames:', filenames )
-        #embed()
         return filenames
     
     #====================================================================================================
@@ -944,12 +1145,17 @@ class SHOC_Run( object ):
     def writeout(self, suffix, dryrun=0): #TODO:  INCORPORATE FILENAME GENERATOR
         fns = []
         for stack in self:
-            fn_out = '{}.{}.fits'.format( stack.get_filename(1,0), suffix )      #FILENAME GENERATOR????
+            fn_out = stack.get_filename(1,0, (suffix, 'fits') )      #FILENAME GENERATOR????
             fns.append(fn_out)
             
             if not dryrun:
-                print('\nWriting to file: %s' %fn_out)
+                print('\nWriting to file: {}'.format(os.path.basename(fn_out)) )
                 stack.writeto(fn_out, output_verify='warn', clobber=True)
+                
+                #save the header as a text file
+                headfile = stack.get_filename(1,0), (suffix, 'head' )
+                print('\nWriting header to file: {}'.format(os.path.basename(headfile)) )
+                stack[0].header.totextfile( headfile )
         
         return fns
     #====================================================================================================
@@ -1005,7 +1211,7 @@ class SHOC_Run( object ):
      
         
     #====================================================================================================
-    def combine( self ):
+    def combine( self, func ):
         ''' Median combines a list of frames (with equal binning) using pyfits
         
         Returns
@@ -1016,8 +1222,8 @@ class SHOC_Run( object ):
         def single_combine(ims):        #TODO MERGE WITH SHOC_Cube.combine????
             '''Combine a run consisting of single images.'''
             header = copy( ims[0][0].header )
-            data = np.mean([im[0].data for im in ims])
-            
+            data = func([im[0].data for im in ims], 0)
+                    
             header.remove('NUMKIN')
             header['NCOMBINE'] = ( len(ims), 'Number of images combined' )
             for i, im in enumerate(ims):
@@ -1025,10 +1231,10 @@ class SHOC_Run( object ):
                 comment = 'Contributors to combined output image' if i==0 else ''
                 header['ICMB'+imnr] = ( im.get_filename(), comment )
             
-            outname = list( ims[0].filename_gen() )[0]  #uses the FilenameGenerator of the first image in the SHOC_Run
+            #outname = next( ims[0].filename_gen() )  #uses the FilenameGenerator of the first image in the SHOC_Run
             
-            pyfits.writeto(outname, data, header=header, output_verify='warn', clobber=True)
-            return outname
+            #pyfits.writeto(outname, data, header=header, output_verify='warn', clobber=True)
+            return pyfits.PrimaryHDU( data, header )#outname
             
         #sep_by = self.sep_by            #how the run is separated
         
@@ -1046,7 +1252,7 @@ class SHOC_Run( object ):
                     'This image will be used as the master {} frame for {} binning.'
                     ).format(outname, self.label, self[0].binning)
             print( msg )
-            combined.append( outname )
+            combined.append( ims[0] )
         
         elif len(ims):
             if args.combine=='daily':           #THIS SHOULD BE FED AS AN ARGUMENT (ALONG WITH SIGMA)
@@ -1055,15 +1261,19 @@ class SHOC_Run( object ):
                 combined.append( single_combine( ims ) )
             
         for stack in stacks:
-            combined.append( stack.combine() )
+            combined.append( stack.combine(func) )
         
         if len(combined)>1:
-            print( 'PROBLEMS!!' )
-            ipshell()
+            msg = '''Ambiguity in combine! Cannot discriminate between given files based on header info alone.
+                Please select the most appropriate option among the following: 
+                '''
+            warn( textwrap.dedent(msg) )
+            self.print_instrumental_setup()
+            i = Input.str( 'Ix?', 0, check=lambda x: x<len(combined), convert=int )
         else:
-            outname = combined[0]
+            i = 0
         
-        return outname, master_flag
+        return combined[i], master_flag
     
     #unpack datacube(s) and assign 'outname' to output images
     #if more than one stack is given 'outname' is appended with 'n_' where n is the number of the stack (in sequence) 
@@ -1114,7 +1324,7 @@ class SHOC_Run( object ):
         
         match1 = np.array([attr in attr2 for attr in attr1])    #which of 1 occur in 2
         
-        if set(attr1).issuperset( set(attr2) ):                                   #All good, run2 contains all the cubes with matching attributes
+        if set(attr1).issuperset( set(attr2) ):  #All good, run2 contains all the cubes with matching attributes
             if match:
                 return match1                    #use this to select out the minimum set of cubes needed (filter out unneeded cubes)
             else:
@@ -1123,17 +1333,21 @@ class SHOC_Run( object ):
             match2 = np.array([attr in attr1 for attr in attr2])      #which of 2 occur in 1 (at this point we know that one of these values are False)
             
             if any(~match2):
-                fns = ' and '.join( fn1[~match1] )
-                badfns = ' and '.join( fn2[~match2] )
+                #FIXME:   ERRONEOUS ERROR MESSAGES!
+                fns = ',\n\t'.join( fn1[~match1] )
+                badfns = ',\n\t'.join( fn2[~match2] )
                 mmvals = ' or '.join( set( np.fromiter( map(str, attr2), 'U64' )[~match2] ) )                       #set of string values for mismatched attributes
                 keycomb = ('{} combination' if isinstance(keys, tuple) else '{}').format(keys)
-                operation = 'de-biasing' if 'bias' in run2.label else 'flat fielding'
-                desc = ('Incompatible {} in {}!\nNo {} frames with {} {} for {} {}'
-                        ).format(keycomb, badfns, self.label, mmvals, keycomb, operation, fns)
+                operation = 'de-biasing' if 'bias' in self.label else 'flat fielding'
+                desc = ('Incompatible {} in'
+                        '\n\t{}'
+                        '\nNo {} frames with {} {} for {}'
+                        '\n\t{}'
+                        '\n\n').format(keycomb, badfns, self.label, mmvals, keycomb, operation, fns)
                 #msg = '\n\n{}: {}\n'
                 
                 if raise_error==1:
-                    raise ValueError( '\n\nERROR!' +desc+ '\n' )                       #obviates the for loop
+                    raise ValueError( '\n\nERROR! %s' %desc )                       #obviates the for loop
                 elif raise_error==0:
                     warn( desc ) 
             
@@ -1144,21 +1358,32 @@ class SHOC_Run( object ):
 
     #====================================================================================================
     def flag_sub(self, science_run, raise_error=0):
+        return
+        #print( 'flag' )
+        #embed()
+        #dim_mismatch = self.check(science_run, 'dimension', 0)
+        #if dim_mismatch:
+            #keys = 'binning', 'dimension'
+            #sprops = set( science_run.zipper(keys)[1] )
+            #cprops = set( self.zipper(keys)[1] )
+            #missing_props = sprops - cprops
+            #for binning, dim in zip(*missing_props):
+                
         
         dim_mismatch = self.check(science_run, 'dimension', 0)
         if dim_mismatch:
             is_subframed = np.array( [s._is_subframed for s in science_run] )
             if np.any( is_subframed ):
-                #flag the self cubes that need to be subframed
+                #flag the cubes that need to be subframed
                 sf_bins = [s.binning for s in science_run if s._is_subframed]           #those binnings that have subframed cubes
                 for cube in self:
                     if cube.binning in sf_bins:
                         cube._needs_sub = 1
         
     #====================================================================================================
-    def set_airmass(self, coords=None):
-        for stack in self:
-            stack.set_airmass(coords)
+    #def set_airmass(self, coords=None):
+        #for stack in self:
+            #stack.set_airmass(coords)
             
     #====================================================================================================
     def set_name_dict(self):
@@ -1225,6 +1450,9 @@ class StructuredRun(coll.MutableMapping):
     
     #====================================================================================================
     def __repr__(self):
+        print( 'REWORK REPR' )
+        #embed()
+        
         return '\n'.join( [ ' : '.join(map(str, x)) for x in self.items() ] )
     
     #====================================================================================================
@@ -1254,12 +1482,14 @@ class StructuredRun(coll.MutableMapping):
         return self.flatten().attr_sep( *keys )
         
     #====================================================================================================
-    def magic_filenames(self):
-        return self.flatten().magic_filenames()
+    def magic_filenames(self, reduction_path='', sep='.', extension='.fits'):
+        return self.flatten().magic_filenames( reduction_path, sep, extension )
     
     #====================================================================================================
     def compute_master(self, mbias=None, load=0, w2f=1):
-        '''Compute the master image(s) (bias / flat field)
+        '''
+        Compute the master image(s) (bias / flat field)
+        
         Parameters
         ----------
         mbias :    A StructuredRun instance of master biases (optional)
@@ -1275,7 +1505,7 @@ class StructuredRun(coll.MutableMapping):
             assert self.sep_by == mbias.sep_by
         
         keys = self.sep_by
-        masters = []                                    #master bias filenames
+        masters = {}                                    #master bias filenames
         datatable = []
         for attrs, run in self.items():
             
@@ -1283,65 +1513,129 @@ class StructuredRun(coll.MutableMapping):
             #print( 'run', run )
             
             #if isinstance(run, SHOC_Run):
-            master, master_flag = run.combine( )                #master bias/flat frame for this attr val
-            #elif isinstance(run, SHOC_Cube):
-                #master, master_flag = run, 1
+            if run is None:                                     #Unmatched!
+                masters[attrs] = None
+                continue
+            
+            master, master_flag = run.combine( args.fcombine )                #master bias/flat frame for this attr val
             
             if not master_flag:
-                hdu = SHOC_Cube.load(master, mode='update', memmap=True, do_timing=0)
-                
                 stack = run[0]                        #~!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                if stack._needs_flip:                 #NEED TO FORMAT THE STRUCTURE OF THIS!!!!!!!!!!!!!
-                    hdu.flip()
+                master._needs_flip = stack._needs_flip
+
+                if master._needs_flip:                 #NEED TO FORMAT THE STRUCTURE OF THIS!!!!!!!!!!!!!
+                    master.flip()
+                    master._needs_flip = not master._needs_flip
                 
+                #FIXME: MEGA NEST!!?
                 if 'flat' in self.label:
                     if mbias:
                         masterbias = mbias[attrs]
                         if masterbias:
-                            print( 'Subtracting master bias {} for {} {} from master flat {}.'.format(masterbias.get_filename(), attrs, keys, master) )
-                            hdu[0].data -= masterbias[0].data
+                            print( ('Subtracting master bias {} for'
+                                    '\n\t{} {} from'
+                                    '\n\tmaster flat {}.').format(masterbias.get_filename(),
+                                                                  attrs,
+                                                                  keys,
+                                                                  master.basename) )
+                            master[0].data -= masterbias[0].data
                         else:
-                            print( 'No master bias for {} {}.'.format(attrs, keys) )
-            
-                    ffmean = np.mean(hdu[0].data)                                                      #flat field mean
+                            print( 'No master bias for\n\t{} {}.'.format(attrs, keys) )
+                                        
+                    ffmean = np.mean( master[0].data )                                                      #flat field mean
                     print( 'Normalising flat field...' )
-                    hdu[0].data /= ffmean                                                              #flat field normalization
+                    master[0].data /= ffmean                                                              #flat field normalization
                 
-                hdu.flush(output_verify='warn', verbose=1)      #writes full frame master
+                master.flush(output_verify='warn', verbose=1)      #writes full frame master
                 
-                if stack._needs_sub:
-                    master = hdu.subframe( stack.sub )          #writes subframed master
-                    
-                hdu.close()
+                #writes subframed master
+                #submasters = [master.subframe(sub) for sub in stack._needs_sub] 
+                
+                #master.close()
             
-            masters.append( master )
-            datatable.append( (master,) + attrs )
+            masters[attrs] =  master
+            datatable.append( (master.get_filename(0,1),) + attrs )
             
-            print()
+        print(   )
             
         #Table for master frames
-        bgcolours = {'flat' : 'cyan', 'bias' : 'magenta', 'sci' : 'green' }
-        title = 'Master {} frames:'.format(self.label)
-        title_props = { 'text':'bold', 'bg': bgcolours[self.label] }
-        col_head = ('Filename',) + tuple( map(str.upper, keys) )
-        table = Table( datatable, title, title_props, col_head )
+        bgcolours       = {'flat' : 'cyan', 'bias' : 'magenta', 'sci' : 'green' }
+        title           = 'Master {} frames:'.format(self.label)
+        title_props     = { 'text':'bold', 'bg': bgcolours[self.label] }
+        col_head        = ('Filename',) + tuple( map(str.upper, keys) )
+        table = sTable( datatable, title, title_props, col_head )
         
         print( table )
-        #STATISTICS????????
+        #TODO: STATISTICS????????
         
         if load:
+            #this creates a run of all the master frames which will be split into individual 
+            #SHOC_Cube instances upon the creation of the StructuredRun at return
             label = 'master {}'.format( self.label )
-            masters = SHOC_Run( filenames=masters, label=label )        #this creates a run of all the master frames which will be split into individual SHOC_Cube instances upon the creation of the StructuredRun on return
+            mrun = SHOC_Run( hdus=masters.values(), label=label )
         
         if w2f:
             fn = label.replace(' ','.')
-            masters.export_filenames( fn )
+            outname = os.path.join(args.output_dir, fn)
+            mrun.export_filenames( outname )
         
-        SR = StructuredRun( zip(self.keys(), masters) )
+        #NOTE:  The dict here is keyed on the closest matching attributes in self!
+        SR = StructuredRun( masters )           
         SR.sep_by = self.sep_by
         SR.label = self.label
         return SR
     
+    #====================================================================================================
+    def subframe(self, c_sr):
+        #Subframe
+        print( 'sublime subframe' )
+        i=0
+        substacks = []
+        #embed()
+        for attrs, r in self.items():
+            #_, csub = c_sr[attrs].sub   #what are the existing dimensions for this binning, mode combo
+            stack = c_sr[attrs]
+            #_, ssub = r.zipper('sub')
+            _, srect = r.zipper('subrect')
+            #if i==0:    
+                #i=1
+            missing_sub = set(srect) - set([(stack.subrect)])
+            print( stack.get_filename(0,1), r )         
+            print( stack.subrect, srect )
+            print( missing_sub )
+            for sub in missing_sub:
+                #for stack in c_sr[attrs]:
+                substacks.append( stack.subframe( sub ) )
+        
+        #embed()
+        
+        print( 'substacks', [s.sub for s in substacks] )
+        
+        b = c_sr.flatten()
+        print( 'RARARARARRAAAR!!!', b.zipper('sub') )
+        
+        newcals = SHOC_Run(substacks, label=c_sr.label) + b
+        return newcals
+    
+    
+    #def subframe(self, c_sr):
+        ##Subframe
+        #i=0
+        #substacks = []
+        #for attrs, r in self.items():
+            #_, csub = c_sr[attrs].zipper('sub')   #what are the existing dimensions for this binning, mode combo
+            #_, ssub = r.zipper('sub')
+            #if i==0:
+                #embed()
+                #i=1
+            #missing_sub = set(csub) - set(ssub)
+            #for sub in missing_sub:
+                #for stack in c_sr[attrs]:
+                    #substacks.append( stack.subframe( sub ) )
+        
+        #newcals = SHOC_Run(substacks) + c_sr.flatten()
+        
+        #return newcals
     
 #################################################################################################################################################################################################################          
 class SHOCHeaderCard( pyfits.card.Card ):
@@ -1379,7 +1673,10 @@ class SHOCHeader( pyfits.Header ):
     
     #====================================================================================================
     def set_defaults(self, header):
-        '''set the default values according to those found in the given header'''
+        '''
+        Set the default values according to those found in the given header.  
+        Useful in interteractive mode to avoid loads of typing.
+        '''
         for card in self.cards:
             key = card.keyword
             if key in header.keys():
@@ -1390,12 +1687,17 @@ class SHOCHeader( pyfits.Header ):
         
         
     #====================================================================================================
-    def set_ron_sens_date(self, header):    #GENERALISE / GET A BETTER NAME!!!!!!!!!!!!
+    def set_ron_sens_date(self, header):    #GET A BETTER NAME!!!!!!!!!!!!
         '''set Readout noise, sensitivity, observation date in header.'''
-        ron, sens, saturation = self.RNT.get_readnoise( header )                                # Readout noise and Sensitivity as taken from ReadNoiseTable
-        self['RON'] = ron
-        self['SENSITIVITY'] = sens                                                        # Images taken at SAAO observatory
-        self['OBS-DATE'] = header['DATE'].split('T')[0]
+        # Readout noise and Sensitivity as taken from ReadNoiseTable
+        ron, sens, saturation = self.RNT.get_readnoise( header )
+        
+        self['RON']             = ron,                          'CCD Readout Noise'
+        self['SENSITIV']        = sens,                         'CCD Sensitivity'                                                    # Images taken at SAAO observatory
+        self['OBS-DATE']        = header['DATE'].split('T')[0], 'Observation date'
+        #self['SATURATION']??
+        
+        return ron, sens, saturation
         
     #====================================================================================================
     def check(self):
@@ -1434,6 +1736,8 @@ class SHOCHeader( pyfits.Header ):
             header.set(card.keyword, card.value, card.comment)                                                               #If  the  field  already  exists  it  is edited
         
         hdu.flush(output_verify='warn', verbose=1)                      #SLOW!! AND UNECESSARY!!!!
+         
+            
         #hdu.close()                                                             #HMMMMMMMMMMMMMMM
         #UPDATE HISTORY / COMMENT KEYWORD TO REFLECT CHANGES
         
@@ -1446,7 +1750,8 @@ def bias_proc(m_bias_dict, sb_dict):             #THIS SHOULD BE A METHOD OF THE
     #NOTE: Bias frames here are technically dark frames taken at minimum possible exposure time.  SHOC's dark current is (theoretically) constant with time,so these may be used as bias frames.  
     #	   Also, there is therefore no need to normalised these to the science frame exposure times.
     
-    '''Do the bias reductions on sciene data
+    '''
+    Do the bias reductions on sciene data
     Parameters
     ----------
     mbias_dict : Dictionary with binning,filename key,value pairs for master biases
@@ -1459,7 +1764,8 @@ def bias_proc(m_bias_dict, sb_dict):             #THIS SHOULD BE A METHOD OF THE
     
     fn_ls = []
     for attrs, master in m_bias_dict.items():
-        #mb_data = #pyfits.getdata(mb_fn, memmap=True)
+        if master is None:
+            continue
         
         stacks = sb_dict[attrs]              #the cubes (as SHOC_Run) for this attrs value
        
@@ -1504,11 +1810,12 @@ def flat_proc(mflat_dict, sb_dict):             #THIS SHOULD BE A METHOD OF THE 
             masterflat = masterflat[0]                  #HACK!!
         
         mf_data = masterflat[0].data            #pyfits.getdata(masterflat, memmap=True)
-            
+        
         if round(np.mean(mf_data), 1) != 1:
             raise ValueError('Flat field not normalised!!!!')
         
         stacks = sb_dict[attrs]                                       #the cubes for this binning value
+        
         msg = '\nDoing flat field division on the stack: '
         lm = len(msg)
         print( msg, )
@@ -1529,7 +1836,7 @@ def flat_proc(mflat_dict, sb_dict):             #THIS SHOULD BE A METHOD OF THE 
 # Headers
 #################################################################################################################################################################################################################  
 
-def header_proc( run ):             #THIS SHOULD BE A METHOD OF THE SHOC_RUN CLASS
+def header_proc( run, _pr=True ):             #THIS SHOULD BE A METHOD OF THE SHOC_RUN CLASS
     '''update the headers where necesary'''
     
     section_header( 'Updating Fits headers' )
@@ -1538,25 +1845,26 @@ def header_proc( run ):             #THIS SHOULD BE A METHOD OF THE SHOC_RUN CLA
     update_head.set_defaults( run[0][0].header )        #set the defaults for object info according to those (if available) in the header of the first cube
     
     table = [
-    ('OBJECT',       'Object designation',   '',                                     validity.trivial,  convert.trivial),
+    ('OBJECT',       'Object name/alias',   '',                                     validity.trivial,  convert.trivial),
     ('RA',           'RA',                   "(eg: '03:14:15' or '03 14 15')",       validity.RA,       convert.RA_DEC),
     ('DEC',          'Dec',                  "(eg: '+27:18:28.1' or '27 18 28.1')",  validity.DEC,      convert.RA_DEC),
     ('EPOCH',        'Epoch of RA and Dec',  'eg: 2000',                             validity.float,    convert.trivial),
     ('FILTER',       'Filter',               '(WL for clear)',                       validity.trivial,  convert.trivial),
     ('OBSERVAT',     'Observatory',          '',                                     validity.trivial,  convert.trivial),
-    ('RON',          'CCD Readout Noise',    '',                                     validity.trivial,  convert.trivial),
-    ('SENSITIVITY',  'CCD Sensitivity',      '',                                     validity.trivial,  convert.trivial),
-    ('TELESCOPE',    'Telescope',             '',                                    validity.trivial,  convert.trivial) 
+    #('RON',          'CCD Readout Noise',    '',                                     validity.trivial,  convert.trivial),
+    #('SENSITIVITY',  'CCD Sensitivity',      '',                                     validity.trivial,  convert.trivial),
+    ('TELESCOP',     'Telescope',             '',                                    validity.trivial,  convert.trivial) 
     ]
 
     keywords ,description, example, check, conversion = zip(*table)
     #convert.ws2ds
-    
+
     if args.update_headers:
         info = []
         askfor = []
         for kw in keywords:
             match = [key for key in head_info.__dict__.keys() if kw.lower().startswith(key)]    #match the terminal (argparse) input arguments with the keywords
+            #print(match)
             if len(match):
                 inf = getattr( head_info, match[0] )    #terminal input value (or default) for this keyword
                 if inf:
@@ -1570,8 +1878,8 @@ def header_proc( run ):             #THIS SHOULD BE A METHOD OF THE SHOC_RUN CLA
                 askfor.append( 0 )
         
     else:    
-        info = ['']*9  #['test', '23 22 22.33', '44 33 33.534', '2000', '2012 12 12', 'WL','saao', '','']    #
-        askfor = [1,1,1,1,1,0,0,0,1]
+        info = ['']*len(table)  #['test', '23 22 22.33', '44 33 33.534', '2000', '2012 12 12', 'WL','saao', '','']    #
+        askfor = [1,1,1,1,1,0,1]
     
     if sum(askfor):
         print("\nPlease enter the following information about the observations to populate the image header. If you enter nothing that item will not be updated.")  #PRINT FORMAT OPTIONS
@@ -1582,37 +1890,48 @@ def header_proc( run ):             #THIS SHOULD BE A METHOD OF THE SHOC_RUN CLA
     
     update_head.extend( update_cards )
     #update_head['OBSERVAT'] = 
-    
-    print( '\n\nUpdating headers with the following information:\n' )
+
+    print( '\n\nUpdating all headers with the following information:\n' )
     print( repr(update_head) )
     print( )
     
+    table = []
     for hdu in run:
-        update_head.set_ron_sens_date( hdu[0].header )     #set RON, SENS, OBSERVAT (the RON and SENS may change through the run)
-        update_head.check()                                #Check if updating observation info is necessary                            #NOT WORKING!!!!!!!!!!!!!
+        # Readout noise and Sensitivity as taken from ReadNoiseTable
+        details = update_head.set_ron_sens_date( hdu[0].header ) #set RON, SENS, OBS-DATE (the RON and SENS may change through the run)
         
+        update_head.check()                                #Check if updating observation info is necessary                            #NOT WORKING!!!!!!!!!!!!!
         update_head.update_to( hdu )                       #copy the cards in update_head to the hdu header and flush
         #hdu.set_name_dict()
+        
+        table.append( details )
     
-    return update_head
+    if _pr:             
+        #TODO:  CAN BENEFIT HERE FROM STRUCTURED RUN, TO PRESENT INFO MORE CONSICELY
+        table = sTable(table, 
+                      col_headers=('RON', 'SENSITIVITY', 'SATURATION'), 
+                      row_headers=run.get_filenames())
+        print( table )
+    
+    return update_head #this will have the RON and SENSITIVITY of the last updated
     
 #################################################################################################################################################################################################################  
 # Science image pre-reductions
 #################################################################################################################################################################################################################
 
-def match_closest(sci_run, calib_run, match_exact, match_closest=None, threshold_warn=7, _pr=1):
+def match_closest(sci_run, calib_run, exact, closest=None, threshold_warn=7, _pr=1):
     '''
     Match the attributes between sci_run and calib_run.
-    Matches exactly to the attributes given in match_exactly, and as closely as possible to the  
-    attributes in match_closest. Separates sci_run by the attributes in both match_exact and 
-    match_closest, and builds an index dictionary for the calib_run which can later be used to
+    Matches exactly to the attributes given in exact, and as closely as possible to the  
+    attributes in closest. Separates sci_run by the attributes in both exact and 
+    closest, and builds an index dictionary for the calib_run which can later be used to
     generate a StructuredRun instance.
     Parameters
     ----------
     sci_run :           The SHOC_Run to which comparison will be done
     calib_run :         SHOC_Run which will be trimmed by matching
-    match_exact :       tuple or str. keywords to match exactly         NOTE: No checks run to ensure calib_run forms a subset of sci_run w.r.t. these attributes
-    match_closest:      tuple or str. keywords to match as closely as possible
+    exact :       tuple or str. keywords to match exactly         NOTE: No checks run to ensure calib_run forms a subset of sci_run w.r.t. these attributes
+    closest:      tuple or str. keywords to match as closely as possible
 
     Returns
     ------
@@ -1628,17 +1947,17 @@ def match_closest(sci_run, calib_run, match_exact, match_closest=None, threshold
     #====================================================================================================
     
     msg = ('\nMatching {} frames to {} frames by:\tExact {};\t Closest {}\n'
-            ).format( calib_run.label.upper(), sci_run.label.upper(), match_exact, repr(match_closest) )
+            ).format( calib_run.label.upper(), sci_run.label.upper(), exact, repr(closest) )
     print( msg )
     
     #create the StructuredRun for science frame and calibration frames
-    match_exact, match_closest = str2tup(match_exact), str2tup(match_closest)
-    sep_by = tuple( key for key in flatten([match_exact, match_closest]) if not key is None )   
+    exact, closest = str2tup(exact), str2tup(closest)
+    sep_by = tuple( key for key in flatten([exact, closest]) if not key is None )   
     s_sr, sflag = sci_run.attr_sep( *sep_by )
     c_sr, bflag = calib_run.attr_sep( *sep_by )
     
     #Do the matching - map the science frame attributes to the calibration StructuredRun element with closest match
-    lme = len(match_exact)                      #NOTE AT THE MOMENT THIS ONLY USES THE FIRST KEYWORD IN match_losest TO DETERMINE THE CLOSEST MATCH 
+    lme = len(exact)                      #NOTE AT THE MOMENT THIS ONLY USES THE FIRST KEYWORD IN closest TO DETERMINE THE CLOSEST MATCH 
     _, sciatts = sci_run.zipper( sep_by )                       #sep_by key attributes of the sci_run
     _, calibatts = calib_run.zipper( sep_by )
     ssciatts = np.array( list(set(sciatts)), object )           #a set of the science frame attributes
@@ -1652,31 +1971,41 @@ def match_closest(sci_run, calib_run, match_exact, match_closest=None, threshold
     for i, attrs in enumerate(ssciatts):
         lx = np.all( calibatts[:,:lme]==attrs[:lme], axis=1 )       #those calib cubes with same attrs (that need exact matching)
         delta = abs( calibatts[:,lme] - attrs[lme] )
-        lc = delta==min(delta[lx])
-        l = lx & lc
         
-        tattrs = tuple(attrs)
-        cattrs = tuple( calibatts[l][0] )
+        if ~lx.any():   #NO exact matches
+            threshold_warn = False                                  #Don't try issue warnings below
+            cattrs = (None,)*len(sep_by)
+            crun = None
+        else:
+            lc = delta==delta[lx].min()
+            l = lx & lc
+            cattrs = tuple( calibatts[l][0] )
+            crun = c_sr[cattrs]
+        
+        tattrs = tuple(attrs)                                           #array to tuple
         attmap[tattrs] = cattrs
-        runmap[tattrs] = c_sr[cattrs]
+        runmap[tattrs] = crun
 
-        datatable.append( ( str(s_sr[tattrs]), )  + tattrs )
-        datatable.append( ( str(runmap[tattrs]), ) + attmap[tattrs] )
+        datatable.append( (str(s_sr[tattrs]), ) + tattrs )
+        datatable.append( (str(crun),)          + cattrs )
         
         #Threshold warnings
+        #FIXME:  MAKE WARNINGS MORE READABLE
         if threshold_warn:
             deltatype = type(delta[0])
             threshold = deltatype(threshold_warn)  #type cast the attribute for comparison (datetime.timedelta for date attribute, etc..)
             if np.any( delta[l] > deltatype(0) ):
-                where_thresh[2*i:2*(i+1),lme+1] += 1
+                where_thresh[2*i:2*(i+1), lme+1] += 1
                 
             if np.any( delta[l] > threshold ):
                 fns = ' and '.join( c_sr[cattrs].get_filenames() )
                 sci_fns = ' and '.join( s_sr[tattrs].get_filenames() )
-                msg = ( 'Closest match of {} {} in {} to {} in {} excedees given threshold of {}!!'
-                        ).format( tattrs[lme], match_closest[0].upper(), fns, cattrs[lme], sci_fns, threshold_warn )
+                msg = ( 'Closest match of {} {} in {}\n'
+                        '\tto {} in {}\n'
+                        '\texcedees given threshold of {}!!\n\n'        
+                        ).format( tattrs[lme], closest[0].upper(), fns, cattrs[lme], sci_fns, threshold_warn )
                 warn( msg )
-                where_thresh[2*i:2*(i+1),lme+1] += 1
+                where_thresh[2*i:2*(i+1), lme+1] += 1
         
     out_sr = StructuredRun( runmap )
     out_sr.label = calib_run.label
@@ -1687,8 +2016,18 @@ def match_closest(sci_run, calib_run, match_exact, match_closest=None, threshold
         col_head = ('Filename(s)',) + tuple( map(str.upper, sep_by) )
         where_row_borders = range(0, len(datatable)+1, 2)
         
-        table = Table( datatable, col_headers=col_head, where_row_borders=where_row_borders )
-        table.colourise( where_thresh, 'default', 'yellow', 202 )
+        table = sTable( datatable,
+                       title='Matches',
+                       title_props=dict(text='bold', bg='light blue'),
+                       col_headers=col_head,
+                       where_row_borders=where_row_borders )
+        
+        #colourise           #TODO: highlight rows instead of colourise??
+        unmatched = [None in row for row in datatable]
+        unmatched = np.tile( unmatched, (len(sep_by)+1,1) ).T
+        states = where_thresh
+        states[unmatched] = 3
+        table.colourise( states, 'default', 'yellow', 202, {'bg':'red'} )
         
         print( '\nThe following matches have been made:' )
         print( table )
@@ -1700,23 +2039,26 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
     
     section_header( 'Science frame processing' )
     
+    run.print_instrumental_setup()
+    
     if args.w2f:
-        run.export_filenames( 'cubes.txt' )
+        outname = os.path.join( args.output_dir, 'cubes.txt' )
+        run.export_filenames( outname )
     
     if args.update_headers:
         updated_head = header_proc(run)
     
     #====================================================================================================
     # Timing
-    if args.timing or args.split:       section_header( 'Timing' )
+    if args.timing or args.split:
+        section_header( 'Timing' )
         
     if args.gps:
         run.set_gps_triggers( args.gps )
-
+    
     if args.timing or args.split:
         run.set_times( head_info.coords )
-        run.set_airmass( head_info.coords )
-        run.export_times()
+        #run.set_airmass( head_info.coords )
     
     #====================================================================================================
     # Debiasing
@@ -1726,11 +2068,16 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         section_header( 'Debiasing' )
         
         suffix += 'b'           #the string to append to the filename base string to indicate bias subtraction
-        s_sr, b_sr = match_closest(run, args.bias, ('binning','mode'), 'kct')
+        s_sr, b_sr = match_closest( run, args.bias, 
+                                    ('binning','mode'), 'kct',
+                                    threshold_warn=None)
         
-        b_sr.magic_filenames()
+        b_sr.magic_filenames( args.output_dir )
         
         masterbias = b_sr.compute_master( load=1, w2f=args.w2f )      #StructuredRun for master biases separated by 'binning','mode', 'kct' 
+        
+        #s_sr.subframe( b_sr )
+
         b_sr = bias_proc(masterbias, s_sr)
         
         #s_sr.writeout( suffix )
@@ -1752,23 +2099,28 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         threshold_warn = 1      if matchdate                 else None
         
         s_sr, f_sr = match_closest(run, args.flats, 'binning', matchdate, threshold_warn)
-        f_sr.magic_filenames()
+        f_sr.magic_filenames( args.output_dir )
+        
+        #embed()
         
         if args.bias:
             if args.bias4flats:
                 f_sr, b4f_sr = match_closest(f_sr.flatten(), args.bias4flats, ('binning','mode'), 'kct')
-                b4f_sr.magic_filenames()
-                for attrs, brun in b4f_sr.items():
-                    for cube in brun:
-                        cube.filename_gen.basename += '.b4f'              #HACK to keep the filenames of biases for science run and flat run different
+                b4f_sr.magic_filenames( args.output_dir, extension='.b4f.fits' )
+                
+                #TODO: CROSS CHECK THE bias4flats SO WE DON'T RECOMPUTE unncessary...
                 
                 masterbias4flats = b4f_sr.compute_master( load=1 )                        #StructuredRun for master biases separated by 'binning','mode', 'kct' 
                 #else:
                     #masterbias4flats = masterbias           #masterbias contains frames with right mode to to flat field debiasing
             else:
                 masterbias4flats = None
-                
+        
         masterflats = f_sr.compute_master( masterbias4flats, load=1 )
+        #q = s_sr.subframe( masterflats )
+        #embed()
+        #raise Exception
+        
         masterflats, _ = masterflats.attr_sep( 'binning' )
         s_sr, _ = s_sr.attr_sep( 'binning' )
         
@@ -1784,12 +2136,13 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         keys, attrs = run.zipper( ('binning', 'mode', 'kct') )
         col_head = ('Filename',) + tuple( map(str.upper, keys) )
         datatable = [(os.path.split(fn)[1],) + attr for fn, attr in zip(nfns, attrs)]
-        table = Table( datatable, title, title_props, col_head )
+        table = sTable( datatable, title, title_props, col_head )
         
         print( table )
         
         if args.w2f:
-            run.export_filenames( 'cubes.bff.txt' )
+            outname = os.path.join(args.output_dir, 'cubes.bff.txt')
+            run.export_filenames( outname )
             
     #animate(sbff[0])
     
@@ -1801,7 +2154,7 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         if args.interactive:    
             print('\n'*2)
             names.science = Input.str('You have entered %i science cubes with %i different binnings (listed above).\nPlease enter a naming convension:\n' %(len(args.cubes), len(sbff)),
-                                '{basename}', example='s{filter}{binning}{sep}',  check=validity.trivial)
+                                '{basename}', example='s{sep}{filter}{binning}{sep}',  check=validity.trivial)
             
             nm_option = Input.str('Please enter a naming option:\n1] Sequential \n2] Number suffix\n', '2', check=lambda x: x in [1,2] )
             sequential = 1  if nm_option==1 else 0
@@ -1813,29 +2166,10 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
     else:
         #One can do photometry without splitting the cubes!!
         
-        for cube in run:
-            unpacked = cube.get_filename(1, 0, (suffix, 'split'))
-            filename = cube.get_filename(1, 1, suffix)
-            naxis3 = cube.shape[-1]
-            #generate file with cube name and slices in iraf slice syntax.  This is a clever way of
-            #sidestepping splitting the cubes and haveing thousands of fits files to deal with, but it
-            #remains an ungly, unncessary, and outdated way of doing things.  IMHO (BRAAK!!!)
-            #NOTE: This also means that the airmass correction done by phot is done with the airmass of
-            #the first frame only... One has to generate an obsparams file for mkapfile COG with the 
-            #airmasses and observation times etc...
-            
-            #filename = cube.get_filename(1, 1, suffix)
-            #slicemap = lambda i: '%s[*,*,%i]'%(filename, i)
-            #slices = lmap(slicemap, range(1,naxis3+1))
-            #filter_info = itt.repeat( head_info.filter or 'WL' )
-            #txs = itt.repeat( cube.texp )
-            #obspar = cube.get_filename(1, 0, suffix='obspar')
-            #np.savetxt( obspar, lzip(slices, filter_info, txs, cube.airmass), fmt='%s' )
-            
-            filename = cube.get_filename(1, 1, suffix)
-            slicemap = lambda i: '%s[*,*,%i]'%(filename, i)
-            slices = lmap(slicemap, range(1,naxis3+1))
-            np.savetxt( unpacked, slices, fmt='%s' )
+        run.make_slices( suffix )
+        run.export_times( with_slices=True )
+        run.make_obsparams_file( suffix )
+        run.export_headers()
         
     return run
   
@@ -1926,13 +2260,14 @@ def setup():
     #group = parser.add_mutually_exclusive_group()
     #main_parser.add_argument('-v', '--verbose', action='store_true')
     #main_parser.add_argument('-s', '--silent', action='store_true')
-    main_parser.add_argument('-i', '--interactive', action='store_true', default=False, dest='interactive', help='Run the script in interactive mode.  You will be prompted for input when necessary')
+    main_parser.add_argument('-i', '--interactive', action='store_true', default=False, dest='interactive', 
+                help='Run the script in interactive mode.  You will be prompted for input when necessary')
 
-    main_parser.add_argument('-d', '--dir', nargs=1, default=[os.getcwd()], dest='dir', 
+    main_parser.add_argument('-d', '--dir', default=os.getcwd(),
                 help = 'The data directory. Defaults to current working directory.')
-    main_parser.add_argument('-o', '--output-dir', nargs=1, default=['ReducedData'], type=str, 
+    main_parser.add_argument('-o', '--output-dir',
                 help = ('The data directory where the reduced data is to be placed.' 
-                        'Defaults to $PWD/ReducedData.'))
+                        'Defaults to input directory'))
     main_parser.add_argument('-w', '--write-to-file', nargs='?', const=True, default=True, dest='w2f', 
                 help = ('Controls whether the script creates txt list of the files created.' 
                         'Requires -c option. Optionally takes filename base string for txt lists.'))
@@ -1957,13 +2292,16 @@ def setup():
     main_parser.add_argument('-s', '--split', nargs='?', const=True, default=False, 
                 help = 'Split the data cubes. Requires -c option.')
     main_parser.add_argument('-t', '--timing', nargs='?', const=True, default=False, 
-                help = 'Calculate the timestamps for data cubes. Note that time-stamping is done by default when the cubes are split.  The timing data will be written to text files with the cube basename and extention indicating the time format used.')
+                help = ('Calculate the timestamps for data cubes. Note that time-stamping is '
+                        'done by default when the cubes are split.  The timing data will be '
+                        'written to text files with the cube basename and extention indicating'
+                        'the time format used.') )
     main_parser.add_argument('-g', '--gps', nargs='+', default=None, 
                 help = 'GPS triggering times. Explicitly or listed in txt file')
     main_parser.add_argument('-k', '--kct', default=None, 
                 help = 'Kinetic Cycle Time for External GPS triggering.')
-    main_parser.add_argument('-q', '--combine', type=str, default='daily', 
-                help = "Specifies how the bias/flats will be combined. Options are 'daily' or 'weekly'.")
+    main_parser.add_argument('-q', '--combine', nargs='+', default=['daily', 'mean'], 
+                help = "Specifies how the bias/flats will be combined. Options are daily/weekly mean/median.")
     args = argparse.Namespace()
     
     #mx = main_parser.add_mutually_exclusive_group                           #NEED PYTHON3.3 AND MULTIGROUP PATCH FOR THIS...  OR YOUR OWN ERROR ANALYSIS???
@@ -1977,14 +2315,14 @@ def setup():
     head_parser.add_argument('-epoch', '--epoch', default=None, help='')
     head_parser.add_argument('-date', '--date', nargs='*', default=[''], help='')
     head_parser.add_argument('-filter', '--filter', default=None, help='')
-    head_parser.add_argument('-tel', '--telescope', default=None, type=str, help='')
+    head_parser.add_argument('-tel', '--telescope', dest='tel', default=None, type=str, help='')
     head_parser.add_argument('-obs', '--observatory', dest='obs', default=None, help='')
     #head_parser.add_argument('-em', '--em-gain', dest='em', default=None, help='Electron Multiplying gain level')
     head_info = argparse.Namespace()
     
     #Name convension parser
     name_parser = argparse.ArgumentParser()
-    name_parser.add_argument('name', nargs='?',
+    name_parser.add_argument( 'name', nargs='?',
                 help = ("template for naming convension of output files.  "
                         "eg. 'foo{sep}{basename}{sep}{filter}[{sep}b{binning}][{sep}sub{sub}]' where"
                         "the options are: "
@@ -1993,7 +2331,7 @@ def setup():
                         "sep - separator character(s); filter - filter band; "
                         "binning - image binning. eg. 4x4; "
                         "sub - the subframed region eg. 84x60. "
-                        "[] brackets indicate optional parameters.")) #action=store_const?
+                        "[] brackets indicate optional parameters.") ) #action=store_const?
     name_parser.add_argument('-fl', '--flats', nargs=1, default='f[{date}{sep}]{binning}[{sep}sub{sub}][{sep}filt{filter}]')
     name_parser.add_argument('-bi', '--bias', default='b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]', nargs=1) 
     name_parser.add_argument('-sc', '--science-frames', nargs=1, dest='sci', default='{basename}')
@@ -2018,6 +2356,8 @@ def setup():
     
     for cmds, parser, namespace in zip(commandlines, parsers, namespaces):
         parser.parse_args( cmds[1:], namespace=namespace )
+    
+    #TODO:  SPLIT SANITY CHECK FUNCTION
     
     #Sanity checks for mutually exclusive keywords
     args_dict = args.__dict__
@@ -2061,11 +2401,16 @@ def setup():
     if not any([getattr(args, key) for key in any_rqd]):
         raise ValueError('No action specified!\n Please specify one or more commands: -s,-t, update-headers, name, or -i for interactive mode')
     #====================================================================================================
-    if args.dir[0]:
-        args.dir = iocheck(args.dir[0], os.path.exists, 1)
+    if args.dir:
+        args.dir = iocheck(args.dir, os.path.exists, 1)
 
         args.dir = os.path.abspath(args.dir)
         #os.chdir(args.dir)                                        #change directory  ??NECESSARY??
+    
+    if args.output_dir:
+        args.output_dir = iocheck(args.output_dir, os.path.exists, 1)
+    else:
+        args.output_dir = args.dir
     
     #====================================================================================================
     if args.cubes is None:
@@ -2088,28 +2433,42 @@ def setup():
             if not os.path.exists(args.output_dir):                              #if it doesn't exist create it
                 print( 'Creating reduced data directory {}.\n'.format(args.output_dir) )
                 os.mkdir( args.output_dir )
-    
+
     #====================================================================================================
     if args.gps:
+        args.timing = True              #Do timing if gps info given
         if len(args.cubes) == 1:
-            args.gps = [iocheck( args.gps[0], validity.RA, raise_error=1 )]
+            args.gps = [iocheck( args.gps[0], validity.RA, raise_error=1 )]             #FIXME:  FILE INPUT!!
         else:
-            if len(args.gps)==1:          #single gps trigger provided
-                if args.cubes.check_rollover_state():
-                    print( ("\nA single GPS trigger provided. Run contain rolled over cubes. " +\
+            if len(args.gps)==1:         #triggers give either as single time string or filename of trigger list
+                if args.cubes.check_rollover_state():    #single trigger OK
+                    print( ("\nA single GPS trigger was provided. Run contain rolled over cubes. " +\
                             "Start time for rolled over cubes will be inferred from the length of the preceding cube(s).\n") )
                     args.gps = [iocheck( args.gps[0], validity.RA, raise_error=1 )]
-                else:
-                    raise ValueError( 'Only {} GPS trigger given. Please provide {} for {}'.format( len(args.gps), len(args.cubes), args.cubes ) )
-            else:
-                args.gps = parsetolist( args.gps, validity.RA, raise_error=1)
+                else:                   #filename with triggers provided
+                    args.gps = parsetolist( args.gps, validity.RA, 
+                                            path=args.dir, 
+                                            abspath=0, 
+                                            sort=0, 
+                                            raise_error=1 )
+            else:                       #multiple explicit triggers
+                args.gps = parsetolist( args.gps, validity.RA,
+                                        abspath=0, 
+                                        sort=0,
+                                        raise_error=1 )
+        
+        if len(args.gps) != len(args.cubes):
+            raise ValueError( ('Only {} GPS trigger given. Please provide {} for {}'
+                                ).format( len(args.gps), len(args.cubes), args.cubes ) )
         
         if np.any( [stack.trigger_mode=='External' for stack in args.cubes] ):
             if args.kct is None:
-                msg = ( "\nIn 'External' triggering mode EXPOSURE stores the total exposure time which is utterly useless.\n" + \
-                        "I need the actual exposure time - i hope you've written it down somewhere!!\n")
-                args.kct = Input.str(msg+'Please specify KCT (Exposure time):', 0.04, check=validity.float, what='KCT')
-        #if np.any( [stack.trigger_mode=='External Start' for stack in args.cubes] ):
+                msg = textwrap.dedent('''
+                        In 'External' triggering mode EXPOSURE stores the total accumulated exposure time which is utterly useless.
+                        I need the actual exposure time - i hope you've written it down somewhere!!
+                        Please specify KCT (Exposure time):
+                      ''')
+                args.kct = Input.str(msg, 0.04, check=validity.float, what='KCT')
     
     #====================================================================================================        
     try:
@@ -2123,13 +2482,25 @@ def setup():
         err = type(err)( '\n\n'.join((err.args[0], msg)) )
         raise err.with_traceback( sys.exc_info()[2] )
         
-    args.cubes.print_instrumental_setup()
+    
     
     #====================================================================================================        
-    if not args.combine.lower() in ['daily','weekly']:
-        warn( 'Argument {} for combine not understood.  Bias/Flat combination will be done daily.' )
-        args.combine = 'daily'
-    
+    if args.flats or args.bias:
+        args.combine = list( map(str.lower, args.combine) )
+        when = 'day', 'daily', 'week', 'weekly'
+        how = 'mean', 'median'
+        understanding = when + how
+        transmap = dict(grouper(when, 2))
+        misunderstood, understood = map(list, partition(understanding.__contains__, args.combine))
+        if any(misunderstood):
+            raise ValueError( 'Argument(s) {} for combine not understood.'.format(misunderstood) )
+        else:
+            understood = [transmap.get(u,u) for u in understood]
+            when, how = next(zip( *partition(how.__contains__, understood) ))
+            args.combine = when
+            args.fcombine = getattr( np, how )
+            print( '\nBias/Flat combination will be done by {} {}.'.format(when, how) )
+        
     #====================================================================================================        
     if args.flats:
         args.flats = parsetolist(args.flats, imaccess, path=args.dir, raise_error=1)
@@ -2144,6 +2515,7 @@ def setup():
         args.flats.flag_sub( args.cubes )                       #flag the flats that need to be subframed, based on the science frames which are subframed
         
         args.flats.print_instrumental_setup()
+        
     #else:
         #print( 'WARNING: No flat fielding will be done!' )
     
@@ -2164,7 +2536,7 @@ def setup():
             args.bias4flats.print_instrumental_setup()
             
         #match the biases for the science run
-        match4sci = args.bias.check( args.cubes, ['binning', 'mode'], 1, 1)
+        match4sci = args.bias.check( args.cubes, ['binning', 'mode'], 0, 1)
         args.bias = args.bias[match4sci]
         for bias in args.bias:
             bias._needs_flip = bias.check( args.cubes[0], 'flip_state' )                        #NOTE: THIS MAY BE INEFICIENT IF THE FIRST CUBE IS THE ONLY ONE WITH A DIFFERENT FLIP STATE...
@@ -2173,7 +2545,7 @@ def setup():
     
         print( 'Biases for science frames: ' )
         args.bias.print_instrumental_setup()
-        
+    
     #else:
         #warn( 'No de-biasing will be done!' )
     
@@ -2193,10 +2565,7 @@ def setup():
             iocheck( head_info.dec, validity.DEC, 1 )
             head_info.coords = SkyCoord(ra=head_info.ra, dec=head_info.dec, unit=('h','deg'))  #, system='icrs'
         else:
-            coo, ra, dec = get_coords( head_info.object )
-            head_info.ra = ra
-            head_info.dec = dec
-            head_info.coords = coo
+            head_info.coords, head_info.ra, head_info.dec = get_coords( head_info.object )
         
         if not head_info.date:
             #head_info.date = args.cubes[0].date#[c.date for c in args.cubes]
@@ -2213,17 +2582,32 @@ def setup():
             head_info.epoch = 2000
         
         if not head_info.obs:
-            print( '\nAssuming SAAO Sutherland observatory!\n' ) 
+            warn( '\nAssuming SAAO Sutherland observatory!\n' ) 
             head_info.obs = 'SAAO'
         
-        if not head_info.telescope:
+        if not head_info.tel:
             warn( '\nAssuming SAAO 1.9m telescope!\n' ) 
-            head_info.telescope = '1.9m'
+            head_info.tel = '1.9m'
+    
+    elif args.timing or args.split:
+        #Need target coordinates for Barycentrization! Check the headers
+        try:
+            head_info.ra = args.cubes[0][0].header['ra']
+            head_info.dec = args.cubes[0][0].header['dec']
+            head_info.coords = SkyCoord(ra=head_info.ra, dec=head_info.dec, unit=('h','deg'))
+        except KeyError:
+            warn( '''Object coordinates not found in header! 
+                     Barycentrization cannot be done without knowing target coordinates!''' )
         
         #iocheck( head_info.date, validity.DATE, 1 )
     #else:
         #warn( 'Headers will not be updated!' )
-        
+    
+    #====================================================================================================
+    #if args.timing and not head_info.coords:
+        #Target coordinates not provided / inferred from 
+       # warn( 'Barycentrization cannot be done without knowing target coordinates!' )
+    
     
     if args.names:
         SHOC_Run.NAMES.flats = names.flats
@@ -2264,16 +2648,7 @@ if __name__ == '__main__':
 
 #main()
 
-#NOTES FOR PHOTOMETRY
 
-#1. ANIMATE                                                             #NOTE: DONE
-#2. SHIFTS?
-#3. FIND STARS ---> PLOT SKY BOX ETC.
-#4. MEASURE SKY SIGMA ---> ACROSS CUBE
-#5. MEASURE PSF, elipticity, etc		--> ACROSS CUBE
-#6. FIND STARS
-#7. CHECK SATURATION
-#8. PHOTOMETRY --> PLOTS APERTURES, SKYBOX ETC.
 
 
     
