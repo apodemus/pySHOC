@@ -1,0 +1,4 @@
+*.kate-swp
+/__pycache__
+
+SHOC_basic_red_*.py
