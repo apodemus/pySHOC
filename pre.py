@@ -3,6 +3,7 @@
 # SHOC pre-reductions (with bells and whistles)
 
 #TODO:
+
 #IO:
     #option for verbosity level
     #option to log to file
@@ -16,6 +17,7 @@
 #IMPROVE DOCSTRINGS
 
 #MAKE EXTENSIBLE
+    #split class definitions into separate scripts
 
 #OPTIONS FOR DISPLAYING COMPUTED IMAGES + STATS
 
@@ -78,6 +80,9 @@ import textwrap
 #from decor import profile
 
 from IPython import embed
+
+from magic.string import banner
+
 
 tsktsk('modules')
 print( 'Done!\n\n' )
@@ -230,7 +235,7 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         self.binning =  tuple(header[s+'BIN'] for s in ['H','V'])
         
         #gain
-        self.gain = header.get( 'gain', None )
+        self.gain = header.get( 'gain', 0 )
         
         #image dimensions
         self.ndims = header['NAXIS']                                                    #Number of image dimensions
@@ -277,8 +282,8 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         
     #====================================================================================================
     def get_instrumental_setup(self, attrs=None):                                                                                                  #YOU CAN MAKE THIS __REPR__????????
-        attrs =  attrs  or ['binning', 'dimension', 'mode', 'acqmode', 'kct']
-        dattrs = [at[:(3 if len(at)>5 else None)].upper() for at in attrs]        #for display
+        attrs =  attrs  or ['binning', 'dimension', 'mode', 'gain', 'trigger_mode', 'kct']
+        dattrs = [at.replace('_',' ').upper() for at in attrs]        #for display
         vals = [ getattr(self, attr, '??') for attr in attrs ]
     
         name = self.get_filename() or 'Unsaved'
@@ -518,9 +523,9 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
             
             t_d = 0.00676
             #dead (readout) time between exposures in s 
-            #(always the same value unless the user has (foolishly) changed the vertical clock speed).
-            #NOTE: MAYBE CHECK stack_header['VSHIFT'] 
-            #NOTE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME TRANSFER MODE!
+            #NOTE: (deadtime should always the same value unless the user has 
+            # (foolishly) changed the vertical clock speed). #MAYBE CHECK stack_header['VSHIFT'] 
+            #EDGE CASE WARNING: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME TRANSFER MODE!
             
             if self.trigger_mode.endswith( 'Start' ):       # External Start
                 t_exp = stack_header['EXPOSURE']            #exposure time in sec as in header
@@ -585,7 +590,7 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
                 t0 += 0.5*td_kct                                        #set t0 to mid time of first frame
                 
             else:
-                raise ValueError( 'No GPS triggers provided!' )
+                raise ValueError( 'No GPS triggers provided for {}!'.format(self.filename()) )
                     #datetime_str = utdate    
         
             if not dryrun:
@@ -832,7 +837,7 @@ class SHOC_Run( object ):
     def __init__(self, hdus=None, filenames=None, label=None, sep_by=None):
         
         #WARNING:  filenames may contain None as well as duplicate entries.....??????
-                    #ot sure if uplicates is desireable wrt efficiency.....
+                    #not sure if uplicates is desireable wrt efficiency.....
         
         self.cubes = list(filter(None, hdus)) if hdus else []
         
@@ -879,7 +884,7 @@ class SHOC_Run( object ):
             if isinstance(key[0], (bool, np.bool_)):
                 assert len(key)==len(self)
                 rl = [ self.cubes[i] for i in np.where(key)[0] ]
-            if isinstance(key[0], (int, np.int0)):
+            elif isinstance(key[0], (int, np.int0)):      #NOTE: be careful bool isa int
                 rl = [ self.cubes[i] for i in key ]
         
         return SHOC_Run( rl, label=self.label, sep_by=self.sep_by )
@@ -942,10 +947,13 @@ class SHOC_Run( object ):
         '''Print the instrumental setup for this run as a table.'''
         names, dattrs, vals = zip( *(stack.get_instrumental_setup() for stack in self) )
         
-        bgcolours       = {'flat' : 'cyan', 'bias' : 'magenta', 'science' : 'green' }
+        bgcolours       = {'flat'       : 'cyan', 
+                           'bias'       : 'magenta', 
+                           'science'    : 'green' }
         table = sTable( vals, 
                         title = 'Instrumental Setup: {} frames'.format(self.label.title()),
-                        title_props = { 'text':'bold', 'bg': bgcolours[self.label] },
+                        title_props = {'text':'bold',
+                                       'bg': bgcolours.get(self.label, 'default')},
                         col_headers = dattrs[0], 
                         row_headers = ['filename'] + list(names), 
                         enumera=True)
@@ -1004,7 +1012,8 @@ class SHOC_Run( object ):
         for stack in self:
             headfile = stack.get_filename( with_path=1, with_ext=0, suffix='.head' )
             print('\nWriting header to file: {}'.format(os.path.basename(headfile)) )
-            stack[0].header.totextfile( headfile )
+            #TODO: remove existing!!!!!!!!!!
+            stack[0].header.totextfile( headfile, clobber=True )
         
     #====================================================================================================
     def make_slices(self, suffix):
@@ -1018,25 +1027,37 @@ class SHOC_Run( object ):
             
     #====================================================================================================
     def set_gps_triggers(self, triggers):
-        if len(triggers)!=len(self):
-            if self.check_rollover_state():
-                triggers = self.get_rolled_triggers( triggers )
+        #if len(triggers)!=len(self):
+        if self.check_rollover_state():           #single trigger OK, can infer the remaining ones
+            triggers = self.get_rolled_triggers( triggers )
+            print( ("\nA single GPS trigger was provided. Run contains auto-split cubes (filesystem rollover due to 2Gb threshold). " +\
+                        "Start time for rolled over cubes will be inferred from the length of the preceding cube(s).\n") )
+            
+        #at this point we expect one trigger time per cube
+        if len(self) != len(triggers):
+            raise ValueError( ('Only {} GPS trigger given. Please provide {} for {}'
+                                ).format( len(triggers), len(self), self ) )
         
         for j, stack in enumerate(self):
             stack.trigger = triggers[j]
             
     #====================================================================================================
     def get_rolled_triggers(self, first_trigger):
-        '''If the cube rolled over while the triggering mode was 'External' or 'External Start', determine the start times 
-        (fake triggers) of the rolled over cube(s).
+        '''
+        If the cube rolled over while the triggering mode was 'External' or
+        'External Start', determine the start times (inferred triggers) of the 
+        rolled over cube(s).
         '''
         slints = [cube.shape[-1] for cube in self]              #stack lengths
         #sorts the file sequence in the correct order
-        fn_patr = '_X([0-9]+)'                                  #re pattern for rolled over filenames
-        key = lambda f: re.findall( fn_patr, f )                #function used to find the roll-over number
-        fns, slints, idx = sorter( self.get_filenames(), slints, range(len(self)), key=key )
+        matcher = re.compile('_X([0-9]+)')                      #re pattern to find the roll-over number (auto_split counter value in filename)
+        fns, slints, idx = sorter( self.get_filenames(), slints, range(len(self)),
+                                   key=matcher.findall )
         
-        #WARNING: This assumes that the run only contains cubes from the run that rolled-over.  This should be ok for present purposes but might not always be the case
+        print( 'WORK NEEDED HERE!' )
+        embed()
+        #WARNING: This assumes that the run only contains cubes from the run that rolled-over.  
+        #         This should be ok for present purposes but might not always be the case
         idx0 = idx[0]
         self[idx0].trigger = first_trigger
         t0, td_kct = self[idx0].time_init( dryrun=1 )      #dryrun ==> don't update the headers just yet (otherwise it will be done twice!)
@@ -1047,9 +1068,18 @@ class SHOC_Run( object ):
         triggers = [t0.isot.split('T')[1] for t0 in t0s]
         
         #resort the triggers to the order of the original file sequence
-        _, triggers = sorter( idx, triggers )
+        #_, triggers = sorter( idx, triggers )
 
         return triggers
+    
+    #====================================================================================================
+    def needs_kct(self):
+        return np.any( [stack.trigger_mode=='External' for stack in args.cubes] )
+    
+    #====================================================================================================
+    def that_need_triggers(self):
+        #embed()
+        return self[[stack.trigger_mode.startswith('External') for stack in self]]
     
     #====================================================================================================
     def magic_filenames( self, reduction_path='', sep='.', extension='.fits' ):
@@ -1846,8 +1876,8 @@ def header_proc( run, _pr=True ):             #THIS SHOULD BE A METHOD OF THE SH
     
     table = [
     ('OBJECT',       'Object name/alias',   '',                                     validity.trivial,  convert.trivial),
-    ('RA',           'RA',                   "(eg: '03:14:15' or '03 14 15')",       validity.RA,       convert.RA_DEC),
-    ('DEC',          'Dec',                  "(eg: '+27:18:28.1' or '27 18 28.1')",  validity.DEC,      convert.RA_DEC),
+    ('RA',           'RA',                   "(eg: '03:14:15' or '03 14 15')",       validity.RA,       convert.RA),
+    ('DEC',          'Dec',                  "(eg: '+27:18:28.1' or '27 18 28.1')",  validity.DEC,      convert.DEC),
     ('EPOCH',        'Epoch of RA and Dec',  'eg: 2000',                             validity.float,    convert.trivial),
     ('FILTER',       'Filter',               '(WL for clear)',                       validity.trivial,  convert.trivial),
     ('OBSERVAT',     'Observatory',          '',                                     validity.trivial,  convert.trivial),
@@ -1909,6 +1939,7 @@ def header_proc( run, _pr=True ):             #THIS SHOULD BE A METHOD OF THE SH
     if _pr:             
         #TODO:  CAN BENEFIT HERE FROM STRUCTURED RUN, TO PRESENT INFO MORE CONSICELY
         table = sTable(table, 
+                       title = 'Readout Noise', 
                       col_headers=('RON', 'SENSITIVITY', 'SATURATION'), 
                       row_headers=run.get_filenames())
         print( table )
@@ -2054,7 +2085,8 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         section_header( 'Timing' )
         
     if args.gps:
-        run.set_gps_triggers( args.gps )
+        #embed()
+        args.cubes.that_need_triggers().set_gps_triggers( args.gps )
     
     if args.timing or args.split:
         run.set_times( head_info.coords )
@@ -2165,7 +2197,7 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         run.unpack( sequential, w2f=args.w2f )								#THIS FUNCTION NEEDS TO BE BROADENED IF YOU THIS PIPELINE AIMS TO REDUCE MULTIPLE SOURCES....
     else:
         #One can do photometry without splitting the cubes!!
-        
+        #TODO: check w2f???
         run.make_slices( suffix )
         run.export_times( with_slices=True )
         run.make_obsparams_file( suffix )
@@ -2189,12 +2221,13 @@ def imaccess( filename ):
         #return False
 
 ###########################################################################q######################################################################################################################################      
+#TODO: externalise
 def get_coords( obj_name ):
     ''' Attempts a SIMBAD Sesame query with the given object name. '''
-    from astropy import coordinates as astcoo
+    from astropy.coordinates.name_resolve import get_icrs_coordinates
     try: 
         print( '\nQuerying SIMBAD database for {}...'.format(repr(obj_name)) )
-        coo = astcoo.name_resolve.get_icrs_coordinates( obj_name )
+        coo = get_icrs_coordinates( obj_name )
         ra = coo.ra.to_string( unit='h', precision=2, sep=' ', pad=1 )
         dec = coo.dec.to_string( precision=2, sep=' ', alwayssign=1, pad=1 )
         
@@ -2291,11 +2324,10 @@ def setup():
     #main_parser.add_argument('-u', '--update-headers',  help = 'Update fits file headers.')
     main_parser.add_argument('-s', '--split', nargs='?', const=True, default=False, 
                 help = 'Split the data cubes. Requires -c option.')
-    main_parser.add_argument('-t', '--timing', nargs='?', const=True, default=False, 
+    main_parser.add_argument('-t', '--timing', nargs='?', const=True, default=True, 
                 help = ('Calculate the timestamps for data cubes. Note that time-stamping is '
                         'done by default when the cubes are split.  The timing data will be '
-                        'written to text files with the cube basename and extention indicating'
-                        'the time format used.') )
+                        'written to a text files with the cube basename and extention ".time"') )
     main_parser.add_argument('-g', '--gps', nargs='+', default=None, 
                 help = 'GPS triggering times. Explicitly or listed in txt file')
     main_parser.add_argument('-k', '--kct', default=None, 
@@ -2417,7 +2449,10 @@ def setup():
         args.cubes = args.dir       #no cubes explicitly provided will use list of all files in input directory
     
     if args.cubes:
-        args.cubes = parsetolist(args.cubes, os.path.exists, path=args.dir, raise_error=1)
+        args.cubes = parsetolist(args.cubes, 
+                                 os.path.exists, 
+                                 path=args.dir, 
+                                 raise_error=1)
         
         if not len(args.cubes):
             raise ValueError( 'File {} contains no data!!'.format('?') )
@@ -2437,38 +2472,28 @@ def setup():
     #====================================================================================================
     if args.gps:
         args.timing = True              #Do timing if gps info given
-        if len(args.cubes) == 1:
-            args.gps = [iocheck( args.gps[0], validity.RA, raise_error=1 )]             #FIXME:  FILE INPUT!!
-        else:
-            if len(args.gps)==1:         #triggers give either as single time string or filename of trigger list
-                if args.cubes.check_rollover_state():    #single trigger OK
-                    print( ("\nA single GPS trigger was provided. Run contain rolled over cubes. " +\
-                            "Start time for rolled over cubes will be inferred from the length of the preceding cube(s).\n") )
-                    args.gps = [iocheck( args.gps[0], validity.RA, raise_error=1 )]
-                else:                   #filename with triggers provided
-                    args.gps = parsetolist( args.gps, validity.RA, 
-                                            path=args.dir, 
-                                            abspath=0, 
-                                            sort=0, 
-                                            raise_error=1 )
-            else:                       #multiple explicit triggers
-                args.gps = parsetolist( args.gps, validity.RA,
+       
+        if len(args.gps)==1:         #triggers give either as single trigger time string or filename of trigger list
+            valid_gps = iocheck( args.gps[0], validity.RA, raise_error=-1 )         #if valid single time this will return that same str else None
+            if not valid_gps:
+                args.gps = parsetolist( args.gps, validity.RA, 
+                                        path=args.dir, 
                                         abspath=0, 
-                                        sort=0,
+                                        sort=0, 
                                         raise_error=1 )
         
-        if len(args.gps) != len(args.cubes):
-            raise ValueError( ('Only {} GPS trigger given. Please provide {} for {}'
-                                ).format( len(args.gps), len(args.cubes), args.cubes ) )
+        #at ths point args.gps is list of explicit time strings.  
+        #Check if they are valid representations of time
+        args.gps = [iocheck( g, validity.RA, raise_error=1, convert=convert.RA ) for g in args.gps]
         
-        if np.any( [stack.trigger_mode=='External' for stack in args.cubes] ):
-            if args.kct is None:
-                msg = textwrap.dedent('''
-                        In 'External' triggering mode EXPOSURE stores the total accumulated exposure time which is utterly useless.
-                        I need the actual exposure time - i hope you've written it down somewhere!!
-                        Please specify KCT (Exposure time):
-                      ''')
-                args.kct = Input.str(msg, 0.04, check=validity.float, what='KCT')
+        #if cubes are GPS triggered on each individual frame
+        if args.cubes.needs_kct() and args.kct is None:
+            msg = textwrap.dedent('''
+                In 'External' triggering mode EXPOSURE stores the total accumulated exposure timewhich is utterly useless.
+                I need the actual exposure time - i hope you've written it down somewhere!!
+                Please specify KCT (Exposure time + Dead time):
+                ''')
+            args.kct = Input.str(msg, 0.04, check=validity.float, what='KCT')
     
     #====================================================================================================        
     try:
@@ -2481,8 +2506,6 @@ def setup():
         msg = section_header( 'Are these GPS triggered frames??', swoosh='!', _print=False )
         err = type(err)( '\n\n'.join((err.args[0], msg)) )
         raise err.with_traceback( sys.exc_info()[2] )
-        
-    
     
     #====================================================================================================        
     if args.flats or args.bias:
@@ -2636,7 +2659,6 @@ if __name__ == '__main__':
     #raise ValueError( 'STOPPING' )
 
     run = sciproc( args.cubes )
-
 
 
     def goodbye():

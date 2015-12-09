@@ -128,18 +128,13 @@ class Conversion(object):
     
     #====================================================================================================
     @staticmethod
-    def RA_DEC(instr):
-        if isinstance(instr, str):
-            instr = instr.strip()
-            if ':' in instr:
-                return instr
-            elif ' ' in instr:
-                return Conversion.ws2cs(instr)
-            else:
-                return float(instr)
-        
-        elif isinstance(instr, float):
-            return instr    
+    def RA(val):
+        return Angle(val, 'h').to_string(sep=':', precision=2)
+    
+    #====================================================================================================
+    @staticmethod
+    def DEC(val):
+        return Angle(val, 'd').to_string(sep=':', precision=2)
     
     #====================================================================================================
     @staticmethod
@@ -164,6 +159,9 @@ class Conversion(object):
 #################################################################################################################################################################################################################
 #Validity tests for user input
 #################################################################################################################################################################################################################
+
+from astropy.coordinates.angles import Angle
+
 class ValidityTests(object):
     MAX_CHECK = 25
     #====================================================================================================
@@ -228,34 +226,20 @@ class ValidityTests(object):
     def RA(RA):
         '''Validity tests for RA'''
         try:
-            RA = float(RA)
-            if RA >= 0. and RA < 24.:
-                return True
-            else:
-                return False
-        except (ValueError, TypeError): 
-            valid, h,m,s = ValidityTests.triplet(RA)
-            if valid:
-                if any([h<0., h>23., m<0., m>59., s<0., s>=60]):
-                    valid = False
-            return valid
+            Angle(RA, 'h')
+            return True
+        except ValueError:
+            return False
 
     #====================================================================================================
     @staticmethod
     def DEC(DEC):
         '''Validity tests for DEC'''
         try:
-            DEC = float(DEC)
-            if DEC > -90. and DEC < 90.:
-                return True
-            else:
-                return False
+            dec = Angle(DEC, 'deg')
+            return abs(dec) < Angle(90, 'deg')
         except ValueError: 
-            valid, d,m,s = ValidityTests.triplet(DEC)
-            if valid:
-                if any([d<-90., d>90., m<0., m>59., s<0., s>=60]):
-                    valid = False
-            return valid
+            return False
     
     #====================================================================================================
     @staticmethod
