@@ -2,22 +2,23 @@ from myio import parsetolist, iocheck, warn
 
 class Input(object):
     MAX_LS = 10
-    #retrieve a string input from user
+    #retrieve input from user
     #INPUT    : query - string query passed to raw_input
-    #         : dflt - the default input option
+    #         : default - the default input option
     #OPTIONAL: verify - Boolean for whether to ask for verification of user input
     #        : check - a function that returns True if the input is valid or False otherwise
     #        : example -
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def str(query, default=None, **kw):
-        check           =       kw.get( 'check', lambda x: True )
-        verify          =       kw.get( 'verify', 0 )
-        what            =       kw.get( 'what', 'output string' )
-        example         =       kw.get( 'example', 0 )
-        convert         =       kw.get( 'convert', lambda x: x )
+        check           =       kw.get('check', lambda x: True)
+        verify          =       kw.get('verify', 0)
+        what            =       kw.get('what', 'output string')
+        example         =       kw.get('example', 0)
+        convert         =       kw.get('convert', lambda x: x)
         
-        default_str = '' if default in ['', None] else ' or ENTER for the default %s.\n' %repr(default)
+        default_str = ('' if default in ['', None] 
+                       else ' or ENTER for the default %s.\n' %repr(default))
         repeat = 1
         while repeat:
             instr = input(query + default_str)
@@ -44,9 +45,9 @@ class Input(object):
                     print('Invalid input!! Please try again.\n')
                     repeat = 1
         
-        return convert( instr )
+        return convert(instr)
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def read_data_from_file(fn, N=None, pr=False):
         '''N - number of lines to read'''
@@ -59,24 +60,32 @@ class Input(object):
         
         if pr:
             nbot = 3
-            ls_trunc = lsfromfile[:MAX_LS-nbot] if len(lsfromfile) > MAX_LS else lsfromfile
-            print('You have input the txt file {} containing the following:\n{}'.format(repr(fn), ''.join(ls_trunc)))                  #USE THE INPUT NAME HERE AS BASIS NAME FOR BIAS SUBTRACTED OUTPUT TXT LIST ETC...
+            ls_trunc = (lsfromfile[:MAX_LS-nbot] if len(lsfromfile) > MAX_LS
+                        else lsfromfile)
+            print('You have input the txt file {} containing the following:\n{}'
+                  ''.format(repr(fn), ''.join(ls_trunc)))
+            #use the input name here as base name for bias subtracted output txt list etc...
             if len(lsfromfile) > MAX_LS:
-                print( '.\n'*3 )
+                print('.\n'*3)
             if len(lsfromfile) > MAX_LS+nbot:
-                print( ''.join(lsfromfile[-nbot:]) )
+                print(''.join(lsfromfile[-nbot:]))
         
         lsfromfile = [q.strip('\n') for q in lsfromfile]
         return lsfromfile
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def list(query, check, default=None, empty_allowed=0):
-        ''' Retrieve a list of user input values and test validity of input according to input function check
-            INPUTS  : query - string query passed to input
-                    : check - a function that returns True if the input is valid or False otherwise
-                    : default - the default option
-                    : emty_allowed - whether or not an empty string can be returned by the function.'''
+        ''' 
+        Retrieve a list of user input values and test validity of input according
+        to input function check
+        INPUTS  : query - string query passed to input
+                : check - a function that returns True if the input is valid or 
+                    False otherwise
+                : default - the default option
+                : emty_allowed - whether or not an empty string can be returned 
+                    by the function.
+    '''
         if isinstance(default, list):
             default = ' ,'.join(default)
         repeat = True
@@ -90,7 +99,8 @@ class Input(object):
         
             if not instr:
                 if default not in ['', None]:
-                    instr = default                 #this means the default option needs to be a string
+                    instr = default
+                    #this means the default option needs to be a string
                 elif empty_allowed:
                     return instr                    #returns an empty string
                 else:
@@ -102,7 +112,7 @@ class Input(object):
                     inls = [s.strip(' ,;') for s in inls]
                     break
             
-            #if inls[0]=='*all':                                                                            #NOT YET TESTED..................
+            #if inls[0]=='*all':   #NOT YET TESTED..................
                 #inls = dirnames
                 #break
             #print('VT')
@@ -112,31 +122,31 @@ class Input(object):
         inls = [s.strip() for s in inls]
         return inls
 
-#################################################################################################################################################################################################################
+################################################################################
 #Conversion functions for user input
-#################################################################################################################################################################################################################
+################################################################################
 class Conversion(object):
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def trivial(instr):
         return instr
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def yn2TF(instr):
         return instr in ('y', 'Y')
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def RA(val):
         return Angle(val, 'h').to_string(sep=':', precision=2)
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def DEC(val):
-        return Angle(val, 'd').to_string(sep=':', precision=2)
+        return Angle(val, 'deg').to_string(sep=':', precision=2)
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def ws2cs(instr):
         '''convert from whitespace separated to colon separated triplets.'''
@@ -144,7 +154,7 @@ class Conversion(object):
         return '{:d}:{:02d}:{:02f}'.format( int(h), int(m), float(s) )
          
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def ws2ds(instr):
         '''convert from whitespace separated to dash separated triplets.'''
@@ -156,25 +166,25 @@ class Conversion(object):
         except ValueError:
             return float(instr)
     
-#################################################################################################################################################################################################################
+################################################################################
 #Validity tests for user input
-#################################################################################################################################################################################################################
+################################################################################
 
 from astropy.coordinates.angles import Angle
 
 class ValidityTests(object):
     MAX_CHECK = 25
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
-    def trivial(instr):                                 #CHECK FOR INVALID CHARACTERS???????????
+    def trivial(instr):    #CHECK FOR INVALID CHARACTERS???????????
         return True
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def yn(instr):
         return instr in ['y','n','Y','N']
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def float(num_str):
         try:
@@ -183,7 +193,7 @@ class ValidityTests(object):
         except ValueError:
             return False
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def int(num_str):
         try:
@@ -193,7 +203,7 @@ class ValidityTests(object):
             return False
     
     #validity test function for the naming convention
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def name_convention(num_str):
         
@@ -201,7 +211,7 @@ class ValidityTests(object):
         return valid
 
     #Validity tests for number triplet input
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def triplet(triplet):
         HMS = triplet.split()
@@ -221,7 +231,7 @@ class ValidityTests(object):
         
         return valid, h,m,s
 
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def RA(RA):
         '''Validity tests for RA'''
@@ -231,7 +241,7 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def DEC(DEC):
         '''Validity tests for DEC'''
@@ -241,7 +251,7 @@ class ValidityTests(object):
         except ValueError: 
             return False
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def epoch(epoch):
         try:
@@ -249,7 +259,7 @@ class ValidityTests(object):
         except ValueError:
             return False
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def DATE(DATE):
         '''Validity tests for DATE'''
@@ -257,7 +267,8 @@ class ValidityTests(object):
             float(DATE)
             return True
         except ValueError: 
-            valid, y,m,d = ValidityTests.triplet(DATE)                                   #WARN IF DIFFERENT FROM DATE IN FILENAME / FILE CREATION DATE IN HEADER
+            valid, y,m,d = ValidityTests.triplet(DATE)
+            #TODO: warn if different from date in filename / file creation date in header?
             if valid:
                 try:
                     from datetime import date
@@ -266,13 +277,13 @@ class ValidityTests(object):
                     valid = False
         return valid
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def test(instr, check, raise_error=0):
         warn( 'FIX THIS LAME FUNCTION!!' )
         return iocheck(instr, check, raise_error)
     
-    #====================================================================================================
+    #===========================================================================
     @staticmethod
     def test_ls(inls, check=None, **kw):
         warn( 'FIX THIS LAME FUNCTION!!' )

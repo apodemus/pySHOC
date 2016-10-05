@@ -1,102 +1,84 @@
 #TODO:  trim down all the cruft!!!!!
-#TODO: localise imports
 
 # -*- coding: utf-8 -*-
+import matplotlib as mpl
+import pylab as plt
+import numpy as np
+#import numpy.linalg as la
+
 import re
 import os
 import copy
-import warnings
 import itertools as itt
-from collections import Iterable
-from pathlib import Path
-from datetime import date as Date
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-#import numpy.linalg as la
+#from collections import Iterable
 
 #from matplotlib import cm, ticker
-#import matplotlib.gridspec as gridspec
+import matplotlib.gridspec as gridspec
 #import matplotlib.image as mimage               #LOCALISE IMPORTS??
 #from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+import pandas as pd
+from astropy.io import ascii
 #import pyfits
 
 from pySHOC.io import Input
 from pySHOC.io import Conversion as convert
 
 from recipes.iter import interleave, groupmore, first_false_idx
-from recipes.list import find_missing_numbers, sortmore
+from recipes.list import  find_missing_numbers, sortmore
+from myio import iocheck, parsetolist, read_data_from_file, warn
 #from superstring import rreplace#kill_brackets   #ProgressBar
-
 from fastfits import quickheader
 from grafico.lc import lcplot
-#from grafico.interactive import PointSelector
 #from superplot.spectra import DualAxes
 #from superplot.spectra import
 #from draggables import DraggableErrorbars
 
-
+from datetime import date as Date
 
 #from lombscargle import fasper, getSignificance
-from tsa import fold
 from tsa.tsa import smoother
+from tsa.tsa import WindowedArrayFolder as af
 from tsa.spectral import Spectral
 from tsa.tfr import TimeFrequencyRepresentation as TFR
-from tsa.outliers import WindowOutlierDetection, generalizedESD
 
-#from IPython import embed
-import decor
-#profiler = decor.profile.profile()
+from outliers import WindowOutlierDetection, generalizedESD
 
-from ansi.str import banner
+from IPython import embed
+import decor.path
+
+from pathlib import Path
+
+from ansi.string import banner
 
 #TODO:  EXPLORE PANDAS DATAFRAMES
 
-#****************************************************************************************************
+##############################################################################################################################################
 class Run(object):
     #TODO make modular
     #TODO: merge by: target; date; etc...
-    #TODO: initialize from cubes!!
     ''' Class for containing / merging / plotting Cube objects.'''
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __init__(self, filenames, databases=None, coordinates=None,
                     target=0, ref=1, target_name='', outpath=None):
 
         self.coordinates = coordinates
-        self.databases =  databases    or   []       #magnitudes database files
+        self.databases =  databases                                           #magnitudes database files
         #self.data_path = path
 
         self.ncubes = len(filenames)
 
         self.target_name = target_name
         #self.date = date
-        if len(filenames):      #TODO: This is ugly... filenames should be a property
-            if isinstance(filenames[0], Cube):      #TODO: This logic should be inside Cube!!
-                self.filenames = [cube.filename for cube in filenames]
-                self.basenames = [cube.basename for cube in filenames]
-                self.cubes = filenames
-            #elif isinstance(filenames[0], Path):        #TODO: This logic should be inside Cube!!
-                
-            
-            else:
-                #full_filenames = [ os.path.join(self.data_path,fn) for fn in filenames ]
-                #TODO: send to Cube...
-                
-                self.filenames = list(map(str, filenames))  #NOTE: THIS SUCKS
 
-                self.basenames = [os.path.split(fn)[1].replace('.fits','') 
-                                    for fn in self.filenames]
+        #full_filenames = [ os.path.join(self.data_path,fn) for fn in filenames ]
+        self.filenames = filenames
+        self.basenames = [ os.path.split(fn)[1].replace('.fits','') for fn in self.filenames ]
 
-                self.cubes = [Cube(fn, db, cf, target, ref) for (fn, db, cf)  in
-                                itt.zip_longest(self.filenames, self.databases, 
-                                                self.coordinates or []) ]           #NOT DYNAMIC!
-        
-        else:
-            raise ValueError('No filenames')
-        
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        self.cubes = [ Cube(fn, db, cf, target, ref) for (fn, db, cf)  in
+                         itt.zip_longest(self.filenames, self.databases, self.coordinates or []) ]           #NOT DYNAMIC!
+
+    #====================================================================================================
     def __getitem__(self, key):
         '''Can be indexed numerically, or by corresponding filename / basename.'''
 
@@ -119,21 +101,21 @@ class Run(object):
         else:
             return self.cubes[key]
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __len__(self):
         return self.ncubes
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __str__(self):
         return 'Run of {} cube{}: {}'.format( self.ncubes,
                                              's'*bool(self.ncubes-1),
                                              '| '.join(self.basenames) )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __repr__(self):
         return str(self)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def get_outname(self, with_name=True, extension='txt', sep='.'):           #TODO: MERGE WITH gen_filename??
         if with_name:
             name = self.target_name.replace(' ','') + sep
@@ -143,7 +125,7 @@ class Run(object):
         outname = '{}{}.{}'.format( name, date_str, extension )
         return os.path.join( self.data_path, outname )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def get_template(self, n):
 
         #self.template = read_data_from_file( args.ims, n )
@@ -151,7 +133,7 @@ class Run(object):
         #return self.template
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def add_cube(self, filename, Nstars=None):
         '''add a cube to the run.'''
         Nstars = Nstars if Nstars else self.nstars
@@ -162,12 +144,12 @@ class Run(object):
         self.basenames.append( basename )
         self.cubes.append( Cube(filename, Nstars) )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def get_date(self, fn):
         #ds = pyfits.getval( self.template, 'date' )                #fits generation date and time
         #self.date = ds.split('T')[0].strip('\n')                         #date string e.g. 2013-06-12
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def get_time(self, tkw):
         #if not tkw in self.Tkw:
             #raise ValueError( '{} is not an valid time format.  Choose from {}'.format(tkw, self.Tkw) )
@@ -175,7 +157,7 @@ class Run(object):
         t = np.concatenate([getattr(cube, tkw) for cube in self])
         return t
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def join(self, whichstar):          #FIXME: INEFFICIENT!!!!
         '''join stars'''
         #Grab the properties from the same star in the first cube
@@ -203,7 +185,7 @@ class Run(object):
         return star
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #@decor.expose.args()
     def conjoin(self):
         '''Join cubes together to form contiguous data block.'''
@@ -235,14 +217,14 @@ class Run(object):
 
         return cube
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def compute_ls(self, tkw='lmst', **kw):
         t = self.get_time(tkw)
 
         for star in self.stars:
             star.compute_ls(t, **kw)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def plot_raw(self, ax, whichstar, tkw='lmst', **kw):
         #starname = self[0][whichstar].name
         #print( 'Plotting raw light curves for star {}'.format(starname) )
@@ -260,7 +242,7 @@ class Run(object):
             ##print( 'WARNING: No data found for star {} in cube {}.'.format(starname, cube.filename) )
         #return pl
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def plot_ls(self, which_stars=[0], fig=None, **kw):
         #option = kw.pop('option') if 'option' in kw else 'combined'
         #if option=='combined':
@@ -280,19 +262,15 @@ class Run(object):
             #scube.plot_ls(which_stars, fig, **kw)
 
 
-#****************************************************************************************************
+##############################################################################################################################################
 class Cube(object):
-    
-    #TODO: integrate with SHOC_Cube ---> Observation / ShocObs ?
-    
     #TODO:  MULTIDIMENSIONAL REC ARRAYS ---- WITH UNCERTAINTIES!
     #TODO:  STORE/LOAD AS FITS.
     #TODO:  PICKLE / json?
-    #TODO:  KILL REF!!!!!!!!!!!!!!!!!!!
     ''' ... '''
     Tkw = ['jd', 'bjd', 'utc', 'utsec', 'lmst']     #'utsec'              #Available time formats
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #@decor.expose.args( pre='!', post='@' )
     @decor.path.to_string.auto
     def __init__(self, filename='', database=None, coordinates=None, 
@@ -304,7 +282,7 @@ class Cube(object):
         self.coordinates = coordinates
 
         if filename:
-            self.target_name, self.date, self.size = get_name_date(filename)
+            self.target_name, self.date, self.size = get_name_date( filename )
 
         self.stars = Stars()
         #NOTE: this is restrictive in that it fixes the Nstars, target, ref across
@@ -316,13 +294,13 @@ class Cube(object):
         #if filename:
             #self.set_times()
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __getitem__(self, key):
         '''Can be indexed numerically, or by using 'target' or 'ref 'strings.'''
-        if isinstance(key, (int, np.int_, slice)):
+        if isinstance( key, (int, np.int_, slice) ):
             return self.stars[key]
 
-        if isinstance(key, str):
+        if isinstance( key, str ):
             key = key.lower()
             if key.startswith( 't' ):
                 return self.stars[self._target]
@@ -334,11 +312,11 @@ class Cube(object):
         else:
             raise KeyError
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __len__(self):
         return len( self.stars[0] )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def get_target(self):
         return self._target
 
@@ -352,7 +330,7 @@ class Cube(object):
 
     target = property( get_target, set_target )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #@property
     def get_ref(self):
         return self._ref
@@ -366,7 +344,7 @@ class Cube(object):
         self.stars.set_colours( self.target, ref )
 
     ref = property(get_ref, set_ref)
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def set_target_ref(self, target, ref):
         self._target = target
         self._ref = ref
@@ -377,27 +355,27 @@ class Cube(object):
         self.stars.set_names( target, ref, self.target_name )
         self.stars.set_colours( target, ref )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def get_data(self):
         #TODO:  as property
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def set_times(self):
         timefile = self.basename + '.time'
         print( 'Loading timing data from {}'.format(repr(timefile)) )
 
         self.timedata = load_times( timefile )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def fix_ut(self, set_=True):
         '''fix UTSEC to be relative to midnight on the starting date of the first frame'''
         t = self.timedata['utsec'].copy()
         dates = self.timedata['utdate']
         dateset = set( dates )
         delim = b'-' if isinstance(next(iter(dateset)), (bytes, np.bytes_)) else '-'
-        to_datetime = lambda d: Date(*map(int, d.split(delim))) #.decode()
+        to_datetime = lambda d: Date( *map(int, d.split(delim)) ) #.decode()
         if len(dateset) > 1:
-            warnings.warn('Data spans multiple UTC dates! Adjusting time origin.' )
+            warn( 'Data spans multiple UTC dates! Adjusting time origin.' )
 
             d0 = to_datetime( dates[0] )
             for i,d in enumerate( dateset-{dates[0]} ):
@@ -408,7 +386,7 @@ class Cube(object):
 
         return t
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def load_data(self, filename=None, coofile=None):
         #mode='shoc',
 
@@ -433,61 +411,37 @@ class Cube(object):
 
                 #self.stars.append( *masterdata[idx0:idx0+Nreadcols] )
 
-        print('loading data. Patience is a virtue')
+        print( 'loading data. Patience is a virtue' )
         filename        = filename or self.database
         coordinates     = coofile or self.coordinates
         #print( coordinates )
-        filename = str(filename)
-        print(filename)
-        
-        #embed()
-        
+        print( filename )
         if filename.endswith( 'lc' ):
-            self.load_from_lc(filename)
-        elif filename.endswith('npz'):
-            self.load_from_npz(filename)
+            self.load_from_lc( filename )
         elif 'apcor' in filename:
-            self.load_from_apcor(filename, coordinates)
+            self.load_from_apcor( filename, coordinates )
         else:
-            self.load_from_mag(filename, 8)
-    
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def load_from_npz(self, filename, mode='flux', nap=0):
-        
-        lz = np.load(filename)  #psf_flux, psf_fwhm, problematic
-        data = lz['flux_ap']    #shape (Nframes, Nstars, Naps)
-        #coo = lz['coords']      #shape (Nframes, Nstars, 2)
-        Nframes, Nstars, Naps = data.shape
-        for i in range(Nstars):
-            star = Star(data[:, i, nap], 
-                        err=None,
-                        coo=None)#coo[:,i,::-1])
-            star._data = data[:, i]
-            self.stars.append( star )
-        
-        self.set_times( )
-    
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            self.load_from_mag( filename, 8 )
+
+    #====================================================================================================
     def load_from_lc(self, filename, mode='flux'):
         #TODO: instead of having mode argument, store data internally as flux ang have a 
-        #property that handles the flux conversion
-        (metaline, starline, headline), data = read(filename)
-        for i, d in enumerate(fold.fold(data.T[1:], 2)):
+        #proporty that handles the flux conversion
+        (metaline,starline,headline), data = read(filename)
+        for i,d in enumerate(Div.div(data.T[1:], 2)):
             if mode == 'mag':
                 mag0 = 25
-                d  = self.asflux(*d, mag0=mag0)
-            self.stars.append(Star(*d))
+                d  = self.asflux( *d, mag0=mag0 )
+            self.stars.append( Star(*d) )
 
 
         #ref = starheads[2::2].index('ref')
         #starheads = starline.strip('#').split('\t')
         starheads = list(filter(None, map(str.strip, starline.strip('#').split('  '))))
         #colheads = kill_brackets(headline).strip('#').lower().split('\t')
-        
-        #embed()
-        
+
         ref = starheads.index('C0')
-        target = first_false_idx(starheads, lambda s: re.match('C\d|ref', s) ) #[2::2]
+        target = first_false_idx( starheads, lambda s: re.match('C\d|ref', s) ) #[2::2]
         self.set_target_ref( target, ref )
 
         #timefields = list(map( lambda s: rreplace(s, '() ', '').lower(),
@@ -498,17 +452,14 @@ class Cube(object):
         timefields = 'utsec','utdate'
         formats = float, 'U30'
         #data[:,:len(timefields)]
-        self.timedata = np.recarray(len(data),
-                                    dtype=list(zip(timefields, formats)) )
+        self.timedata = np.recarray( len(data),
+                                  dtype=list(zip(timefields, formats)) )
         self.timedata['utsec'] = data[:,0]
         self.timedata['utdate'] = self.date
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    #@profiler.histogram
+    #====================================================================================================
     def load_from_mag(self, filename, nap=None, write=True):
-        '''load data from IRAF daophot multi-aperture ascii database.'''
-        from astropy.io import ascii
-        
+        '''load data from daophot multi-aperture ascii database.'''
         def as2Dfloat( colid ):
             table = bigdata[tuple(colid+str(i) for i in range(1,Naps+1))]
             return table.as_array().view(float).reshape(len(table),-1)
@@ -557,7 +508,7 @@ class Cube(object):
             bigdata[:10].write( '{}.tbl'.format(filename),
                                 format='ascii.fast_commented_header' )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def load_from_apcor(self, filename, coofile, splitfile=None ):
         '''load data from aperture correction ascii database.'''
 
@@ -611,8 +562,7 @@ class Cube(object):
                 z = fileno[ix]-1
                 data[z], err[z] =  self.asflux( bigdata[ix]['Mag'], bigdata[ix]['Merr'], mag0=25 )
             except:
-                print( 'ERROR CAUGHT!' )
-                embed()
+                 embed()
             #bigdata[ix]['Exptime']
             mask[z] = False
             data.mask = mask
@@ -623,7 +573,7 @@ class Cube(object):
 
         self.set_times( )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     @staticmethod
     def asflux(mag, magerr=None, mag0=0):
         '''Convert magnitudes to Fluxes'''
@@ -635,7 +585,7 @@ class Cube(object):
         return flux, fluxerr
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #TODO:  as property??
     def datablock(self, which='raw', with_error=False):
         if with_error:
@@ -644,7 +594,7 @@ class Cube(object):
         else:
             return np.ma.vstack( [star.get_data(which) for star in self] )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def optimal_smoothing(self):
         '''Determine the optimal amount of smoothing for differential photometry
         by minimising the variance of the differentail light curve for the given
@@ -653,7 +603,7 @@ class Cube(object):
         data = self.datablock('clipped')
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def compute_dl(self, which='raw', mode='flux', **kw):
         #TODO: instead of having mode argument, store data internally as flux ang have a 
         #proporty that handles the flux conversion
@@ -680,10 +630,9 @@ class Cube(object):
         #mag_ref = np.ma.array( mag_ref, mask=self[ref].clipped.mask )
 
         #NEEDS WORK --> COMBINED POLY + SMOOTH DETRENDING...
-
         if mean:
-            compix = tuple(set(range(len(self.stars))) - {self._target})        #self._others???
-            comps = self.datablock(which)[compix,:]         #data for comparison stars
+            compix = tuple(set(range(len(self.stars))) - {self._target})
+            comps = self.datablock()[compix,:]         #data for comparison stars
             Fr = comps / comps.mean(1)[None].T
             ref = Fr.mean(0)
             #TODO:  SMOOTH BY CONSIDERING STDEV OF Fr????
@@ -694,7 +643,7 @@ class Cube(object):
             ref = self['ref'].get_data( which )     #'clipped'
 
         if smoothing:    #smoothing gives window size
-            ref = smoother(ref, smoothing, fill=None)#, return_type='masked')
+            ref = smooth(ref, smoothing, fill=None)#, return_type='masked')
 
         if poly:
             t = self.timedata['utsec']
@@ -713,7 +662,7 @@ class Cube(object):
             print('Star %i!!!!!!!!!!' %j)
 
             #mag = star.data                             #OR CLIPPED???
-            star.dl = op( star.get_data(which), ref ) #* scale
+            star.dl = op( star.get_data( which ), ref ) #* scale
 
         #print np.array( [np.linalg.norm([e1, e2]) for e1,e2 in zip(err,diff_err)] )
         #err_dl = np.array( [np.linalg.norm([e1, e2]) for e1,e2 in zip(err,diff_err)] )              #Add errors in quadrature
@@ -722,7 +671,7 @@ class Cube(object):
 
         #return coof
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def plot_lc(self, which='raw', tkw='utsec', **kw):
 
         which = which.lower()
@@ -765,12 +714,9 @@ class Cube(object):
                                     colours=colours,
                                     axlabels=axlabels,
                                     timescale=timescales[tkw],
-                                    start=self.date,
+                                    startdate=self.date,
                                     **kw )
-        
-        #This will plot the target *over* the other light curves
-        plots.lines[self._target].set_zorder(10) #FIXME!!!!!!!!!!!!
-        
+
         ax = fig.axes[0]
         if mode.lower() == 'mag':
             ax.invert_yaxis()
@@ -784,7 +730,7 @@ class Cube(object):
         return plots
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def load_ls(self, fn):
         Nstars = len(self.stars)
         ls_data = np.loadtxt( fn, unpack=1 )
@@ -794,17 +740,17 @@ class Cube(object):
             ls_data[:,i+1]
             self.stars[i].ls_data = frq, ls_data[:,i+1], None
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def save_ls(self, fn):
         Amps = [ star.ls_data.A[0] for star in self ]
         data = [ self[0].ls_data.f[0] ] + Amps          #frequencies should be the same for all the stars.  If not, we have problems
         outarray = np.array( data )
         np.savetxt(fn, outarray)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def compute_ls(self, tkw='utsec', **kw):
         print( 'Computing Ldbomb Scargle spectrum for cube {}'.format(self.filename) )
-        if not tkw in self.timedata.dtype.names:
+        if not tkw in conjc.timedata.dtype.names:
             raise ValueError( '{} is not an valid time format'.format(tkw) )
         else:
             'warn if time crosses 00.00h for utc or lmst ---> aliases'
@@ -832,7 +778,7 @@ class Cube(object):
                     #'create data array and return it'
         #return T, Frq, Amp, Sig
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def plot_ls(self, whichstars=None, fig=None, **kw ):
 
         #whichstars = whichstars if whichstars else [self._target, self._ref]
@@ -858,7 +804,7 @@ class Cube(object):
         #ax.set_xlabel('f (Hz)')
         #ax.legend(loc='best')
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def save_lc(self, filename=None, which='raw',  tkw=('utsec',), clobber=None):
         #TODO: MAYBE YOU CAN FIX THE ASTROPY TABLE TO ALIGN COLUMN NAMES WITH VALUES
 
@@ -899,7 +845,7 @@ class Cube(object):
         else:
             print( 'Nothing written' )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def heteroskedacity( self, whichstars, nwindow, window='flat', tkw='lmst' ):
 
         fig, ax = plt.subplots()
@@ -918,15 +864,13 @@ class Cube(object):
         ax.set_xlabel( tkw.upper() )
         ax.legend()
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def minvar(self):
         '''return index of star with minimal variance'''
         return np.ma.var( self.datablock(), axis=1 ).argmin()
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def check_ref(self, ref):
-        #FIXME: THIS FUNCTION WILL PICK THE WRONG REFERENCE IF THE TARGET STAR 
-        #IS THE ONE WITH THE HIGHEST SNR!!
         #check which star has maximal SNR
 
         d, e = self.datablock( with_error=True )
@@ -941,46 +885,20 @@ class Cube(object):
 
         if not ref is None:
             if ref != maxsnr:#minvar:
-                warnings.warn('The selected reference star {} is not the one '
-                    'with the best SNR!  Use {} instead.'.format(args.ref, maxsnr))
+                warn( 'The selected reference star {} is not the one with the best SNR!  Use {} instead.'.format(args.ref, maxsnr) )
             return ref
 
         else:
             print( 'Using star {} as reference'.format(maxsnr) ) #minvar
             return maxsnr #minvar
-    
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def plot_spread(self, tkw='utsec'):
-        '''plot all aperture data as time series'''
-        fig, axes = plt.subplots(2, 1, figsize=(18,12), 
-                                 sharex=True, 
-                                 gridspec_kw=dict(hspace=0))
-    
-        t = self.timedata[tkw]
-        
-        print(t)
-        
-        for ax, star in zip(axes, self):
-            sdata = get_spread(star, 1e4)
-            naps = sdata.shape[0]
-            labels = ['ap %d' %i for i in range(naps)]
-            lcplot(t, sdata, ax=ax, labels=labels)
-    
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_spread(star, sfactor):
-    naps = star._data.shape[1]
-    return (star._data + np.arange(naps)*sfactor).T
-    
 
-    
-    
-    
-#****************************************************************************************************
+
+##############################################################################################################################################
 class Stars(object):
     #TODO: Merge into Cube
     COLOURS = ['b', 'g', 'm', 'c', 'k', 'r', 'y','orange']   #colormap???
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __init__(self):
         #self.target = target
         #self.ref = ref
@@ -989,19 +907,19 @@ class Stars(object):
         #self.set_names()                                                #SHOULD FORM PART OF STAR __INIT__
         #self.set_colours()
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __getitem__(self,n):
         return self.stars[n]
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __setitem__(self, key, val):
         self.stars[key] = val
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __len__(self):
         return len(self.stars)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def append(self, data=None, err=None, coo=None):
 
         if isinstance( data, Star ):
@@ -1009,7 +927,7 @@ class Stars(object):
         else:
             self.stars.append( Star(data, err, coo) )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def set_names(self, target, ref, target_name, basename=None):       #THS SHOULD BE A METHOD OF CUBE
         count = 0
         for i, star in enumerate(self):
@@ -1025,11 +943,11 @@ class Stars(object):
             #star.fn_LS = '{}.{}.ls'.format(basename, name)                         #Lomb-Scargle txt file
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def get_names(self):
         return [star.name for star in self]
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def set_colours(self, target, ref):              #THS SHOULD BE A METHOD OF CUBE
         '''
         Set the plot colours for the stars.
@@ -1049,13 +967,13 @@ class Stars(object):
             i += 1
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def allmags(self):
         ##alldata = np.empty( (len(self), len(self[shortest].data) ,2) )
         ##[q.T for q in s.allmags()]
         #return np.ma.hstack( [s.data for s in self] )
 
-    ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ##====================================================================================================
     #def clipper(self):                                                                                          #THIS IS MEMORY INEFFICIENT!!!!!!!
         #for star in self:
             #for cube in star:
@@ -1064,10 +982,10 @@ class Stars(object):
 
 
 
-#****************************************************************************************************
+##############################################################################################################################################
 class Star(object):
     ''' ... '''
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __init__(self, data=None, err=None, coo=None, name=None, colour=None):
         #datalen = datalen if datalen else 0
         if not data is None:
@@ -1076,29 +994,23 @@ class Star(object):
                 self.err = err                          #errors
             else:
                 self.data = np.ma.array( data, mask=np.isnan(data) )
-                if err is None:
-                    self.err = np.ma.array(np.empty_like(data),
-                                           mask=True)
-                else:
-                    self.err = np.ma.array( err, mask=np.isnan(err) )
-        
+                self.err = np.ma.array( err, mask=np.isnan(err) )
 
-        self.coo = None         if coo is None          else np.array(coo)
-
+        self.coo = np.array(coo)
 
         self.dl = np.empty( 0 )                      #differential light curve (mag,err)
         self.clipped = np.empty( 0 )
 
         #self.ls_data = SpectralDataWrapper()                    #Lomb Scargle data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def __len__(self):
         if ~self.data.mask.any():
             return len(self.data)
         else:
             return sum(~self.data.mask)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def get_data(self, which):
         #TODO: STORE THIS DATA IN REC ARRAY
         if which=='raw':
@@ -1109,10 +1021,9 @@ class Star(object):
             data = self.dl
         return data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def running_stats(self, nwindow, center=True, which='clipped'):
-        import pandas as pd
-        
+
         #first reflect the edges of the data array
         #if center is True, the window will be centered on the data point - i.e. data point preceding and following the current data point will be used to calculate the statistics (mean & var)
         #else right window edge is aligned with data points - i.e. only the preceding values are used.
@@ -1143,7 +1054,7 @@ class Star(object):
 
         #return med, var
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def plot_clippings(self, *args):
         #TODO:  plot clippings from outliers.py
         ax, t, nwindow = args
@@ -1177,18 +1088,18 @@ class Star(object):
         ax.legend( loc='best' )
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def smooth(self, nwindow, window='hanning', fill='mean'):
         #data = self.clipped[~self.clipped.mask]
-        self.smoothed = smoother( self.clipped, nwindow, window, fill)
+        self.smoothed = smooth( self.clipped, nwindow, window, fill)
         return self.smoothed
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def argmin(self):
         return np.argmin(self.counts())
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def compute_ls(self, t, signal, **kw):
         print( 'Doing Lomb Scargle for star {}'.format(self.name) )
         '''Do a LS spectrum on light curve of star.
@@ -1204,7 +1115,7 @@ class Star(object):
         #return self.ls_data.f, self.ls_data.A, self.ls_data.signif
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     #def plot_ls(self, ax=None, offsets=None, **kw):
         ##TODO: OFFSETS are redundant with draggables
         #'''Plot the LS spectra for the star.'''
@@ -1251,7 +1162,7 @@ class Star(object):
         #self.ls_plots = plots
         #return plots
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
     def plot_lc(self, ax, t, which='raw', **kw):
 
         label = getattr(self, 'label', kw.get('label', ''))
@@ -1287,7 +1198,7 @@ class Saver():
         if os.path.exists( filename ):
             if clobber is None:
                 msg = 'A file named {} already exists! Overwrite ([y]/n)?? '.format(filename)
-                return InputLoop.str( msg, 'y', convert=convert.yn2TF )
+                return Input.str( msg, 'y', convert=convert.yn2TF )
             return clobber
         else:
             return True
@@ -1307,11 +1218,9 @@ saver = Saver()
 
 
 #THIS SHOULD BE FITS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@decor.path.to_string.auto
 def read(filename):
-    from myio import read_data_from_file
-    header = read_data_from_file(filename, N=3)         #read first 3 lines
-    (metaline, starline, headline) = header
+    header = read_data_from_file( str(filename), N=3 )
+    (metaline,starline,headline) = header
 
     fill_value = -99
     data = np.genfromtxt( str(filename),
@@ -1324,12 +1233,12 @@ def read(filename):
 
 
 
-#****************************************************************************************************
+##############################################################################################################################################
+from myio import read_file_line
 @decor.path.to_string.auto
 def load_times(timefile):
     '''read timestamps from file.'''
-    from myio import read_file_line
-    
+
     hline = read_file_line(timefile, 0)                 #read header line
     colnames = hline.strip('\n #').lower().split()      #extract column names (lower case)
 
@@ -1337,10 +1246,10 @@ def load_times(timefile):
                             dtype=None,
                             names=colnames,
                             skip_header=1,
-                            usecols=range(1, len(colnames)) )   #???
+                            usecols=range(1,len(colnames))  )   #???
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_name_date(fn=None):
+#====================================================================================================
+def get_name_date( fn=None ):
 
     if fn:
         print( "Getting info from {}... ".format( os.path.split(fn)[1] ) )
@@ -1348,7 +1257,7 @@ def get_name_date(fn=None):
         name = header['OBJECT']
         size = header['NAXIS3']
         try:
-            date = header['DATE-OBS'].split('T')[0]
+            date = header['DATE-OBS']
         except KeyError:
             ds = header['DATE']                 #fits generation date and time
             date = ds.split('T')[0].strip('\n') #date string e.g. 2013-06-12
@@ -1358,22 +1267,11 @@ def get_name_date(fn=None):
 
 
 
-#****************************************************************************************************###################################################################
+#################################################################################################################################################################################################################
 #import cProfile as cpr
 if __name__=='__main__':
-    import os, sys, argparse
-    from myio import iocheck, parsetolist
-    from recipes.misc import is_interactive, Unbuffered
-    
-    if is_interactive():
-        #convert stdout to unbuffered
-        _stdout = sys.stdout #backup
-        sys.stdout = Unbuffered(sys.stdout)
-        #FIXME: causes AttributeError: 'IOStream' object has no attribute 'flush'
-        #when using embed()
-        #print('IN IPYTHON!!')
-        
-    
+
+    import argparse, os
     #bar = ProgressBar()
 
     parser = argparse.ArgumentParser(description='')
@@ -1428,8 +1326,6 @@ if __name__=='__main__':
         cube.read_path = cube.write_path = path       #FIXME!
         cube.load_data( )
         
-        #embed()
-        
         if len(cube.stars)>1:
             cube.ref = ref = cube.check_ref( args.ref )
         #FIXME:  TARGET AND REFERENCE CANNOT BE THE SAME!  CONJOIN WILL MERGE 2 STARS INTO THE SAME!!
@@ -1465,14 +1361,14 @@ if __name__=='__main__':
             conjc.save_lc( outname )
 
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #====================================================================================================
+
     #Plots setup
-    import matplotlib as mpl
     #plt.close('all')
 
-    #mpl.rc( 'figure', figsize=(18,8) )                                #set the figure size for this session
+    mpl.rc( 'figure', figsize=(18,8) )                                #set the figure size for this session
     mpl.rc( 'savefig', directory=path )
-    #mpl.rc( 'figure.subplot', left=0.065, right=0.95, bottom=0.075, top=0.95 )    # the left, right, bottom, top of the subplots of the figure
+    mpl.rc( 'figure.subplot', left=0.065, right=0.95, bottom=0.075, top=0.95 )    # the left, right, bottom, top of the subplots of the figure
     #mpl.rc( 'figure', dpi=600 )
 
     #######################################################################################################################
@@ -1482,12 +1378,8 @@ if __name__=='__main__':
                                mode='flux',
                                relative_time=True,
                                twinx='sexa')
-    
     starplots.connect()
-    
-    #ps = PointSelector(starplots.draggables)
-    #ps.connect()
-    
+
     raise SystemExit
 
     if args.w2f:
@@ -1500,52 +1392,45 @@ if __name__=='__main__':
     testfile = Path(conjc.databases[0]).with_suffix('.clc')
     if testfile.exists():
         _, data = read(testfile)
-        for i, d in enumerate(fold.fold(data.T[1:], 2)):
+        for i,d in enumerate(Div.div(data.T[1:], 2)):
             conjc[i].clipped = d[0]
 
     else:
         #OUTLIER CLIPPING
         nwindow = 100
-        overlap = '50%'
+        noverlap = 50
         for star in conjc:
             print( 'outliers', star )
             #NOTE: OUTLIER DETECTION DOES NOT TAKE ACCOUNT OF UNCERTAINTIES
-            ix = WindowOutlierDetection(star.data, 
-                                        nwindow, overlap,
-                                        generalizedESD, 
-                                        maxOLs=25, alpha=0.05 )
+            ix = WindowOutlierDetection( star.data, nwindow, noverlap,
+                                         generalizedESD, maxOLs=25, alpha=0.05 )
             mask = np.zeros_like( star.data )
             mask[ix] = True
             star.clipped = np.ma.array( star.data, mask=mask )
 
 
-    starplots = conjc.plot_lc(which='clipped', 
-                              tkw=tkw, 
-                              mode='flux', 
-                              show_masked='x',
-                              relative_time=True,
-                              twinx='sexa')
-    starplots.connect()
-    #TODO: Line selector
+    starplots = conjc.plot_lc( which='clipped', 
+                               tkw=tkw, 
+                               mode='flux', 
+                               show_masked='x',
+                               relative_time=True )
+
 
     if args.w2f:
         conjc.save_lc( which='clipped' )
-
-
-    raise SystemExit
 
     #######################################################################################################################
     #HETEROSKEDACITY
     #whichstars = range(Nstars)
     #conjc.heteroskedacity( whichstars, 100, tkw=tkw )
-    
+
 
     #######################################################################################################################
     #DIFFERENTIAL LIGHT CURVE
     testfile = Path(conjc.databases[0]).with_suffix('.dlc')
     if testfile.exists():
         _, data = read(testfile)
-        for i,d in enumerate(fold.fold(data.T[1:], 2)):
+        for i,d in enumerate(Div.div(data.T[1:], 2)):
             conjc[i].dl = d[0]
     else:
         conjc.compute_dl( which='clipped', poly=1 )		#smooth=50, poly=3
@@ -1666,13 +1551,13 @@ if __name__=='__main__':
     fig = plot_spec( conjc )
 
     #Welch's periodogram
-    conjc.compute_ls(which = 'clipped',
-                     nwindow=1024,
-                     noverlap='50%',
-                     use='ls',
-                     normalise=None,
-                     detrend=3,
-                     timescale='s')
+    conjc.compute_ls(   which = 'clipped',
+                        nwindow=1024,
+                        noverlap='50%',
+                        use='ls',
+                        normalise=None,
+                        detrend=3,
+                        timescale='s'   )
 
     save_spec( conjc, 'clc.welch.ls' )
     fig = plot_spec( conjc )

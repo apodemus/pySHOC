@@ -21,7 +21,7 @@
 
 #OPTIONS FOR DISPLAYING COMPUTED IMAGES + STATS
 
-
+#TODO: check which imports are so bloody slow.... localize them???
 
 from types import ModuleType
 def tsktsk(s):
@@ -35,7 +35,7 @@ import time
 t1 = time.time()
 
 import numpy as np
-import pyfits
+import astropy.io.fits as pyfits
 #import astropy.io.fits as pyfits
 
 #import matplotlib.animation as ani
@@ -46,6 +46,7 @@ import re
 import datetime
 import subprocess
 #from glob import glob
+import textwrap
 
 import collections as coll
 import itertools as itt
@@ -54,6 +55,7 @@ from copy import copy
 
 from astropy.time import TimeDelta
 from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.coordinates.angles import Angle
 from astropy.table import Table as aTable
 from astropy.table import Column
 
@@ -75,13 +77,11 @@ from pySHOC.io          import Conversion as convert
 #import matplotlib.pyplot as plt
 #from imagine import supershow
 
-import textwrap
 
 #from decor import profile
 
 from IPython import embed
-
-from magic.string import banner
+#from magic.string import banner
 
 
 tsktsk('modules')
@@ -577,20 +577,22 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
                 tz = -2
                 tzd = TimeDelta(tz*3600, format='sec')
                 
-                hms = np.array( self.trigger.split(':'), float)
-                trigsec = sum( hms * (3600, 60, 1))
+                trigsec = Angle(self.trigger, 'h').to('arcsec').value / 15
                 ttrig = TimeDelta( trigsec, format='sec' )
                 ttrig += tzd                                    #trigger now in UTC
+
                 if ttrig.value < 0:
                     ttrig += TimeDelta( 1, format='jd' )        #adjust to positive value -- this needs to be done so we don't accidentally shift the date!
 
                 t0 = utdate + ttrig
                 #datetime_str = 'T'.join([str(utdate), self.trigger])     #Correct the time in the datetime_str
-                t0 = Time( t0.isot, format='isot', scale='utc', precision=9, location=sutherland)
+                t0 = Time( t0.isot, format='isot', scale='utc', 
+                           precision=9, location=sutherland)
                 t0 += 0.5*td_kct                                        #set t0 to mid time of first frame
                 
             else:
-                raise ValueError( 'No GPS triggers provided for {}!'.format(self.filename()) )
+                raise ValueError( 'No GPS triggers provided for {}!'.format(
+                                    self.filename()) )
                     #datetime_str = utdate    
         
             if not dryrun:
@@ -630,45 +632,44 @@ class SHOC_Cube( pyfits.hdu.hdulist.HDUList ):          #HACK:  Subclass Primary
         t.delta_ut1_utc = delta
         
         #initialize array for timing data
-        self.timedata = timedata = np.recarray( (len(t)), 
-                                                dtype=[ ('utdate', 'U20'),
-                                                        ('uth', float), 
-                                                        ('utsec', float),
-                                                        ('utc', 'U30'),
-                                                        ('utstr', 'U20'),
-                                                        ('lmst', float),
-                                                        ('jd', float),
-                                                        ('gjd', float),
-                                                        ('bjd', float),
-                                                        ('altitude', float),
-                                                        ('airmass', float)]  )
+        self.timedata = timedata = np.recarray((len(t)), 
+                                               dtype=[('utdate', 'U20'),
+                                                      ('uth', float), 
+                                                      ('utsec', float),
+                                                      ('utc', 'U30'),
+                                                      ('utstr', 'U20'),
+                                                      ('lmst', float),
+                                                      ('jd', float),
+                                                      ('gjd', float),
+                                                      ('bjd', float),
+                                                      ('altitude', float),
+                                                      ('airmass', float)])
         #compute timestamps for various scales
         timedata.texp           = texp
         timedata.utc            = t.utc.isot
         timedata.uth            = t.utc.hours                   #UTC in decimal hours for each frame
         timedata.utsec          = timedata.uth * 3600.              #td_kct.value
-        utdata = np.fromiter( map(lambda x: tuple(x.split('T')), timedata.utc),
-                                                 [('utdate','U20'),('utc','U20')] )
-        timedata.utdate = utdata['utdate']
-        timedata.utstr = utdata['utc']
-        lmst       = t.sidereal_time('mean', longitude=lon)  #LMST for each frame
-        timedata.lmst = lmst
-        #timedata.last       = t.sidereal_time('apparent', longitude=lon)
+        utdata = np.fromiter(map(lambda x: tuple(x.split('T')), timedata.utc),
+                                                 [('utdate','U20'),('utc','U20')])
+        timedata.utdate         = utdata['utdate']
+        timedata.utstr          = utdata['utc']
+        lmst                    = t.sidereal_time('mean', longitude=lon)  #LMST for each frame
+        timedata.lmst           = lmst
+        #timedata.last          = t.sidereal_time('apparent', longitude=lon)
         
-        timedata.jd         = t.jd
-        #timedata.ljd        = np.floor(timedata.jd)
-        timedata.gjd        = t.tcg.jd                  #geocentric julian date
+        timedata.jd             = t.jd
+        #timedata.ljd           = np.floor(timedata.jd)
+        timedata.gjd            = t.tcg.jd                  #geocentric julian date
         
         self.has_coords = not coords is None
         if self.has_coords:
             bjd_offset = t[:1].bjd( coords, precess=1, abcorr=None ) - timedata.jd[0]
             
             timedata.bjd[:] = timedata.jd +  bjd_offset               #barycentric julian date
-            timedata.altitude = altitude( coords.ra.radian,
-                                            coords.dec.radian,
-                                            lmst.radian,
-                                            np.radians(lat) )
-                                          
+            timedata.altitude = altitude(coords.ra.radian,
+                                        coords.dec.radian,
+                                        lmst.radian,
+                                        np.radians(lat))
             timedata.airmass = Young94( np.pi/2 - timedata.altitude )
                 
         #print( 'Updating the starting times for datacube {} ...'.format(self.get_filename()) )
@@ -826,27 +827,27 @@ class SHOC_Run( object ):
     MAX_LS = 25                                                            #Maximal number of files to list in dir_info
     
     #Naming convension defaults
-    NAMES = type( 'Names', (), 
-                {   'flat'  :       'f{date}{sep}{binning}[{sep}sub{sub}][{sep}filt{filter}]',
-                    'bias'  :       'b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]',
-                    'sci'   :       '{basename}' }
-                )
+    NAMES = type('Names', (), 
+                {'flat' :   'f{date}{sep}{binning}[{sep}sub{sub}][{sep}filt{filter}]',
+                 'bias' :   'b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]',
+                 'sci'  :   '{basename}' })
 
     
     #====================================================================================================
     def __init__(self, hdus=None, filenames=None, label=None, sep_by=None):
         
         #WARNING:  filenames may contain None as well as duplicate entries.....??????
-                    #not sure if uplicates is desireable wrt efficiency.....
+                    #not sure if duplicates are desireable wrt efficiency.....
         
         self.cubes = list(filter(None, hdus)) if hdus else []
         
         self.sep_by = sep_by
-        self.label = label
+        self.label = label or 'unlabelled'
         
         if not filenames is None:
-            self.filenames = list( filter(None, filenames) )            #filter None
-            self.load( self.filenames )
+            #filter null filenames and convert potential Path to str
+            self.filenames = list(map(str, filter(None, filenames)))   
+            self.load(self.filenames)
         elif not hdus is None:
             self.filenames =  [hdulist.filename() for hdulist in self]
         
@@ -915,14 +916,14 @@ class SHOC_Run( object ):
     #====================================================================================================
     def join(self, *runs):
         
-        runs = list( filter(None, runs) )       #Filter empty runs (None)
+        runs = list(filter(None, runs))       #Filter empty runs (None)
         labels = [r.label for r in runs]
         hdus = sum([r.cubes for r in runs], self.cubes )
         
         if np.all( self.label == np.array(labels) ):
             label = self.label
         else:
-            warn( "Labels {} don't match {}!".format(labels, self.label) )
+            warn( "Labels {} don't match {}!".format(labels, self.label))
             label = None
         
         return SHOC_Run( hdus, label=label )
@@ -934,7 +935,8 @@ class SHOC_Run( object ):
         '''
         self.filenames = filenames
         
-        label = kwargs.pop('label') if 'label' in kwargs else self.label 
+        label = kwargs.pop('label', kwargs.get('label', self.label))
+        
         print( '\nLoading data for {} run...'.format(label) )
         
         cubes = []
@@ -945,13 +947,15 @@ class SHOC_Run( object ):
     #====================================================================================================
     def print_instrumental_setup(self):
         '''Print the instrumental setup for this run as a table.'''
-        names, dattrs, vals = zip( *(stack.get_instrumental_setup() for stack in self) )
+        names, dattrs, vals = zip(*(stack.get_instrumental_setup()
+                                    for stack in self))
         
         bgcolours       = {'flat'       : 'cyan', 
                            'bias'       : 'magenta', 
                            'science'    : 'green' }
+        label = self.label or 'unlabelled'
         table = sTable( vals, 
-                        title = 'Instrumental Setup: {} frames'.format(self.label.title()),
+                        title = 'Instrumental Setup: {} frames'.format(label.title()),
                         title_props = {'text':'bold',
                                        'bg': bgcolours.get(self.label, 'default')},
                         col_headers = dattrs[0], 
@@ -1354,7 +1358,7 @@ class SHOC_Run( object ):
         
         match1 = np.array([attr in attr2 for attr in attr1])    #which of 1 occur in 2
         
-        if set(attr1).issuperset( set(attr2) ):  #All good, run2 contains all the cubes with matching attributes
+        if set(attr1).issuperset(set(attr2)):   #All good, run2 contains all the cubes with matching attributes
             if match:
                 return match1                    #use this to select out the minimum set of cubes needed (filter out unneeded cubes)
             else:
@@ -1364,22 +1368,22 @@ class SHOC_Run( object ):
             
             if any(~match2):
                 #FIXME:   ERRONEOUS ERROR MESSAGES!
-                fns = ',\n\t'.join( fn1[~match1] )
-                badfns = ',\n\t'.join( fn2[~match2] )
-                mmvals = ' or '.join( set( np.fromiter( map(str, attr2), 'U64' )[~match2] ) )                       #set of string values for mismatched attributes
+                fns = ',\n\t'.join(fn1[~match1])
+                badfns = ',\n\t'.join(fn2[~match2])
+                mmvals = ' or '.join(set(np.fromiter(map(str, attr2), 'U64')[~match2]))                       #set of string values for mismatched attributes
                 keycomb = ('{} combination' if isinstance(keys, tuple) else '{}').format(keys)
                 operation = 'de-biasing' if 'bias' in self.label else 'flat fielding'
-                desc = ('Incompatible {} in'
-                        '\n\t{}'
-                        '\nNo {} frames with {} {} for {}'
-                        '\n\t{}'
-                        '\n\n').format(keycomb, badfns, self.label, mmvals, keycomb, operation, fns)
-                #msg = '\n\n{}: {}\n'
+                desc = ('Incompatible %s in'                % keycomb,
+                        '\t%s'                              % badfns,
+                        'No %s frames with %s %s for %s'    %(self.label, mmvals, keycomb, operation),
+                        '\t%s'                              % fns,
+                        '\n')
+                msg = '\n'.join(desc)
                 
                 if raise_error==1:
-                    raise ValueError( '\n\nERROR! %s' %desc )                       #obviates the for loop
+                    raise ValueError('\n\nERROR! %s' %msg)                       #obviates the for loop
                 elif raise_error==0:
-                    warn( desc ) 
+                    warn(msg) 
             
             if match:
                 return match1       #np.array([attr in attr2 for attr in attr1])
@@ -2085,7 +2089,6 @@ def sciproc(run):                               #WELL THIS CAN NOW BE A METHOD O
         section_header( 'Timing' )
         
     if args.gps:
-        #embed()
         args.cubes.that_need_triggers().set_gps_triggers( args.gps )
     
     if args.timing or args.split:
@@ -2472,7 +2475,7 @@ def setup():
     #====================================================================================================
     if args.gps:
         args.timing = True              #Do timing if gps info given
-       
+        
         if len(args.gps)==1:         #triggers give either as single trigger time string or filename of trigger list
             valid_gps = iocheck( args.gps[0], validity.RA, raise_error=-1 )         #if valid single time this will return that same str else None
             if not valid_gps:
@@ -2509,20 +2512,23 @@ def setup():
     
     #====================================================================================================        
     if args.flats or args.bias:
-        args.combine = list( map(str.lower, args.combine) )
+        args.combine = list(map(str.lower, args.combine))
         when = 'day', 'daily', 'week', 'weekly'
         how = 'mean', 'median'
         understanding = when + how
         transmap = dict(grouper(when, 2))
-        misunderstood, understood = map(list, partition(understanding.__contains__, args.combine))
+        understood, misunderstood = map(list, 
+                            partition(understanding.__contains__, args.combine))
         if any(misunderstood):
-            raise ValueError( 'Argument(s) {} for combine not understood.'.format(misunderstood) )
+            raise ValueError('Argument(s) {} for combine not understood.'
+                             ''.format(misunderstood))
         else:
             understood = [transmap.get(u,u) for u in understood]
-            when, how = next(zip( *partition(how.__contains__, understood) ))
+            how, when = next(zip(*partition(how.__contains__, understood)))
             args.combine = when
-            args.fcombine = getattr( np, how )
-            print( '\nBias/Flat combination will be done by {} {}.'.format(when, how) )
+            args.fcombine = getattr(np, how)
+            print('\nBias/Flat combination will be done by {} {}.'
+                  ''.format(when, how))
         
     #====================================================================================================        
     if args.flats:
