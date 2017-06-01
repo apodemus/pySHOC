@@ -1,8 +1,18 @@
+
+*.idea
 *.kate-swp
 *~
 *.bak
 /__pycache__
 
+#cache
+.coordcache
+
 dev
+.todo
+caltest.py
+mp_test.py
+
+examples
 
 EMvsCON

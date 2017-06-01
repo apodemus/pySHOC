@@ -19,5 +19,7 @@ class TestPipeline(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-    
-#TODO: old + new data all modes!!!
+
+# TODO: old + new data all modes!!!
+# TODO: all combinations of science, bias, dark, flats (+ masters)
+# TODO:
