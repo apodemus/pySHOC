@@ -12,6 +12,7 @@
 # FIXME: printing too many match tables
 
 # TODO: logging
+# TODO:  + indicate different compute sections (timing / flats / etc) by ANSI marker at the beginning of terminal lines?
 
 # TODO: LOCALIZE IMPORTS FOR PERFORMANCE GAIN / import in thread and set global??
 
@@ -214,7 +215,7 @@ def parse_input():
         default=True,
         help='Calculate the timestamps for data cubes. Note that time-stamping is done by default '
              'The timing data will be written to a text files with the cube basename and extention '
-             '".time"')
+             '".time"')     #TODO: eliminate this argument
     main_parser.add_argument(
         '-g',
         '--gps',
@@ -224,7 +225,7 @@ def parse_input():
     main_parser.add_argument(
         '-k',
         '--kct',
-        default=None,
+        default=[],
         nargs='+',
         help='Kinetic Cycle Time for External GPS triggering.')
     main_parser.add_argument(
@@ -419,6 +420,7 @@ def process_args(namespaces):
     if args.files_or_directory and not args.sci:
         args.sci = args.files_or_directory
 
+    # embed()
 
     if args.outdir:
         # output directory given explicitly
@@ -477,6 +479,7 @@ def process_args(namespaces):
         # Check if they are valid representations of time
         args.gps = [iocheck(g, validity.RA, raise_error=1, convert=convert.RA)
                     for g in args.gps]
+
         # Convert and set as cube attribute
         args.sci.that_need_triggers().set_gps_triggers(args.gps)
 
@@ -484,21 +487,19 @@ def process_args(namespaces):
         grun = args.sci.that_need_kct()
         if len(args.kct) == 1 and len(grun) != 1:
             warn('A single GPS KCT provided for multiple externally triggered runs. '
-                 'Assuming this applies for all these files: {}'.format(grun))
+                 'Assuming this applies for all these files: %s' % grun)
+            args.kct *= len(grun)   # expand by repeating
 
         elif len(grun) != len(args.kct):
-            raise ValueError('The number of GPS KCT values provided ({}) {} does '
-                             'not match the required number ({}) for {}'
-                             ''.format(len(args.kct), args.kct, len(grun), grun))
+            l = str(len(args.kct)) or 'No'
+            s = ': %s' % str(args.kct) if len(args.kct) else ''
+            raise ValueError('%s GPS KCT values provided%s for %i file(s): %s'
+                             '' % (l, s, len(grun), grun))
 
-            # if len(grun) and args.kct is None:
-            # msg = ("In 'External' triggering mode EXPOSURE stores the total "
-            # "accumulated exposure time, which is utterly useless. We need "
-            # "the actual exposure time - i hope you've written it down somewhere!! "
-            # "Please specify KCT (Exposure time + Dead time):")
-            # args.kct = InputCallbackLoop.str(msg, 0.04, check=validity.float, what='KCT')
+        # "Please specify KCT (Exposure time + Dead time):")
+        # args.kct = InputCallbackLoop.str(msg, 0.04, check=validity.float, what='KCT')
 
-        for cube, kct in itt.zip_longest(grun, args.kct, fill_value=args.kct[0]):
+        for cube, kct in zip(grun, args.kct):
             cube.timing.kct = kct
 
     # ===========================================================================
@@ -744,6 +745,7 @@ def header_proc(run, do_update, head_info, verbose=True):
         if info:
             print('Updating header for {}.'.format(cube.get_filename()))
             cube.header.update(info)
+            cube.header['history'] = 'pySHOC.pipeline header updated'
         # update_head.check()
         cube.flush(output_verify='warn', verbose=1)  # SLOW!! AND UNECESSARY!!!!
 
@@ -789,9 +791,9 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
         # FIXME: grouping not yet needed here!!! since we will flatten below anyway!!
         # TODO: add closest matching to shocRun.cross_check ???
         _, f_sr = run.match_and_group(args.flats, 'binning', matchdate, threshold_warn)
-        needs_debias += f_sr.flatten()  # NOTE: does not preserve names / cubeClass / runClass
+        needs_debias += f_sr.flatten()  # NOTE: does not preserve names / ObsClass / runClass
 
-    # # ===========================================================================
+    # ===========================================================================
     # combine bias
     if args.bias:
         section_header('De-biasing')

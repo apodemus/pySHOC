@@ -11,26 +11,29 @@ register_hdu(shocOldHDU)
 
 
 # Collect named cubes in a dict
-namedCubeClasses = {cls.name: cls
-                    for cls in flatiter((itersubclasses(shocCube), shocCube))}
-namedRunClasses = {cls.cubeClass.name: cls
+namedObsClasses = {cls.kind: cls
+                    for cls in flatiter((itersubclasses(shocObs), shocObs))}
+namedRunClasses = {cls.obsClass.kind: cls
                     for cls in flatiter((itersubclasses(shocRun), shocRun))}
 
-def cubeFactory(name):      # FIXME: not a factory
-    return namedCubeClasses.get(name, shocCube)
+def cubeFactory(kind):      # not really a factory
+    return namedObsClasses.get(kind, shocObs)
 
-def runFactory(name):
-    return namedRunClasses.get(name, shocRun)
+def runFactory(kind):
+    return namedRunClasses.get(kind, shocRun)
 
 
 def load(filenames, kind='science'):
     """
 
-    :param filenames:
-    :param kind:
-    :return:
+    Parameters
+    ----------
+    filenames
+    kind
+
+    Returns
+    -------
+
     """
-    cls = runFactory(kind)
-    # print(cls, '!')
-    run = cls(filenames=filenames, label=kind)
+    run = shocCube.load(filenames=filenames, kind=kind)
     return run

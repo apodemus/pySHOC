@@ -128,3 +128,16 @@ class ReadNoiseTable(np.ndarray):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_saturation(self, fn_fits):
         return self.get_readnoise(fn_fits)[-1]
+
+
+def get_readnoise_info(fn_or_header):
+    return ReadNoiseTable().get_readnoise(fn_or_header)
+
+def get_readnoise(fn_or_header):
+    return get_readnoise_info(fn_or_header)[0]
+
+def get_sensitivity(fn_or_header):
+    return get_readnoise_info(fn_or_header)[1]
+
+def get_saturation(fn_or_header):
+    return get_readnoise_info(fn_or_header)[2]
