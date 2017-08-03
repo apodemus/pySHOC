@@ -40,15 +40,20 @@ tsplt = TSplotter()             #TODO: attach to PhotResult class
 def quadadd(a, axis):
     return np.sqrt(np.square(a).sum(axis))
 
-def as_flux(mag, magerr=None, mag0=0):
+def as_flux(mag, mag_std=None, mag0=0):
     """Convert magnitudes to Fluxes"""
     flux = 10 ** ((mag0 - mag) / 2.5)
-    if magerr is None:
+    if mag_std is None:
         return flux
 
-    fluxerr = magerr * (np.log(10) / 2.5) * flux
+    fluxerr = mag_std * (np.log(10) / 2.5) * flux
     return flux, fluxerr
 
+def as_magnitude(flux, flux_std=None, mag0=0):
+    """Convert fluxes to magnitudes"""
+    mag = -2.5 * np.log10(flux) + mag0
+    mag_std = None
+    return mag, mag_std
 
 def extract_2Dfloat(table, colid, n):
     colix = range(1, n + 1)
@@ -154,6 +159,7 @@ class PhotRun(SelfAwareContainer):
 
         self.target_name = target_name
 
+        # FIXME: check if filenames are non-str sequence
         if len(filenames):
             itr = itt.zip_longest(filenames,
                                   databases or [],  # magnitudes database files
@@ -292,6 +298,7 @@ class PhotRun(SelfAwareContainer):
                 data[start:end, :obs.nstars] = obs.data[:, order]
                 std[start:end, :obs.nstars] = obs.std[:, order]
         except Exception as err:
+            print(str(err))
             embed()
             raise
 
@@ -532,7 +539,7 @@ class PhotResult(AutoFileToPath):
         yield from roundrobin(*blob)
 
 
-    def __new__(cls, *args):
+    def __new__(cls, *args, **kws):
         # this is here to handle initializing the object from an already existing
         # istance of the class
         if len(args) > 0 and isinstance(args[0], cls):
@@ -566,24 +573,27 @@ class PhotResult(AutoFileToPath):
         self.datafile = datafile
         self.coordfile = coordfile
 
-        # load timing data if available
         name_guess = self.fitspath.with_suffix('.time')
         self.timefile = first_exists(timefile, name_guess)
-        if self.timefile:
-            load_times(self.timefile)
 
         #optional ephemeris
         # self.ephem = ephem
 
         # load info from fitsfile if avaliable
         self.target_name, self.date, self.size = get_name_date(self.fitsfile)
-        # FIXME: self.date should be self.startdate
+        # FIXME: self.date should be self.startdate ???
 
+        # store data internally as masked array (Nframes, Nstars, Naps)
+        # init null data containers
         self.data = np.ma.empty((0, 0, 0))
         self.std = np.empty((0,0,0))
         self.timedata = np.empty(0)
 
-        # store data internally as masked array (Nstars, Npoints)
+        # load timing data if available
+        if self.timefile:
+            self.timedata = load_times(self.timefile)
+
+        # load data if available
         if exists(self.datafile):
             self.load_data()
             # self.load_times()
@@ -658,7 +668,7 @@ class PhotResult(AutoFileToPath):
     @property
     def reorder(self):
         if self._flx_sort and self.data.size:
-            order = list(self.data.mean(0).squeeze().argsort()[::-1])
+            order = list(self.data.mean(0)[:, -1].argsort()[::-1])
         else:
             order = list(range(self.nstars))
 
@@ -847,14 +857,14 @@ class PhotResult(AutoFileToPath):
         self.std = std.reshape(-1, nstars, naps)
         self.load_times()
 
-    def reccommend_ap(self):
+    def recommend_ap(self):
         # for multiaperture dbs. determine aperture with highest mean SNR
         snr = self.data / self.std
         ixap = int(np.ceil(snr.argmax(-1).mean()))
         return ixap
 
     def select_best_ap(self):
-        ixap = self.reccommend_ap()
+        ixap = self.recommend_ap()
         data = self.data[..., ixap:ixap+1]
         std = self.std[..., ixap:ixap+1]
         return data, std
@@ -1017,7 +1027,7 @@ class PhotResult(AutoFileToPath):
         if self.naps == 1:
             ixap = 0
         elif ixap is None:
-            ixap = self.reccommend_ap()
+            ixap = self.recommend_ap()
             logging.info('Choosing aperture %i (highest SNR)', ixap)
 
         # Reshape for plotting
