@@ -9,7 +9,7 @@ from astropy.coordinates.name_resolve import NameResolveError
 from recipes.io import warn
 from obstools.jparser import Jparser
 from decor.misc import persistant_memoizer
-from decor.profile.timers import timer
+from decor.profiler.timers import timer
 
 
 # get coordinate cache file
