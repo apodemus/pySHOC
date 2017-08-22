@@ -34,7 +34,7 @@ from .convert_keywords import KEYWORDS as kw_old_to_new
 
 # debugging
 from IPython import embed
-from decor.profile.timers import timer#, profiler
+from decor.profiler.timers import timer#, profiler
 
 # def warn(message, category=None, stacklevel=1):
 # return warnings.warn('\n'+message, category=None, stacklevel=1)
@@ -1146,6 +1146,7 @@ class shocRun(object):
 
 
     def zipper(self, keys, flatten=True):
+        # TODO: eliminate this function
 
         # NOTE: this function essentially accomplishes what the one-liner below does
         # attrs = list(map(operator.attrgetter(*keys), self))
@@ -1159,11 +1160,16 @@ class shocRun(object):
             return (tuple(keys),
                     list(zip(*([getattr(s, key) for s in self] for key in keys))))
 
-    def group_by(self, *keys):
+    def group_iter(self):
+        'todo'
+
+    def group_by(self, *keys, **kws):
         """
         Separate a run according to the attribute given in keys.
         keys can be a tuple of attributes (str), in which case it will seperate into runs with a unique combination
         of these attributes.
+
+        optional keyword: return_index
 
         Returns
         -------
@@ -1172,31 +1178,38 @@ class shocRun(object):
         """
         attrs = self.attrgetter(*keys)
         keys = OrderedSet(keys)
+        return_index = kws.get('return_index', False)
         if self.groupId == keys:  # is already separated by this key
             SR = StructuredRun(zip([attrs[0]], [self]))
             SR.groupId = keys
             # SR.name = self.name
-            return SR#, 0
+            if return_index:
+                return SR, dict(attrs[0], list(range(len(self))))
+            return SR
 
         atset = set(attrs)  # unique set of key attribute values
         atdict = OrderedDict()
-        if len(atset) == 1:  # all input files have the same attribute (key) value(s)
-            # flag = 0
-            atdict[attrs[0]] = self
+        idict = OrderedDict()
+        if len(atset) == 1:
+            # all input files have the same attribute (key) value(s)
             self.groupId = keys
+            atdict[attrs[0]] = self
+            idict[attrs[0]] = np.arange(len(self))
         else:  # key attributes are not equal across all shocObs
-            # flag = 1
             for ats in sorted(atset):
                 # map unique attribute values to shocObs (indices) with those attributes
                 l = np.array([attr == ats for attr in attrs])  # list for-loop needed for tuple attrs
                 eq_run = self[l]  # shocRun object of images with equal key attribute
                 eq_run.groupId = keys
                 atdict[ats] = eq_run   # put into dictionary
+                idict[ats], = np.where(l)
 
         SR = StructuredRun(atdict)
         SR.groupId = keys
         # SR.name = self.name
-        return SR#, flag
+        if  return_index:
+            return SR, idict
+        return SR
 
     def varies_by(self, *keys):
         """False if the run is homogeneous by keys and True otherwise"""
@@ -1222,8 +1235,8 @@ class shocRun(object):
     def sort_by(self, *keys, **kws):
         """
         Sort the cubes by the value of attributes given in keys,
-        kws can be attribute, callables pairs in which case sorting will be done according to value
-        returned by callable on given attribute.
+        kws can be (attribute, callable) pairs in which case sorting will be done according to value
+        returned by callable on a given attribute.
         """
         # FIXME: order of kws lost when passing as dict. not desirable.
         # NOTE: this is not a problem in python >3.5!! yay! https://docs.python.org/3/whatsnew/3.6.html
@@ -1588,6 +1601,23 @@ class shocRun(object):
 
 
     def coalign(self, align_on=0, first=10, flip=True, return_index=False, **findkws):
+        """
+        Search heuristic that finds the positional and rotational offset between
+        partially overlapping images.
+
+        Parameters
+        ----------
+        align_on
+        first
+        flip
+        return_index
+        findkws
+
+        Returns
+        -------
+
+        """
+
         # TODO: eliminate flip arg - this means figure out why the flip state
         # is being recorded erroneously. OR inferring the flip state
         # bork if no overlap ?
@@ -1635,33 +1665,31 @@ class shocRun(object):
     def coalignDSS(self, align_on=0, first=10, **findkws):
         from pySHOC.wcs import MatchDSS
 
-        sr = self.group_by('telescope')
+        sr, idict = self.group_by('telescope', return_index=True)
 
-        I = []
+        I = np.empty(len(self), 'O')
         P = np.empty((len(self), 3))
         FoV = np.empty((len(self), 2))
-
-        lens = list(map(len, sr.values()))
-        slices = list(map(slice, [0] + lens, np.cumsum(lens)))
         aligned_on = np.empty(len(sr), int)
+        # ensure that P, FoV maintains the same order as self
         for i, (tel, run) in enumerate(sr.items()):
-            sl = slices[i]
+            indices = idict[tel]
             images, fovs, ps, ali = run.coalign(first=first, return_index=True, **findkws)
-            aligned_on[i] = ali + sl.start
-            FoV[sl], P[sl] = fovs, ps
-            I.extend(images)
+            aligned_on[i] = indices[ali]
+            FoV[indices], P[indices] = fovs, ps
+            I[indices] = images
 
         # pick the DSS FoV to be slightly larger than the largest image
         fovDSS = np.ceil(FoV.max(0))
         dss = MatchDSS(self[align_on].coords, fovDSS, **findkws)
 
-        #return dss, I, FoV, P, slices, aligned_on
-
-        for i, a in enumerate(aligned_on):
+        for i, tel in enumerate(sr.keys()):
+            a = aligned_on[i]
             p = dss.match_image(I[a], FoV[a])
-            P[slices[i]] += p
+            P[idict[tel]] += p
 
-        return dss, I, FoV, P, slices#, aligned_on
+        return dss, I, FoV, P, idict
+
 
 
 ################################################################################
