@@ -16,7 +16,7 @@ import spiceypy as spice
 from obstools.airmass import Young94, altitude
 from recipes.string import minfloatfmt
 
-# from decor.profile import profiler
+# from decor.profiler import profiler
 # profiler = profile()
 
 def hms(t):

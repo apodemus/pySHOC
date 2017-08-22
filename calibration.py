@@ -6,7 +6,7 @@ from scipy.special import erf
 __all__ = ['GaussUni', 'PoissonGauss', 'PoissonGaussAdaptive', 'PoissonGaussUni', 'PoissonGaussUniAdaptive']
 
 
-# from decor.profile import profiler
+# from decor.profiler import profiler
 
 # @profiler.histogram()
 def GaussUni(x, mu, sigma, l):
@@ -181,7 +181,7 @@ if __name__ == '__main__':
 
     def profile(N=1e2):
         # from line_profiler import LineProfiler
-        from decor.profile import HLineProfiler
+        from decor.profiler import HLineProfiler
 
         # from recipes.io.tracewarn import warning_traceback_on
         # warning_traceback_on()

@@ -20,7 +20,7 @@
 
 # TODO: time / profile sections
 
-from decor.profile.timers import Chrono, timer, timer_extra
+from decor.profiler.timers import Chrono, timer, timer_extra
 chrono = Chrono()
 # NOTE do this first so we can profile import times
 
@@ -58,7 +58,7 @@ from ansi.table import Table as sTable
 
 # from ansi.progress import ProgressBar
 
-from decor.profile import profiler
+from decor.profiler import profiler
 # profiler = profile()
 # @profiler.histogram
 

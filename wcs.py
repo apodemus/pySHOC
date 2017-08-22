@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 
 from recipes.dict import AttrDict
 from obstools.phot.find import sourceFinder
-from decor.profile.timers import timer
+from decor.profiler.timers import timer
 
 from .utils import retrieve_coords, get_dss
 
@@ -116,7 +116,7 @@ def plot_transformed_image(ax, image, fov, p=(0, 0, 0), frame=False, **kws):
     # image = image / image.max()
     extent = np.c_[[0., 0.], fov]
     pixscale = np.divide(fov, image.shape)
-    extent -= 0.5 * pixscale[None].T  # adjust to pixel centers...
+    #extent -= 0.5 * pixscale[None].T  # adjust to pixel centers...
 
     # set colour limits
     vmin, vmax = np.percentile(image, (0.25, 99.75))
@@ -201,7 +201,7 @@ class MatchImages():
         # add 0s for angle grid
         z = np.zeros(grid.shape[1:])[None]
         grid = np.r_[grid, z]
-        logging.info("Doing search on (%.1f' x %.1f') (%d x %d) sky grid",
+        logging.info("Doing search on (%.1f' x %.1f') (%d x %d pix) sky grid",
                      *fov, yres, xres)
         r, ix, pGs = gridsearch_mp(objective1, (self.coords, coo), grid)
         logging.debug('Grid search optimum: %s', pGs)
@@ -209,7 +209,7 @@ class MatchImages():
         # match patterns
         cooGs = transform_yx(coo, pGs)
         ir, ic = match_constellation(self.coords, cooGs)
-        logging.info('Matched %d stars in constellation.', len(ir))
+        logging.info('Matched %d stars across images.', len(ir))
 
         # final alignment
         # pick a star to re-center coordinates on
@@ -260,7 +260,6 @@ class MatchDSS(MatchImages):
 
         if (coords is None):
             raise ValueError('Need object name or coordinates')
-        self.targetCoords = coords
 
         for serv in self._servers:
             self.hdu = get_dss(serv, coords.ra.deg, coords.dec.deg, fov)
@@ -269,6 +268,12 @@ class MatchDSS(MatchImages):
         # DSS data array
         data = self.hdu[0].data.astype(float)
         MatchImages.__init__(self, data, fov, **findkws)
+
+        # save target coordinate position
+        self.targetCoords = coords
+        self.targetCoordsPix = np.divide(self.data.shape, 2) + 0.5
+
+
 
     def build_wcs(self, cube, p, telescope=None):
         """
@@ -363,6 +368,7 @@ class MosaicPlotter():
         return self._ax
 
     def _world2pix(self, p, fov):
+        # convert fov to the DSS pixel coordinates (aplpy)
         if self.use_aplpy:
             scale_ratio = (fov / self.dss.fov)
             dsspix = scale_ratio * self.dss.data.shape
@@ -381,6 +387,9 @@ class MosaicPlotter():
         if name is None:
             name = 'image%i' % next(self._counter)
 
+        # convert fov to the DSS pixel coordinates (aplpy)
+        p, fov = self._world2pix(p, fov)
+
         # plot
         # image = image / image.max()
         self.plots[name] = pl = \
@@ -392,8 +401,8 @@ class MosaicPlotter():
         """Get corners relative to DSS coordinates"""
         c = np.array([[0, 0], fov])  # lower left, upper right
         corners = np.c_[c[0], c[:, 0], c[1], c[::-1, 1]].T  # all 4 clockwise
-        corners = transform_yx(corners, p)
-        return corners
+        corners = transform_yx(corners[:, ::-1], p)
+        return corners[:, ::-1]
 
     def update_lims(self, p, fov):
 
