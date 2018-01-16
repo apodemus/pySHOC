@@ -2,19 +2,21 @@
 Functions for time-stamping SHOC data
 """
 
+import logging
 from warnings import warn
 from urllib.error import URLError
 
 import numpy as np
 from astropy.time import Time, TimeDelta
-from astropy.table import Table as aTable       #Column
-from astropy.constants import c, G, M_sun   # M_sun = M_sun.value # Solar mass (kg)
+from astropy.table import Table as aTable  # Column
+from astropy.constants import c, G, M_sun  # M_sun = M_sun.value # Solar mass (kg)
 from astropy.coordinates import EarthLocation, FK5
 from astropy.coordinates.angles import Angle
 import spiceypy as spice
 
 from obstools.airmass import Young94, altitude
-from recipes.string import minfloatfmt
+from recipes.pprint import minimalNumericFormat
+
 
 # from decor.profiler import profiler
 # profiler = profile()
@@ -39,7 +41,7 @@ def fmt_hms(t, precision=None, sep='hms', short=None):
         exists
     sep: str
         seperator(s) to use for time representation
-    minimalist: bool or None
+    short: bool or None
         will strip unnecessary parts from the repr if True.
         eg: '0h00m15.4s' becomes '15.4s'
 
@@ -61,8 +63,8 @@ def fmt_hms(t, precision=None, sep='hms', short=None):
     if len(sep) == 1:
         sep = (sep, sep, '')
     if short is None:
-       short = (sep == 'hms')
-       # short representation only really useful if units given
+        short = (sep == 'hms')
+        # short representation only really useful if units given
 
     sexa = hms(t)
     precision = (0, 0, precision)
@@ -71,7 +73,7 @@ def fmt_hms(t, precision=None, sep='hms', short=None):
     for i, (n, p, s) in enumerate(zip(sexa, precision, sep)):
         last = (i == 2)
         ifill = bool(len(tstr)) * 2
-        part = minfloatfmt(n, p, ifill)
+        part = minimalNumericFormat(n, p, ifill)
         if short and not last and not float(part) and not len(tstr):
             continue
         tstr += (part + s)
@@ -80,27 +82,25 @@ def fmt_hms(t, precision=None, sep='hms', short=None):
 
 
 # ====================================================================================================
-def get_updated_iers_table(cache=True, verbose=True, raise_=True):       # TODO: rename
+def get_updated_iers_table(cache=True, raise_=True):  # TODO: rename
     """Get updated IERS data"""
-    from astropy.utils.iers import IERS_A, IERS_A_URL      # import IERS data class
+    from astropy.utils.iers import IERS_A, IERS_A_URL  # import IERS data class
     from astropy.utils.data import download_file
 
-    if verbose:
-        print('Updating IERS table...', )
+    logging.info('Updating IERS table.')
 
     # get IERS data tables from cache / download
     try:
         iers_a_file = download_file(IERS_A_URL, cache=cache)
-        iers_a = IERS_A.open(iers_a_file)                       # load data tables
-        if verbose:
-            print('Done')       # TODO: print in same line as verbose...
+        iers_a = IERS_A.open(iers_a_file)  # load data tables
+        logging.info('Done')
         return iers_a
     except URLError as err:
         if raise_:
             raise err
         warn('Unable to update IERS table due to the following exception:\n%s'
              '\nAre you connected to the internet? If not, try re-run with cache=True'
-             % err)      # TODO with traceback?
+             % err)  # TODO with traceback?
         return None
 
 
@@ -146,9 +146,9 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
     """
 
     tabc = ['NONE', 'LT', 'LT+S', 'CN', 'CN+S']
-    rabc = ['X'+s for s in tabc]
-    allowed_abc = tabc+rabc
-    abcorr = str(abcorr).replace(' ','').upper()
+    rabc = ['X' + s for s in tabc]
+    allowed_abc = tabc + rabc
+    abcorr = str(abcorr).replace(' ', '').upper()
     if abcorr in allowed_abc:
         ABCORR = abcorr
     else:
@@ -157,17 +157,16 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
              '(Abberation effects should be negligible anyway!)'
              ''.format(abcorr, allowed_abc))
 
-
     # TODO: do this when loading the module
     # load kernels:
-    SPK = '/home/hannes/repos/SpiceyPy/kernels/de430.bsp'          #ephemeris kernel : https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/
-    #TODO: automate finding latest kernels:  http://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/
-    LSK = '/home/hannes/repos/SpiceyPy/kernels/naif0012.tls'       #leap second kernel
+    SPK = '/home/hannes/repos/SpiceyPy/kernels/de430.bsp'  # ephemeris kernel : https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/
+    # TODO: automate finding latest kernels:  http://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/
+    LSK = '/home/hannes/repos/SpiceyPy/kernels/naif0012.tls'  # leap second kernel
     spice.furnsh(SPK)
     spice.furnsh(LSK)
 
     xyzObj = get_Obj_coords(t, coords, precess=precess)
-    xyzSun, xyzEarth = get_Earth_Sun_coords(t[:1], ABCORR)  #HACK for speed!!!!
+    xyzSun, xyzEarth = get_Earth_Sun_coords(t[:1], ABCORR)  # HACK for speed!!!!
 
     rd = romer_delay(xyzEarth, xyzObj)
     ed = einstein_delay(t.tt.jd)
@@ -188,10 +187,10 @@ def get_Earth_Sun_coords(t, ABCORR):
     system Barycenter at times t
     """
     FRAME = 'J2000'
-    OBSERVER = '0'                            # Solar System Barycenter (SSB)
+    OBSERVER = '0'  # Solar System Barycenter (SSB)
 
     N = len(t)
-    #TODO: vectorize??
+    # TODO: vectorize??
     xyzEarth = np.empty((N, 3), np.float128)
     xyzSun = np.empty((N, 3), np.float128)
     ltEarth = np.empty(N)
@@ -202,7 +201,7 @@ def get_Earth_Sun_coords(t, ABCORR):
         # Earth geocenter wrt SSB in J2000 coordiantes
         xyzEarth[i], ltEarth[i] = spice.spkpos(OBSERVER, et, FRAME, ABCORR, 'earth')
         # Sun heliocenter wrt SSB in J2000 coordiantes
-        xyzSun[i], ltSun[i]   = spice.spkpos(OBSERVER, et, FRAME, ABCORR, '10')
+        xyzSun[i], ltSun[i] = spice.spkpos(OBSERVER, et, FRAME, ABCORR, '10')
 
     return xyzSun, xyzEarth
 
@@ -221,14 +220,14 @@ def get_Obj_coords(t, coords, precess=False):
             precessed = coords.transform_to(FK5(equinox=t[0]))
             return precessed.cartesian.xyz
 
-        #TODO: EVERY
-        #TODO: INTERPOLATION?
+        # TODO: EVERY
+        # TODO: INTERPOLATION?
 
     N = len(t)
     xyzObj = np.empty((N, 3), np.float128)
 
     if precess is True:
-        #TODO: MULTIPROCESS FOR SPEED!!!!!?????
+        # TODO: MULTIPROCESS FOR SPEED!!!!!?????
         for i, t in enumerate(t):
             # bar.progress(i)
             # precess to observation date and time and then transform back to FK5 (J2000)
@@ -239,6 +238,7 @@ def get_Obj_coords(t, coords, precess=False):
 
     else:
         raise ValueError
+
 
 # ====================================================================================================
 def romer_delay(xyzEarth, xyzObj):
@@ -257,17 +257,19 @@ def romer_delay(xyzEarth, xyzObj):
 
     return delay
 
+
 # ====================================================================================================
 def einstein_delay(jd_tt):
     """
     Calculate Eistein delay in units of days
     """
     red_jd_tt = jd_tt - 2451545.0
-    g = np.radians(357.53 + 0.98560028 * red_jd_tt)       #mean anomaly of Earth
-    L_Lj = np.radians(246.11 + 0.90251792*red_jd_tt)      #Difference in mean ecliptic longitudea of the Sun and Jupiter
+    g = np.radians(357.53 + 0.98560028 * red_jd_tt)  # mean anomaly of Earth
+    L_Lj = np.radians(246.11 + 0.90251792 * red_jd_tt)  # Difference in mean ecliptic longitudea of the Sun and Jupiter
     delay = 0.001657 * np.sin(g) + 0.000022 * np.sin(L_Lj)
 
     return delay / 86400.
+
 
 # ====================================================================================================
 def shapiro_delay(xyzEarth, xyzSun, xyzObj):
@@ -276,15 +278,15 @@ def shapiro_delay(xyzEarth, xyzSun, xyzObj):
 
     https://en.wikipedia.org/wiki/Shapiro_delay
     """
-    Earth_Sun = xyzEarth - xyzSun                               # Earth to Sun vector
-    d_Earth_Sun = np.linalg.norm(Earth_Sun, axis=1)[None].T     # Earth to Sun distance
-    u_Earth_Sun = Earth_Sun / d_Earth_Sun                       # Earth to Sun unit vector
+    Earth_Sun = xyzEarth - xyzSun  # Earth to Sun vector
+    d_Earth_Sun = np.linalg.norm(Earth_Sun, axis=1)[None].T  # Earth to Sun distance
+    u_Earth_Sun = Earth_Sun / d_Earth_Sun  # Earth to Sun unit vector
 
     # dot product gives cosine of angle between Earth and Sun
     cosTheta = (u_Earth_Sun * xyzObj).sum(1)
 
     # Approximate for Shapiro delay
-    delay = (2*G*M_sun/c**3) * np.log(1-cosTheta)
+    delay = (2 * G * M_sun / c ** 3) * np.log(1 - cosTheta)
 
     # print(cosTheta)
     # print(2*G*M_sun/c**3)
@@ -317,15 +319,15 @@ def utc2bjd(times, coords):
     payload['ra'] = coords.ra.to_string('h', sep=' ')
     payload['dec'] = coords.dec.to_string(sep=' ')
 
-    #encode form data
+    # encode form data
     params = urllib.parse.urlencode(payload)
 
     # web form can only handle 1e4 times simultaneously
     if len(times) > 1e4:
-        'TODO' #split time array into chunks
+        'TODO'  # split time array into chunks
 
     # encode the times to url format str (urllib does not success convert newlines appropriately)
-    newline, spacer, joiner = '%0D%0A', '+',  '&'         # html POST code translations
+    newline, spacer, joiner = '%0D%0A', '+', '&'  # html POST code translations
     fixes = ('-', spacer), (':', spacer), (' ', spacer)
     ts = newline.join(times.iso)
     for fix in fixes:
@@ -350,7 +352,7 @@ def utc2bjd(times, coords):
     return bjd_tdb
 
 
-#****************************************************************************************************
+# ****************************************************************************************************
 class Time(Time):
     """
     Extends the astropy.time.core.Time class to include method that returns the time in hours.
@@ -367,15 +369,16 @@ class Time(Time):
 
     [1]     Shewchuk, 1997, Discrete & Computational Geometry 18(3):305-363
     """
+
     # TODO: HJD:
     # TODO: phase method...
 
     # ====================================================================================================
-    #@property
+    # @property
     def isosplit(self):
         """Split ISO time between date and time (from midnight)"""
         splitter = lambda x: tuple(x.split('T'))
-        dtype = [('utdate','U20'), ('utc','U20')]
+        dtype = [('utdate', 'U20'), ('utc', 'U20')]
         utdata = np.fromiter(map(splitter, self.utc.isot), dtype)
         return utdata
 
@@ -417,7 +420,7 @@ class Time(Time):
 
         if np.any(beyond):
             warn('{} / {} times are outside of range covered by IERS table.'
-                ''.format(beyond.sum(), len(beyond)))
+                 ''.format(beyond.sum(), len(beyond)))
         return beyond
 
     # =========================================================================================================================
@@ -472,7 +475,11 @@ def timingFactory(cube):
 def unknown():
     pass
 
+
 # ****************************************************************************************************
+class NoGPSTriggerProvided(Exception):
+    pass
+
 
 class Duration(float):
     @property
@@ -484,7 +491,8 @@ class Trigger():
     def __init__(self, header):
         self.mode = header['trigger']
         self.start = header.get('gpsstart')
-        # self.start is now either None (older SHOC data), or a string time representation
+        # self.start is now either None (older SHOC data), or a str representing
+        # start time
 
     def __str__(self):
         return self.mode
@@ -519,12 +527,12 @@ class Trigger():
 
     def is_external(self):
         return self.mode.startswith('External')
+
     is_gps = is_external
 
     def is_external_start(self):
         return self.is_gps() and self.mode.endswith('Start')
     # is_gps_all = is_external_start
-
 
 
 # ****************************************************************************************************
@@ -542,7 +550,7 @@ class shocTimingBase():
         UTC : Universal Coordinate Time (array)
         LMST : Local mean sidereal time
         JD : Julian Date
-        BJD : Baryocentric julian day
+        BJD : Barycentric julian day
 
         Parameters
         ----------
@@ -556,74 +564,117 @@ class shocTimingBase():
         # Older SHOC data (pre 2016)
         # --------------------------
         # Times recorded in FITS header are as follows:
-        #   Mode: 'Internal'        : (FRAME, DATE) Time at the end of the first exposure (file creation timestamp)
-        #                           : The time here is rounded to the nearest second of computer clock
-        #                           :   ==> uncertainty of +- 0.5 sec (for absolute timing)
-        #                           : DATE-OBS not recorded
-        #   Mode: 'External Start'  : EXPOSURE - exposure time (sec)
-        #                             WARNING: KCT, DATE-OBS not recorded
-        #                           : WARNING: start time not recorded
-        #   Mode: 'External'        : WARNING: KCT, DATE-OBS not recorded
-        #                           : EXPOSURE stores the total accumulated exposure time
+        #   Mode: 'Internal':
+        #     * DATE-OBS not recorded
+        #     * (FRAME, DATE) Time at the end of the first exposure (file
+        #       creation timestamp)
+        #     * The time here is rounded to the nearest second of computer clock
+        #       ==> uncertainty of +- 0.5 sec (for absolute timing)
+        #
+        #   Mode: 'External Start':
+        #     * EXPOSURE - exposure time (sec)
+        #     * KCT, DATE-OBS **not recorded**
+        #     * start time **not recorded**
+        #
+        #   Mode: 'External':
+        #     * KCT, DATE-OBS **not recorded**
+        #     * EXPOSURE - erroneously stores the total accumulated exposure time
 
         # Recent SHOC data (post software upgrade)
         # ----------------------------------------
-        #   Mode: 'Internal'        : DATE-OBS  - start time accurate to microsec
-        #   Mode: 'External [Start]': GPSSTART  - GPS start time (UTC; external)
-        #                           : KCT       - Kinetic Cycle Time
-        #   Mode: 'External'        : GPS-INT   - GPS trigger interval (msec)
+        #   Mode: 'Internal':
+        #     * DATE-OBS  - start time accurate to microsec
+        #   Mode: 'External [Start]':
+        #     * GPSSTART  - GPS start time (UTC; external)
+        #     * KCT       - Kinetic Cycle Time
+        #   Mode: 'External':
+        #     * GPS-INT   - GPS trigger interval (msec)
 
         self.filename = cube.get_filename()
         self.header = header = cube[0].header
+        self.data = None        # calculated in `set` method
         self.location = location or self.sutherland
 
         # Timing trigger mode
         self.trigger = Trigger(header)
-        # self.trigger_mode = header['trigger']
-        # self.trigger = header.get('gpsstart')  # None for older SHOC data
-
 
         # Date (midnight UT)
         date_str = header['date'].split('T')[0]  # or FRAME
         self.utdate = Time(date_str)  # this should at least be the correct date!
 
         # exposure time
-        # NOTE: The attributes `exp` and `kct` will be None only if we expect the user to
-        #  provide them explicitly (applicable only to older SHOC data)
-        self.exp, self.kct = self.get_kct()
+        # NOTE: The attributes `exp` and `kct` will be None only if we need
+        # the user to provide them explicitly (applicable only to older SHOC data)
+        self.texp, self.kct = self.get_kct()
         self.nframes = cube.shape[-1]
 
+        # stamps
+        self._t0 = None
         self._t0mid = None
         self._td_kct = None
-
-        # self.t0mid, td_kct = self.get_time_data()
-        # self.timeDeltaSequence = td_kct * np.arange(self.nframes, dtype=float)
 
     def get_kct(self):
         return self.header['exposure'], self.header['kct']
 
+    def get_tdead(self):
+        # dead (readout) time between exposures in s
+        # NOTE: deadtime should always the same value unless the user has (foolishly) changed
+        # NOTE: the vertical clock speed. TODO: MAYBE CHECK stack_header['VSHIFT']
+        # WARNING: EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME TRANSFER MODE!
+        return 0.00676
+
     # NOTE: the following attributes are accessed as properties to account for the
     # case of (old) GPS triggered data in which the frame start time and kct
-    # are not available upon initialization (they are missing in the header)
+    # are not available upon initialization (they are missing in the header).
+    # If missing they will be calculated upon accessing the attribute.
     @property
     def duration(self):
+        """Duration of the observation"""
         if self.kct:
             return Duration(self.nframes * self.kct)
 
+    @property
+    def t0(self):
+        """time stamp for the 0th frame start"""
+        if self._t0 is None:
+            self._t0, self._td_kct = self.get_time_data()
+        return self._t0
+
+    @property
+    def t0repr(self):
+        """
+        Representative str for `t0`. For printing run info before timestamp
+        has been set.
+
+        eg: '2015-02-24 18:15:36.5'
+        or: 'unknown' if GPS trigger needs to be set by user (old SHOC data)
+
+        """
+        try:
+            dt = self.t0.to_datetime()
+            # 1 decimal precision for seconds
+            s = round(dt.second + dt.microsecond / 1e6, 1)
+            return dt.strftime('%Y-%m-%d %H:%M:') + str(s)
+
+        except NoGPSTriggerProvided as err:
+            from ansi import as_ansi
+            return as_ansi('unknown', 'red')
 
     @property
     def t0mid(self):
+        """time stamp for the 0th frame mid exposure"""
         if self._t0mid is None:
-            self._t0mid, self._td_kct = self.get_time_data()
+            self._t0mid = self.t0 + 0.5 * self.td_kct
         return self._t0mid
 
     @property
     def td_kct(self):
-        if self._t0mid is None:
-            self._t0mid, self._td_kct = self.get_time_data()
+        """Kinetic Cycle Time as a astropy.time.TimeDelta object"""
+        if self._t0 is None:
+            self._t0, self._td_kct = self.get_time_data()
         return self._td_kct
 
-    def get_time_data(self):  #TODO: rename
+    def get_time_data(self):  # TODO: rename
         """
         Return the mid time of the first frame in UTC and the cycle time (exposure + dead time) as
         TimeDelta object
@@ -637,27 +688,20 @@ class shocTimingBase():
         t0 = Time(tStart, format='isot', scale='utc', precision=9, location=self.location)
         # NOTE: TimeDelta has higher precision than Quantity
         td_kct = TimeDelta(self.kct, format='sec')
-        tmid = t0 + 0.5 * td_kct  # midframe time for first frame
 
-        return tmid, td_kct
+        return t0, td_kct
 
+    def set(self, t0, iers_a=None, coords=None):  # TODO: corrections):
 
-    # def get_timing_array(self, t0):
-    #     t_kct = round(self.get_kct()[1], 9)                     #numerical kinetic cycle time in sec (rounded to nanosec)
-    #     td_kct = td_kct * np.arange( self.shape[0], dtype=float )
-    #     t = t0 + td_kct                         #Time object containing times for all framesin the cube
-    #     return t
-
-
-    def set(self, t0, iers_a=None, coords=None):        # TODO: corrections):
-
-        # astropy.time.Time object containing time stamps for all frames in the cube
+        # create time stamps
         timeDeltaSequence = self.td_kct * np.arange(self.nframes, dtype=float)
         t = t0 + timeDeltaSequence
+        # `t` is an astropy.time.Time instance containing time stamps for all
+        # frames in the cube
 
         # set leap second offset from most recent IERS table
         delta, status = t.get_delta_ut1_utc(iers_a, return_status=True)
-        if np.any(status == -2):  # TODO: verbose?
+        if np.any(status == -2):
             warn('Using predicted leap-second values from IERS.')
         t.delta_ut1_utc = delta
 
@@ -698,7 +742,7 @@ class shocTimingBase():
         timeData.gjd = t.tcg.jd  # geocentric julian date
 
         # do barycentrization
-        if (coords is not None) and (self.location is not None):  # verbose to avoid  #quantity.py:892: FutureWarning
+        if (coords is not None) and (self.location is not None):  # verbose syntax to avoid  #quantity.py:892: FutureWarning
             # barycentric julian date (with light travel time corrections)
             bjd = light_time_corrections(t, coords, precess='first', abcorr=None)
             timeData.bjd = bjd
@@ -724,8 +768,10 @@ class shocTimingBase():
             return delimiter.join(colheads)
 
         # print( 'Writing timing data to file...' )
-        TKW = ['utdate', 'uth', 'utsec', 'lmst', 'altitude', 'airmass', 'jd', 'gjd', 'bjd']
-        fmt = ('%-10s', '%-12.9f', '%-12.6f', '%-12.9f', '%-12.9f', '%-12.9f', '%-18.9f', '%-18.9f', '%-18.9f')
+        TKW = ['utdate', 'uth', 'utsec', 'lmst', 'altitude', 'airmass',
+               'jd', 'gjd', 'bjd']
+        fmt = ('%-10s', '%-12.9f', '%-12.6f', '%-12.9f', '%-12.9f', '%-12.9f',
+               '%-18.9f', '%-18.9f', '%-18.9f')
         formats = dict(zip(TKW, fmt))
 
         table = aTable(self.data[TKW])
@@ -757,27 +803,25 @@ class shocTimingBase():
         # if use_iraf:
         #     link_to_short_name_because_iraf_sux(timefile, count, 'time')
 
+        # else:
+        # for i, tkw in enumerate(TKW):
+        ##write each time sequence to a separate file...
+        # fn = '{}.{}'.format(self.get_filename(1,0), tkw)
+        # if tkw in TKW_sf:
+        # if fn.endswith('uth'): fn.replace('uth', 'utc')
+        # np.savetxt( fn, T[i], fmt='%.10f' )
 
-            # else:
-            # for i, tkw in enumerate(TKW):
-            ##write each time sequence to a separate file...
-            # fn = '{}.{}'.format(self.get_filename(1,0), tkw)
-            # if tkw in TKW_sf:
-            # if fn.endswith('uth'): fn.replace('uth', 'utc')
-            # np.savetxt( fn, T[i], fmt='%.10f' )
-
-
-    def stamp(self, j, t0=None, coords=None, verbose=False):
-        """Timestamp the header """
-        if verbose:
-            print('Updating the starting times for datacube {} ...'.format(self.filename))
-            # FIXME: repeat print not necessary
+    def stamp(self, j, t0=None, coords=None):
+        """Timestamp the header"""
+        # FIXME: repeat print not necessary
+        logging.info('Updating the starting times for datacube %s ...',
+                     self.filename)
 
         header = self.header
         timeData = self.data
 
         from IPython import embed
-        print('timing.stamp' * 50)
+        logging.debug('timing.stamp' * 50)
         embed()
 
         # update timestamp in header
@@ -800,7 +844,6 @@ class shocTimingBase():
         # header['TIMECORR'] = ( True, 'Timing correction done' )        #imutil.hedit(imls[j], 'TIMECORR', True, add=1, ver=0)                                       #Adds the keyword 'TIMECORR' to the image header to indicate that timing correction has been done
         # header.add_history('Timing information corrected at %s' %str(datetime.datetime.now()), before='HEAD' )            #Adds the time of timing correction to header HISTORY
 
-
     # def set_airmass( self, coords=None, lat=-32.376006 ):
     # """Airmass"""
     # if coords is None:
@@ -820,9 +863,11 @@ class shocTimingBase():
     # z = np.pi/2 - self.altitude
     # self.data.airmass = Young94(z)
 
+
 # ****************************************************************************************************
 class shocTimingNew(shocTimingBase):
     pass
+
 
 # ****************************************************************************************************
 class shocTimingOld(shocTimingBase):
@@ -839,14 +884,9 @@ class shocTimingOld(shocTimingBase):
 
         # GPS Triggering (External or External Start)
         elif self.trigger.is_gps():
-            t_dead = 0.00676
-            # dead (readout) time between exposures in s
-            # NOTE: deadtime should always the same value unless the user has (foolishly) changed
-            # NOTE: the vertical clock speed. TODO: MAYBE CHECK stack_header['VSHIFT']
-            # WARNING: EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME TRANSFER MODE!
-
             if self.trigger.is_external_start():  # External Start
                 t_exp = stack_header['EXPOSURE']  # exposure time in sec as in header
+                t_dead = self.get_tdead()
                 t_kct = t_dead + t_exp  # Kinetic Cycle Time
             else:
                 # trigger mode external - exposure and kct needs to be provided at terminal through -k
@@ -857,7 +897,7 @@ class shocTimingOld(shocTimingBase):
 
         return t_exp, t_kct
 
-    def get_time_data(self, verbose=False):
+    def get_time_data(self):
         """
         Extract ralavent time data from the FITS header.
 
@@ -871,7 +911,7 @@ class shocTimingOld(shocTimingBase):
         # date_str = header['DATE'].split('T')[0]
         # utdate = Time(date_str)     #this should at least be the correct date!
 
-        t_exp, t_kct = self.exp, self.kct
+        t_exp, t_kct = self.texp, self.kct
         td_kct = TimeDelta(t_kct, format='sec')  # NOTE: TimeDelta has higher precision than Quantity
         # td_kct = t_kct * u.sec
 
@@ -881,7 +921,11 @@ class shocTimingOld(shocTimingBase):
             #       in header FRAME is rounded to the nearest second
             # time for end of first frame
             utf = Time(header['DATE'],  # or FRAME
-                       format='isot', scale='utc', precision=9, location=self.location)
+                       format='isot', scale='utc',
+                       # use nano-second precision internally, although time
+                       # stamp in header is only micro-second accuracy
+                       precision=9,
+                       location=self.location)
             t0mid = utf - 0.5 * td_kct  # mid time of first frame
             # return  tmid, td_kct
 
@@ -890,28 +934,25 @@ class shocTimingOld(shocTimingBase):
                 t0 = self.utdate + self.trigger.start
                 t0 = Time(t0.isot, format='isot', scale='utc', precision=9, location=self.location)
                 t0mid = t0 + 0.5 * td_kct  # set t0 to mid time of first frame
-                # return tmid, td_kct
             else:
-                raise ValueError('No GPS triggers provided for %s! '
-                                 'Please set self.trigger.start' % self.filename)
+                raise NoGPSTriggerProvided(
+                        'No GPS triggers provided for %r. Please set '
+                        'self.trigger.start' % self.filename)
 
         # stack_hdu.flush(output_verify='warn', verbose=1)
         # IF TIMECORR --> NO NEED FOR GPS TIMES TO BE GIVEN EXPLICITLY
-
-        # logging.debug()
-        if verbose:
-            print('{} : TRIGGER is {}. tmid = {}; KCT = {} sec'
-                  ''.format(self.filename, self.trigger.mode.upper(), t0mid, t_kct))
+        logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',
+                  self.filename, self.trigger.mode.upper(), t0mid, t_kct)
 
         return t0mid, td_kct
 
-    def stamp(self, j, t0=None, coords=None, verbose=False):
+    def stamp(self, j, t0=None, coords=None):
 
-        shocTimingBase.stamp(self, j, t0, coords, verbose)
+        shocTimingBase.stamp(self, j, t0, coords)
 
         header = self.header
         header['KCT'] = (self.kct, 'Kinetic Cycle Time')  # set KCT in header
-        header['EXPOSURE'] = (self.exp, 'Integration time')  # set in header
+        header['EXPOSURE'] = (self.texp, 'Integration time')  # set in header
         if t0:
             # also set DATE-OBS keyword
             header['DATE-OBS'] = str(t0)
@@ -919,6 +960,3 @@ class shocTimingOld(shocTimingBase):
                 # Set correct (GPS triggered) start time in header
                 header['GPSSTART'] = (str(t0), 'GPS start time (UTC; external)')
                 # TODO: OR set empty?
-
-
-

@@ -24,7 +24,6 @@ from recipes.set import OrderedSet
 from recipes.string import rreplace
 from ansi.table import Table as sTable
 
-
 # TODO: choose which to use for timing: spice or astropy
 # from .io import InputCallbackLoop
 from .utils import retrieve_coords, convert_skycooords
@@ -34,7 +33,8 @@ from .convert_keywords import KEYWORDS as kw_old_to_new
 
 # debugging
 from IPython import embed
-from decor.profiler.timers import timer#, profiler
+from decor.profiler.timers import timer  # , profiler
+
 
 # def warn(message, category=None, stacklevel=1):
 # return warnings.warn('\n'+message, category=None, stacklevel=1)
@@ -46,20 +46,48 @@ from decor.profiler.timers import timer#, profiler
 # TODO
 # __all__ = ['']
 
-#TODO: can you pickle these classes
+# TODO: can you pickle these classes
 #
+
+# def attrgetter_default(*attrs, **kw):
+#     """
+#     Like attrgetter, but defaults to None (or specified default) if attr
+#     doesn't exist.
+#     Always returns tuple, even if only one in attrs (unlike attrgetter)
+#     """
+#     default = kw.pop('default', None)
+#     if kw:
+#         raise TypeError("attrgetter_default() got unexpected "
+#             "keyword argument(s): %r" % sorted(kw))
+#     def fn(obj):
+#         getter = lambda attr: getattr(obj, attr, default)
+#         return tuple(map(getter, attrs))
+#     return fn
+
 
 def median_scaled_median(data, axis):
     """"""
-    frame_med = np.median(data, (1,2))[:, None, None]
+    frame_med = np.median(data, (1, 2))[:, None, None]
     scaled = data / frame_med
     return np.median(scaled, axis)
 
 
-def mad(data, data_median=None):
+def mad(data, data_median=None, axis=None):
+    """
+    Median absolute deviation
+
+    Parameters
+    ----------
+    data
+    data_median
+
+    Returns
+    -------
+
+    """
     if data_median is None:
-        data_median = np.median(data, 0)
-    return np.median(np.abs(data - data_median), 0)
+        data_median = np.median(data, axis)
+    return np.median(np.abs(data - data_median), axis)
 
 
 def apply_stack(func, *args, **kws):
@@ -76,6 +104,7 @@ class Date(datetime.date):
     of the class representation format, when print is called on, for eg. a tuple
     containing a date_time object.
     """
+
     def __repr__(self):
         return str(self)
 
@@ -84,16 +113,15 @@ class Date(datetime.date):
 class shocHDU(PrimaryHDU):
     def __init__(self, data=None, header=None, do_not_scale_image_data=False,
                  ignore_blank=False, uint=True, scale_back=None):
-
         # convert to shocHeader
         header = shocHeader(header)
 
         super(PrimaryHDU, self).__init__(
-            data=data, header=header,
-            do_not_scale_image_data=do_not_scale_image_data,
-            uint=uint,
-            ignore_blank=ignore_blank,
-            scale_back=scale_back)
+                data=data, header=header,
+                do_not_scale_image_data=do_not_scale_image_data,
+                uint=uint,
+                ignore_blank=ignore_blank,
+                scale_back=scale_back)
 
 
 class shocNewHDU(shocHDU):
@@ -123,36 +151,69 @@ class shocOldHDU(shocHDU):
 #         speedMHz = int(round(speed / 1.e6))
 #
 #         # CCD mode
-#         self.preAmpGain = header['PREAMP']       # FIXME: use seperately.....
+#         self.preAmpGain = header['PREAMP']       # FIXME: use separately.....
 #         self.outAmpMode = header['OUTPTAMP']
+
+class PPrintHelper():
+    # handle default attributes for `pprint` and `get_instrumental_setup`
+    _default_attrs = [('shape', ),
+                      ('binning', ),
+                      ('preAmpGain', ),
+                      ('outAmpMode', ),
+                      ('emGain', ),
+                      ('timing.trigger.mode', 'trigger.mode'),
+                      ('timing.t0repr', 't0 (UTC)'),
+                      ('timing.duration', 'duration'),
+                      ('timing.texp', 'tExp (s)'), ]  # 'ron'
+
+    _nullGainStr = '--'
+
+    def __init__(self, attrs=None):
+
+        if attrs is None:
+            attrs = self._default_attrs
+
+        self.attrs, self.headers = [], []
+        for attr in attrs:
+            self.add_attr(*attr)
+
+    def add_attr(self, attr, header=None):
+
+        if not isinstance(attr, str):
+            raise ValueError('Attribute must be a str')
+
+        if header is None:
+            header = attr
+
+        # avoid duplication
+        if attr in self.attrs:
+            return
+
+        self.attrs.append(attr)
+        self.headers.append(header)
 
 
 class shocObs(HDUList):
     """
-    Extend the hdu.hdulist.HDUList class to perform simple tasks on the image stacks.
+    Extend the hdu.hdulist.HDUList class to perform simple tasks on the image
+    stack.
     """
     kind = 'science'
     location = 'sutherland'
-    # default attributes for __repr__ / get_instrumental_setup
-    _pprint_attrs = ['binning', 'shape', 'preAmpGain', 'outAmpMode', 'emGain',
-                     ]  # 'ron'
-    _nullGainStr = '--'
+
+    pprinter = PPrintHelper()
+
 
     @classmethod
-    def set_pprint(cls, attrs):
-        # TODO: safety checks - need abc for this? or is that overkill?
-        cls._pprint_attrs = attrs
-
-    @classmethod
-    def load(cls, fileobj, mode='update', memmap=False, save_backup=False, **kwargs):
+    def load(cls, fileobj, mode='update', memmap=False, save_backup=False,
+             **kwargs):
         """
-        Load shocObs from file
+        Load `shocObs` instance from file
         """
         return cls._readfrom(fileobj=str(fileobj), mode=mode, memmap=memmap,
                              save_backup=save_backup, ignore_missing_end=True,
                              # do_not_scale_image_data=True,
                              **kwargs)
-
 
     def __init__(self, hdus=None, file=None):
 
@@ -166,15 +227,19 @@ class shocObs(HDUList):
         if self.basename:
             self.basename = self.basename.replace('.fits', '')
 
-        # if len(self):   # FIXME: either remove these lines from init or detect new file write. or ??
+        # if len(self):
+        #  FIXME: either remove these lines from init or detect new file write. or ??
         # Load the important header information as attributes
-        self.instrumental_setup()   # NOTE: fails on self.writeto
+        self.instrumental_setup()  # NOTE: fails on self.writeto
+
         # Initialise timing class
         timingClass = timingFactory(self)
         self.timing = timingClass(self)
         # NOTE: this is a hack that allows us to set the timing associated methods dynamically
         self.kct = self.timing.kct
-        # NOTE: Set this attribute here so the cross matching algorithm works. inherit from the timing classes directly to avoid the previous line
+        # NOTE: Set this attribute here so the cross matching algorithm works.
+        # NOTE: maybe inherit from the timing classes directly to avoid the previous line
+
         # except ValueError as err:
         #     if str(err).startswith('No GPS triggers provided'):
         #         pass
@@ -183,22 +248,19 @@ class shocObs(HDUList):
         # else:
         #     warn('Corrupted file: %s' % self.basename)
 
-
         # except Exception as err:
-            # import traceback
-            # warnings.warn('%s: %s.__init__ failed with: %s' %
-            #               (self.basename, self.__class__.__name__, str(err)))
-            # pass
-            # print('FAIL!! '*10)
+        # import traceback
+        # warnings.warn('%s: %s.__init__ failed with: %s' %
+        #               (self.basename, self.__class__.__name__, str(err)))
+        # pass
+        # print('FAIL!! '*10)
         # print(err)
         # embed()
-
-
 
         # self.filename_gen = FilenameGenerator(self.basename)
         # self.trigger = None
 
-    def __repr__(self):
+    def __str__(self):
         filename, dattrs, values = self.get_instrumental_setup()
         attrRep = map('%s = %s'.__mod__, zip(dattrs, values))
         clsname = self.__class__.__name__
@@ -231,14 +293,13 @@ class shocObs(HDUList):
         if self.is_EM:
             return self._emGain
         else:
-            return self._nullGainStr # for display
+            return self.pprinter._nullGainStr  # for display
 
     # @property
     # def is_old():
 
     # @property
     # def ron(self):
-
 
     def get_filename(self, with_path=False, with_ext=True, suffix=(), sep='.'):
 
@@ -273,7 +334,7 @@ class shocObs(HDUList):
 
         # date from header
         date, time = header['DATE'].split('T')
-        self.date = Date(*map(int, date.split('-'))) # oldSHOC: file creation date
+        self.date = Date(*map(int, date.split('-')))  # oldSHOC: file creation date
         # starting date of the observing run --> used for naming
         h = int(time.split(':')[0])
         namedate = self.date - datetime.timedelta(int(h < 12))
@@ -293,7 +354,7 @@ class shocObs(HDUList):
         # subrect stores the sub-region of the full CCD array captured for this obs
         # xsub, ysub = (xb, xe), (yb, ye) = \
         xsub, ysub = self.subrect.reshape(-1, 2) // self.binning
-        self.sub = np.array([xsub, ysub[::-1]]) # for some reason the ysub order is reversed
+        self.sub = np.array([xsub, ysub[::-1]])  # for some reason the ysub order is reversed
         self.subSlices = list(map(slice, *self.sub.T))
 
         # readout speed
@@ -301,16 +362,16 @@ class shocObs(HDUList):
         self.preAmpSpeed = speedMHz = int(round(speed / 1.e6))
 
         # CCD mode
-        self.preAmpGain = header['PREAMP']          # TODO: self.mode.preamp.gain ??
-        self.outAmpModeLong = header['OUTPTAMP']    # TODO: self.mode.outamp ??
+        self.preAmpGain = header['PREAMP']  # TODO: self.mode.preamp.gain ??
+        self.outAmpModeLong = header['OUTPTAMP']  # TODO: self.mode.outamp ??
         self.acqMode = header['ACQMODE']
 
         # gain
-        self._emGain = header.get('gain', None)       # should be printed as '--' when mode is CON
+        self._emGain = header.get('gain', None)  # should be printed as '--' when mode is CON
         self.outAmpMode = 'CON' if self.outAmpModeLong.startswith('C') else 'EM'
-        self.is_EM = (self.outAmpMode == 'EM')      # self.outamp.mode.is_EM()
-        self.mode = '{} MHz, PreAmp @ {}, {}'.format(speedMHz, self.preAmpGain, self.outAmpMode) #TODO: str(self.mode)
-        self.mode_trim = '{}MHz{}{}'.format(speedMHz, self.preAmpGain, self.outAmpMode) #TODO: self.mode.suffix
+        self.is_EM = (self.outAmpMode == 'EM')  # self.outamp.mode.is_EM()
+        self.mode = '{} MHz, PreAmp @ {}, {}'.format(speedMHz, self.preAmpGain, self.outAmpMode)  # TODO: str(self.mode)
+        self.mode_trim = '{}MHz{}{}'.format(speedMHz, self.preAmpGain, self.outAmpMode)  # TODO: self.mode.suffix
 
         # TODO
         # if self.is_EM and (self._emGain is not None):
@@ -322,7 +383,7 @@ class shocObs(HDUList):
 
         # orientation
         self.flip_state = self.flipy, self.flipx = \
-            tuple(header['FLIP' + s] for s in 'YX') # NOTE: row, column order
+            tuple(header['FLIP' + s] for s in 'YX')  # NOTE: row, column order
         # WARNING: flip state wrong for old shoc data : TODO confirm this
 
         # Timing
@@ -343,7 +404,7 @@ class shocObs(HDUList):
         # 'KCT', 'EXPOSURE', 'GPSSTART'
 
         # self.kct = header.get('kct')   #will only work for internal triggering.
-        # self.exp = header.get('exposure')
+        # self.texp = header.get('exposure')
 
         # telescope
         # self.telescope = header['telescope']
@@ -393,27 +454,22 @@ class shocObs(HDUList):
     def has_coords(self):
         return self.coords is not None
 
-    def get_instrumental_setup(self, attrs=None):
-        # TODO: YOU CAN MAKE THIS __REPR__????????
+    def get_instrumental_setup(self, attrs=None, headers=None):
         # TODO: units
 
         filename = self.get_filename() or '<Unsaved>'
-        attrNames = self._pprint_attrs[:] if (attrs is None) else attrs
-        attrDisplayNames = attrNames[:] #.upper()
+        attrNames, attrDisplayNames = attrs, headers
+        if attrs is None:
+            attrNames = self.pprinter.attrs[:]
 
-        # get timing attributes if available
-        timingAttrNames = ['trigger', 'kct', 'duration.hms']
-        if hasattr(self, 'timing'):
-            attrNames.extend(
-                map('timing.%s'.__mod__, timingAttrNames))
-            attrDisplayNames.extend(
-                (t.split('.')[0] for t in timingAttrNames))
+        if headers is None:
+            attrDisplayNames = self.pprinter.headers[:]
 
-
+        # check correct number of attrs / headers
+        assert len(attrNames) == len(attrDisplayNames)
         attrVals = operator.attrgetter(*attrNames)(self)
 
-        return filename, attrDisplayNames, attrVals
-
+        return filename, attrDisplayNames, attrNames, attrVals
 
     def get_field_of_view(self, telescope=None, unit='arcmin', with_focal_reducer=False):
         """
@@ -438,22 +494,23 @@ class shocObs(HDUList):
 
         """
         # Field of view in arcmin
-        fov74 = (1.29, 1.29);   fov74r = (2.79, 2.79)  # with focal reducer
+        fov74 = (1.29, 1.29);
+        fov74r = (2.79, 2.79)  # with focal reducer
         fov40 = (2.85, 2.85)
-        #fov30 = (3.73, 3.73)
+        # fov30 = (3.73, 3.73)
 
         # PS. welcome to the new millennium, we use the metric system now
         if telescope is None:
             telescope = self.header.get('telescop')
 
         telescope = str(telescope)
-        telescope = telescope.rstrip('inm') # strip "units" in name
+        telescope = telescope.rstrip('inm')  # strip "units" in name
         if with_focal_reducer:
             fov = {'74': fov74r, '1.9': fov74r}.get(telescope)
         else:
-            fov = {#'30': fov30, '0.75': fov30,
-                   '40': fov40, '1.0': fov40, '1': fov40,
-                   '74': fov74, '1.9': fov74}.get(telescope)
+            fov = {  # '30': fov30, '0.75': fov30,
+                '40': fov40, '1.0': fov40, '1': fov40,
+                '74': fov74, '1.9': fov74}.get(telescope)
         if fov is None:
             raise ValueError('Please specify telescope to get field of view.')
 
@@ -477,7 +534,6 @@ class shocObs(HDUList):
         return self.get_field_of_view(telescope, unit, with_focal_reducer) / self.ishape
 
     get_plate_scale = get_pixel_scale
-
 
     def cross_check(self, frame2, key, raise_error=0):
         """
@@ -510,7 +566,7 @@ class shocObs(HDUList):
                 header['FLIP%s' % yx] = int(not self.flip_state[axis])
 
         self.flip_state = tuple(header['FLIP%s' % s] for s in ['YX'])
-        #FIXME: avoid this line by making flip_state a list
+        # FIXME: avoid this line by making flip_state a list
 
     @property
     def is_subframed(self):
@@ -530,7 +586,6 @@ class shocObs(HDUList):
         subext = 'sub{}x{}'.format(re - rb, ce - cb)
         outname = self.get_filename(1, 1, subext)
         fileobj = pyfits.file._File(outname, mode='ostream', overwrite=True)
-
 
         hdu = PrimaryHDU(data=data, header=header)
         stack = self.__class__(hdu, fileobj)
@@ -650,7 +705,6 @@ class shocObs(HDUList):
 
         return count
 
-
     def get_name_dict(self):
 
         # get nice representation of Kinetic Cycle Time
@@ -672,7 +726,6 @@ class shocObs(HDUList):
     # def writeto(self, fileobj, output_verify='exception', overwrite=False, checksum=False):
     #     self._in_write = True
 
-
     def plot(self, **kws):
         """Display the data"""
         if self.ndims == 2:
@@ -689,12 +742,12 @@ class shocObs(HDUList):
         im.figure.canvas.set_window_title(self.get_filename())
         return im
 
-
     # def animate(self):
     #   TODO: OR incorporate in ImageCubeDisplay
 
+
 ################################################################################
-class shocBiasObs(shocObs): #FIXME: DARK?
+class shocBiasObs(shocObs):  # FIXME: DARK?
     kind = 'bias'
 
     def get_coords(self):
@@ -713,8 +766,8 @@ class shocFlatFieldObs(shocBiasObs):
         if masterbias:
             if verbose:
                 logging.info(
-                    'Subtracting master bias %r from master flat %r.',
-                    masterbias.get_filename(), master.basename)
+                        'Subtracting master bias %r from master flat %r.',
+                        masterbias.get_filename(), master.basename)
             # match orientation
             masterbias.flip(master.flip_state)
             master.data -= masterbias.data
@@ -729,13 +782,9 @@ class shocFlatFieldObs(shocBiasObs):
         return master
 
 
-
 class ClassProperty(property):
     def __get__(self, cls, owner):
         return self.fget.__get__(None, owner)()
-
-
-
 
 
 ################################################################################
@@ -743,27 +792,34 @@ class shocRun(object):
     # TODO: merge method?
     """
     Class containing methods to operate with sets of shocObs objects.
-    perform comparitive tests between cubes to see if they are compatable.
+    Group, filter and compare across cubes based on keywords.
+    Calibrate, calculate time stamps (including barycentrization)
+    Merge, stack or combine the cubes, or unpack the frames.
+    Write output fits and/or timing files.
+    Pretty printed table representations of your SHOC runs
     """
     obsClass = shocObs
-    nameFormat = '{basename}'       # Naming convention defaults
+    nameFormat = '{basename}'  # Naming convention defaults
+    _skip_init = False
+    # this is here so we can initialize new instances from existing instances
+
+    # options for pretty printing
     displayColour = 'g'
     _compactRepr = True
     # compactify the table representation form the `print_instrumental_setup` method by
     # removing columns (attributos) that are equal accross all constituent cubes and printing
     # them as a top row in the table
-    _skip_init = False
-    # this is here so we can initialize new instances from existing instances
+    pprinter = PPrintHelper()
 
 
-    @ClassProperty      # so we can access via  shocRun.kind and shocRun().kind
+    @ClassProperty  # so we can access via  shocRun.kind and shocRun().kind
     @classmethod
     def kind(cls):
         return cls.obsClass.kind
 
-
     @classmethod
-    def load(cls, filenames, kind='science', mode='update', memmap=False, save_backup=False, **kwargs):
+    def load(cls, filenames, kind='science', mode='update', memmap=False,
+             save_backup=False, **kwargs):
         """
         Load data from file(s).
 
@@ -802,33 +858,34 @@ class shocRun(object):
         hdus = []
         for i, fileobj in enumerate(filenames):
             # try:
-            hdu = obsCls.load(fileobj, mode=mode, memmap=memmap,
-                               save_backup=save_backup,
-                               **kwargs)
-            hdus.append(hdu)
+            obs = obsCls.load(fileobj, mode=mode, memmap=memmap,
+                              save_backup=save_backup,
+                              **kwargs)
+            hdus.append(obs)
             # except Exception as err:
             #     import traceback
             #     warn('File: %s failed to load with exception:\n%s' % (fileobj, str(err)))
 
+            # set the pretty printer as same object for all shocObs in the Run
+            obs.pprinter = cls.pprinter
+
         return cls(hdus, label)
 
-
     def __init__(self, hdus=None, label=None, groupId=None):
-        # wrap objects in array to ease item getting
 
         if hdus is None:
             hdus = []
 
         for hdu in hdus:
             if not isinstance(hdu, HDUList):
-                raise TypeError(
-                    'Cannot initialize from %r. Please use `shocRun.load(filename)`' % wrongclass[0])
+                raise TypeError('Cannot initialize from %r. '
+                                'Please use `shocRun.load(filename)`' % hdu)
 
-        self.cubes = np.empty(len(hdus), dtype='O')      #, dtype='O')
+        # put hdu objects in array to ease item getting. YAY!!
+        self.cubes = np.empty(len(hdus), dtype='O')
         self.cubes[:] = hdus
         self.groupId = OrderedSet(groupId)
         self.label = label
-
 
     def __len__(self):
         return len(self.cubes)
@@ -839,37 +896,11 @@ class shocRun(object):
         return ' : '.join((clsname, files))
 
     def __getitem__(self, key):
-        # NOTE: if you can wrap the cubes in an object array you will get
-        # all the array indexing and slicing niceties for free, however,
-        # since the cubes are already a container class HDUList (although
-        # they really don't need to be such!!), the resultant array is 2D of
-        # type shocHDU. :(
-        # items = self.cubes[key]
-        # if isinstance(key, (int, np.integer)):
-        #     if key >= len(self):
-        #         raise IndexError("The index (%d) is out of range." % key)
-        #     return self.cubes[key]
-        #
-        # if isinstance(key, slice):
-        #     items = self.cubes[key]
-
-        # if isinstance(key, tuple):
-        #     assert len(key) == 1
-        #     key = key[0]  # this should be an array...
-
-        # elif isinstance(key, (list, np.ndarray)):
-        #     if isinstance(key[0], (bool, np.bool_)):
-        #         assert len(key) == len(self)
-        #         items = [self.cubes[i] for i in np.where(key)[0]]
-        #
-        #     elif isinstance(key[0], (int, np.integer)):  # NOTE: be careful bool isa int
-        #         items = [self.cubes[i] for i in key]
 
         items = self.cubes[key]
         if np.size(items) > 1:
             return self.__class__(items, self.label, self.groupId)
         return items
-
 
     def __add__(self, other):
         if self.kind != other.kind:
@@ -932,10 +963,10 @@ class shocRun(object):
         return sum(runs, self)
 
         # for run in runs:
-            # kinds = [run.kind for run in runs]
-            # labels = [run.label for run in runs]
-            # self.cubes, [r.cubes for r in runs]
-            # hdus = sum([r.cubes for r in runs], self.cubes)
+        # kinds = [run.kind for run in runs]
+        # labels = [run.label for run in runs]
+        # self.cubes, [r.cubes for r in runs]
+        # hdus = sum([r.cubes for r in runs], self.cubes)
 
         # if np.all(self.label == np.array(labels)):
         #     label = self.label
@@ -945,16 +976,41 @@ class shocRun(object):
 
         # return self.__class__(hdus, label=label)
 
-    def print_instrumental_setup(self, attrs=None, description=''):
-        """Print the instrumental setup for this run as a table.
-        :param attrs:
+    def print_instrumental_setup(self, attrs=None, description='', **kws):
         """
-        filenames, attrDisplayNames, attrVals = zip(*(stack.get_instrumental_setup(attrs)
-                                                      for stack in self))
-        attrDisplayNames = attrDisplayNames[0] # all are the same
-        name = self.label or ''# ''<unlabeled>'      # todo: default?
-        title = 'Instrumental Setup: %s %s frames %s' \
-                % (str(name).title(), self.kind.title(), description)
+        Print the instrumental setup for this run as a table.
+
+        Parameters
+        ----------
+        attrs: array_like, optional
+            Attributes of the instance that will be printed in the table.
+            defaults to the list given in `self.pprinter.attrs`
+        description: str, optional
+            Description of the observation to be included in the table.
+        **kws:
+            Keyword arguments passed directly to the `ansi.table.Table`
+            constructor.
+
+        Returns
+        -------
+        `ansi.table.Table` instance
+
+        """
+        filenames, attrDisplayNames, attrNames, attrVals = \
+            zip(*(stack.get_instrumental_setup(attrs) for stack in self))
+        attrDisplayNames = attrDisplayNames[0]  # all are the same
+        name = self.label or ''  # ''<unlabeled>'      # todo: default?
+        suptitle = 'Instrumental setup: SHOC %s frames' % self.kind.title()
+        subtitle = ': '.join(filter(None, (str(name).title(), description)))
+        title = os.linesep.join(filter(None, (suptitle, subtitle)))
+
+        # if duration requested, als print total duration
+        total = ()
+        if len(self) > 1:
+            for i, at in enumerate(attrNames[0]):
+                if 'duration' in at:
+                    total = (i, )
+                    break
 
         table = sTable(attrVals,
                        title=title,
@@ -962,27 +1018,24 @@ class shocRun(object):
                        col_headers=attrDisplayNames,
                        row_headers=['filename'] + list(filenames),
                        number_rows=True,
-                       precision=5, minimalist=True, compact=True
-                       )
+                       precision=5, minimalist=True, compact=True,
+                       formatters={'duration': fmt_hms},
+                       total=total,
+                       **kws)
 
-        # try:
         print(table)
-        # except:
-        #     embed()
-        #     raise
         return table
 
     pprint = print_instrumental_setup
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Timing
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def set_times(self, coords=None):
 
         # initialize timing
         t0s = []
         for stack in self:
-            # stack.timing(self.location)
             t0s.append(stack.timing.t0mid)
 
         # check whether IERS tables are up to date given the cube starting times
@@ -996,12 +1049,12 @@ class shocRun(object):
         # update the IERS table and set the leap-second offset
         iers_a = get_updated_iers_table(cache=True, raise_=False)
 
-        msg = '\n\nCalculating timing arrays for datacube(s):'
+        msg = 'Calculating timing arrays for data cube(s):'
         lm = len(msg)
-        logging.info(msg )
+        logging.info('\n\n' + msg)
         for i, stack in enumerate(self):
             logging.info(' ' * lm + stack.get_filename())
-            t0 = t0s[i] # t0 = stack.timing.t0mid
+            t0 = t0s[i]  # t0 = stack.timing.t0mid
             if coords is None and stack.has_coords:
                 coords = stack.coords
             stack.timing.set(t0, iers_a, coords)
@@ -1046,10 +1099,10 @@ class shocRun(object):
         if self.check_rollover_state():
             times = self.get_rolled_triggers(times)
             logging.info(
-                '\nA single GPS trigger was provided. Run contains auto-split '
-                'cubes (filesystem rollover due to 2Gb threshold on old windows server).'
-                ' Start time for rolled over cubes will be inferred from the length'
-                ' of the preceding cube(s).\n'
+                    '\nA single GPS trigger was provided. Run contains auto-split '
+                    'cubes (filesystem rollover due to 2Gb threshold on old windows server).'
+                    ' Start time for rolled over cubes will be inferred from the length'
+                    ' of the preceding cube(s).\n'
             )
 
         # at this point we expect one trigger time per cube
@@ -1126,7 +1179,8 @@ class shocRun(object):
             for f in self.filenames:
                 fp.write(f + '\n')
 
-    def writeout(self, with_path=False, suffix='', dryrun=False, header2txt=False):  # TODO:  INCORPORATE FILENAME GENERATOR
+    def writeout(self, with_path=False, suffix='', dryrun=False,
+                 header2txt=False):  # TODO:  INCORPORATE FILENAME GENERATOR
         fns = []
         for stack in self:
             fn_out = stack.get_filename(with_path, False, (suffix, 'fits'))  # FILENAME GENERATOR????
@@ -1143,7 +1197,6 @@ class shocRun(object):
                     stack.header.totextfile(headfile, overwrite=True)
 
         return fns
-
 
     def zipper(self, keys, flatten=True):
         # TODO: eliminate this function
@@ -1201,13 +1254,13 @@ class shocRun(object):
                 l = np.array([attr == ats for attr in attrs])  # list for-loop needed for tuple attrs
                 eq_run = self[l]  # shocRun object of images with equal key attribute
                 eq_run.groupId = keys
-                atdict[ats] = eq_run   # put into dictionary
+                atdict[ats] = eq_run  # put into dictionary
                 idict[ats], = np.where(l)
 
         SR = StructuredRun(atdict)
         SR.groupId = keys
         # SR.name = self.name
-        if  return_index:
+        if return_index:
             return SR, idict
         return SR
 
@@ -1231,13 +1284,13 @@ class shocRun(object):
         selection = list(map(predicate, attrs))
         return self[selection]
 
-
     def sort_by(self, *keys, **kws):
         """
         Sort the cubes by the value of attributes given in keys,
         kws can be (attribute, callable) pairs in which case sorting will be done according to value
         returned by callable on a given attribute.
         """
+
         # FIXME: order of kws lost when passing as dict. not desirable.
         # NOTE: this is not a problem in python >3.5!! yay! https://docs.python.org/3/whatsnew/3.6.html
         # for keys, func in kws.items():
@@ -1250,8 +1303,8 @@ class shocRun(object):
         triv = (trivial,) * len(keys)  # will be used to sort by the actual values of attributes in *keys*
         kwkeys = tuple(kws.keys())
         kwattrs = self.attrgetter(kwkeys)
-        kwfuncs = tuple(kws.values())       #
-        funcs = triv + kwfuncs              # tuple of functions, one for each requested attribute
+        kwfuncs = tuple(kws.values())  #
+        funcs = triv + kwfuncs  # tuple of functions, one for each requested attribute
         # combine all functions into single function that returns tuple that determines sort position
         attrSortFunc = lambda *x: tuple(f(z) for (f, z) in zip(funcs, x))
 
@@ -1290,7 +1343,6 @@ class shocRun(object):
             logging.info(msg)
         return is_single
 
-
     def stack(self, name):
 
         header = copy(self[0].header)
@@ -1302,7 +1354,6 @@ class shocRun(object):
         cube = self.__class__(hdu, fileobj)  # initialise the Cube with target file
         cube.instrumental_setup()
 
-
     def stack_data(self):
         """return array of stacked data"""
         # if len(self) == 1:
@@ -1310,7 +1361,7 @@ class shocRun(object):
 
         dims = self.attrgetter('ndims')
         if not np.equal(dims, dims[0]).all():
-            raise ValueError('Cannot stack cubes with differing frame sizes: %s' %str(dims))
+            raise ValueError('Cannot stack cubes with differing frame sizes: %s' % str(dims))
 
         return np.vstack(self.attrgetter('data'))
 
@@ -1378,8 +1429,8 @@ class shocRun(object):
             # check whether the numer of images in the timing stack are equal to the total number of frames in the cubes.
             if len(args.timing) != tot_num:  # WARNING - NO LONGER VALID
                 raise ValueError(
-                    'Number of images in timing list ({}) not equal to total number in given '
-                    'stacks ({}).'.format(len(args.timing), tot_num))
+                        'Number of images in timing list ({}) not equal to total number in given '
+                        'stacks ({}).'.format(len(args.timing), tot_num))
 
         for i, stack in enumerate(self):
             count = stack.unpack(count, padw, dryrun, w2f)
@@ -1434,7 +1485,7 @@ class shocRun(object):
             mmset = set(np.fromiter(map(str, attr2), 'U64')[~match2])
             mmvals = ' or '.join(mmset)
             keycomb = ('{} combination' if isinstance(keys, tuple)
-                       else '{}').format(keys)
+            else '{}').format(keys)
             operation = ('de-biasing' if 'bias' in self.name else 'flat fielding')
             desc = ('Incompatible {} in'
                     '\n\t{}'
@@ -1451,11 +1502,10 @@ class shocRun(object):
 
             return match1
 
-
     def close(self):
         [stack.close() for stack in self]
 
-    #TODO: as a mixin?
+    # TODO: as a mixin?
     def match_and_group(self, cal_run, exact, closest=None, threshold_warn=7, _pr=1):
         """
         Match the attributes between sci_run and cal_run.
@@ -1579,7 +1629,7 @@ class shocRun(object):
                 logging.info('The following matches have been made:')
                 print(table)
             except:
-                print('TABLE FAIL! '*5)
+                print('TABLE FAIL! ' * 5)
                 embed()
 
         return s_sr, out_sr
@@ -1598,7 +1648,6 @@ class shocRun(object):
                     break
             idd[kind] = cls(run)
         return idd
-
 
     def coalign(self, align_on=0, first=10, flip=True, return_index=False, **findkws):
         """
@@ -1647,7 +1696,7 @@ class shocRun(object):
         # align on highest res image if not specified
         a = align_on
         if align_on is None:
-             a = scales.argmin(0)[0]
+            a = scales.argmin(0)[0]
         others = set(range(n)) - {a}
 
         logging.info('Aligning run of %i images on %r', len(self), self[a].get_filename())
@@ -1660,7 +1709,6 @@ class shocRun(object):
         if return_index:
             return I, FoV, P, a
         return I, FoV, P
-
 
     def coalignDSS(self, align_on=0, first=10, **findkws):
         from pySHOC.wcs import MatchDSS
@@ -1691,13 +1739,11 @@ class shocRun(object):
         return dss, I, FoV, P, idict
 
 
-
 ################################################################################
 class shocSciRun(shocRun):
-    #name = 'science'
+    # name = 'science'
     nameFormat = '{basename}'
     displayColour = 'g'
-
 
 
 class shocBiasRun(shocRun):
@@ -1705,6 +1751,7 @@ class shocBiasRun(shocRun):
     obsClass = shocBiasObs
     nameFormat = 'b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}][sub{sub}]'
     displayColour = 'm'
+
     # NOTE: Bias frames here are technically dark frames taken at minimum possible
     # exposure time.  SHOC's dark current is (theoretically) constant with time,
     # so these may be used as bias frames.
@@ -1714,7 +1761,6 @@ class shocBiasRun(shocRun):
     def combined(self, names, how_combine=np.median):
         # overwriting just to set the default function
         return shocRun.combined(self, names, how_combine)
-
 
     #     return compute_master(how_combine, masterbias)
 
@@ -1748,9 +1794,12 @@ class shocFlatFieldRun(shocRun):
     #     self.stack(name).compute_master(how_combine, masterbias)
     #     return cmb.compute_master()
 
+
 from collections import OrderedDict
+
+
 ################################################################################
-class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
+class StructuredRun(OrderedDict):  # TODO: Maybe rename as GroupedRun??
     """
     Emulates dict to hold multiple shocRun instances keyed by their shared common attributes.
     The attribute names given in groupId are the ones by which the run is separated
@@ -1758,6 +1807,7 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
     This class attempts to eliminate the tedium of computing calibration frames for different
     observational setups by enabling loops over various such groupings.
     """
+
     @property
     def runClass(self):
         if len(self):
@@ -1801,12 +1851,12 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
     # TODO: maybe make specific to calibrationRun
     # @profiler.histogram()
     @timer
-    def combined(self, func): #, write=True
+    def combined(self, func):  # , write=True
         verbose = True
 
-        #TODO: split duplicate_aware_compute
+        # TODO: split duplicate_aware_compute
 
-        #TODO: variance of sample median (need to know the distribution for direct estimate)
+        # TODO: variance of sample median (need to know the distribution for direct estimate)
         # OR bootstrap to estimate
         # OR median absolute deviation
 
@@ -1832,7 +1882,7 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
             # FIXME: will have to implement generating filenames like: 'f2017020[89].4x4' or something
             # combine entire run (potentially multiplo cubes) for this group
             cmb = run.combine_all(name, func, axis=0)
-            #cmb.flush(output_verify='warn', verbose=1)  # writes to file
+            # cmb.flush(output_verify='warn', verbose=1)  # writes to file
             cmbrun = run.__class__([cmb])  # Make it a run.  FIXME: kind of sucky
             for attr in keys:
                 combined[attr] = cmbrun
@@ -1844,7 +1894,6 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
         sr.groupId = self.groupId
         # SR.label = self.label
         return sr
-
 
     def compute_master(self, how_combine, mbias=None, load=False, w2f=True, outdir=None):
         """
@@ -1902,7 +1951,7 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
             # this creates a run of all the master frames which will be split into individual
             # shocObs instances upon the creation of the StructuredRun at return
             label = 'master {}'.format(self.name)
-            mrun = self.runClass(hdus=masters.values())     #label=label
+            mrun = self.runClass(hdus=masters.values())  # label=label
 
         if w2f:
             fn = label.replace(' ', '.')
@@ -1943,12 +1992,12 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
         b = c_sr.flatten()
         print('RARARARARRAAAR!!!', b.zipper('sub'))
 
-        newcals = self.runClass(substacks) + b  #, label=c_sr.label
+        newcals = self.runClass(substacks) + b  # , label=c_sr.label
         return newcals
 
     # TODO: combine into calibration method
     @timer
-    def debias(self, m_bias_dict, ):       #FIXME: RENAME Dark
+    def debias(self, m_bias_dict, ):  # FIXME: RENAME Dark
         """
         Do the bias reductions on science / flat field data
 
@@ -1980,7 +2029,7 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
                 # Adds the keyword 'BIASCORR' to the image header to indicate that bias correction has been done
                 # header['BIASCORR'] = (True, 'Bias corrected')
                 # Add the filename and time of bias subtraction to header HISTORY
-                hist = 'Bias frame %r subtracted at %s' %\
+                hist = 'Bias frame %r subtracted at %s' % \
                        (master.get_filename(), datetime.datetime.now())
                 header.add_history(hist, before='HEAD')
 
@@ -2040,4 +2089,3 @@ class StructuredRun(OrderedDict): # TODO: Maybe rename as GroupedRun??
                     embed()
 
         self.label = 'science frames (flat fielded)'
-

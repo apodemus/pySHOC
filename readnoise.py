@@ -18,7 +18,8 @@ def _as_array(raw):
             buffer.write(str.encode(outline + '\n'))
     buffer.seek(0)
 
-    return np.genfromtxt(buffer, dtype=None, names=True, delimiter='\t')
+    return np.genfromtxt(buffer, dtype=None, names=True, delimiter='\t',
+                         encoding=None)
 
 
 # ****************************************************************************************************
@@ -65,7 +66,7 @@ class ReadNoiseTable(np.ndarray):
 
         # CCD acquisition mode
         mode = header['OUTPTAMP']
-        lmode = self['Mode'] == mode.encode()
+        lmode = self['Mode'] == mode
 
         # Readout clock frequency
         freq = 1. / header['READTIME']

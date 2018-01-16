@@ -51,11 +51,21 @@ def get_header_info(do_update, from_terminal, header_for_defaults, strict=False)
         NOTE that timing data will not be barycentre corrected if object coordinates are not
         contained in the header
 
-    :param do_update: Whether the "update-headers" argument was supplied at terminal
-    :param from_terminal: argparse.Namespace of terminal arguments for updating headers.
-    :param header_for_defaults: The header object that will be used to populate the default
-    :param strict:  if True, always ask for required keyword values. else ignore them
-    :return:
+
+    Parameters
+    ----------
+    do_update:
+        Whether the "update-headers" argument was supplied at terminal
+    from_terminal:
+        argparse.Namespace of terminal arguments for updating headers.
+    header_for_defaults:
+        The header object that will be used to populate the default
+    strict:
+        if True, always ask for required keyword values. else ignore them
+
+    Returns
+    -------
+
     """
 
     # TODO: if interactive
@@ -159,20 +169,16 @@ def get_header_info(do_update, from_terminal, header_for_defaults, strict=False)
 
 class shocHeader(Header):
     """Extend the pyfits.Header class for interactive user input"""
-    # ===========================================================================
     readNoiseTable = ReadNoiseTable()
 
-    # # ===========================================================================
-    # def __init__(self, cards=None, copy=False):
+    # # def __init__(self, cards=None, copy=False):
     #     cards = [] if cards is None else cards
     #     Header.__init__(self, cards, copy)
 
-    # ===========================================================================
     def has_old_keys(self):
         old, new = zip(*kw_old_to_new)
         return any((kw in self for kw in old))
 
-    # ===========================================================================
     def convert_old_new(self, forward=True, verbose=False):
         """Convert old heirarch keywords to new short equivalents"""
         success = True
@@ -193,7 +199,6 @@ class shocHeader(Header):
 
         return success
 
-    # ===========================================================================
     def get_readnoise(self):
         """Readout noise, sensitivity, saturation as taken from ReadNoiseTable"""
         return self.readNoiseTable.get_readnoise(self)
@@ -220,7 +225,6 @@ class shocHeader(Header):
 
         return ron, sensitivity, saturation
 
-    # ===========================================================================
     def needs_update(self, info, verbose=False):
         """check which keys actually need to be updated"""
         to_update = {}
@@ -232,7 +236,6 @@ class shocHeader(Header):
                     print("%s will not be updated" % key)
         return to_update
 
-    # ===========================================================================
     # def take_from(self, header):           #OR TEXT FILE or args!!!!!!!!!!!!!!
     #     """take header information from hdu of another fits file."""
     #     for j in range(len(self.headkeys)):
@@ -241,8 +244,7 @@ class shocHeader(Header):
     #     #else:
     #     #'complain!'
 
-    # # ===========================================================================
-    # def set_defaults(self, header):
+    # # def set_defaults(self, header):
     #     """
     #     Set the default values according to those found in the given header.
     #     Useful in interteractive mode to avoid loads of typing.
@@ -256,8 +258,7 @@ class shocHeader(Header):
     #             card.default = ''
     #             # YOU CAN SUPERCEDE THE DEFAULTS IF YOU LIKE.
     #
-    # # ===========================================================================
-    # def update_to(self, hdu):  # OPTIONAL REFERENCE FITS FILE?.......
+    # # def update_to(self, hdu):  # OPTIONAL REFERENCE FITS FILE?.......
     #     """ Updating header information
     #         INPUT: hdu - header data unit of the fits image
     #         OUTPUTS: NONE

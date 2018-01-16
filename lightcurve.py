@@ -19,8 +19,8 @@ from tsa.smoothing import smoother
 from tsa.spectral import Spectral
 from grafico.ts import TSplotter
 from grafico.multitab import MplMultiTab
-from fastfits import quickheader
-from recipes.list import flatten
+from obstools.fastfits import quickheader
+# from recipes.list import flatten
 from recipes.iter import (interleave, groupmore, first_true_idx,
                           roundrobin)
 # from grafico.interactive import PointSelector
@@ -29,16 +29,17 @@ from recipes.iter import (interleave, groupmore, first_true_idx,
 
 from pySHOC.io import Conversion as convert
 
-from IPython import embed
+# from IPython import embed
 # import decor
 # profiler = decor.profile.profile()
 # from ansi.core import banner
 
-tsplt = TSplotter()             #TODO: attach to PhotResult class
+tsplt = TSplotter()  # TODO: attach to PhotResult class
 
 
 def quadadd(a, axis):
     return np.sqrt(np.square(a).sum(axis))
+
 
 def as_flux(mag, mag_std=None, mag0=0):
     """Convert magnitudes to Fluxes"""
@@ -49,11 +50,13 @@ def as_flux(mag, mag_std=None, mag0=0):
     fluxerr = mag_std * (np.log(10) / 2.5) * flux
     return flux, fluxerr
 
+
 def as_magnitude(flux, flux_std=None, mag0=0):
     """Convert fluxes to magnitudes"""
     mag = -2.5 * np.log10(flux) + mag0
     mag_std = None
     return mag, mag_std
+
 
 def extract_2Dfloat(table, colid, n):
     colix = range(1, n + 1)
@@ -102,13 +105,16 @@ def load_times(timefile):
     colnames = hline.strip('\n #').lower().split()  # extract column names (lower case)
 
     t = np.genfromtxt(str(timefile),
-                         dtype=None,
-                         names=colnames,
-                         skip_header=1,
-                         usecols=range(1, len(colnames)))
+                      dtype=None,
+                      names=colnames,
+                      skip_header=1,
+                      usecols=range(1, len(colnames)),
+                      encoding=None  # this prevents np.VisibleDeprecationWarning
+                      )
     # if len(t)
     # TODO: check that it is consistent with data
-    return t
+    return t.view(np.recarray)
+
 
 def get_name_date(fitsfile=None):
     if fitsfile and os.path.exists(fitsfile):
@@ -124,7 +130,6 @@ def get_name_date(fitsfile=None):
 
         return name, date, size
     return None, None, None
-
 
 
 class SelfAwareContainer(object):
@@ -144,6 +149,7 @@ class SelfAwareContainer(object):
 # ****************************************************************************************************
 class PhotRun(SelfAwareContainer):
     """ Class for containing / merging / plotting PhotResult objects."""
+
     # TODO: inherit from OrderedDict / list ??
     # TODO: merge by: target; date; etc...
     # TODO: multiprocess generic methods
@@ -169,7 +175,6 @@ class PhotRun(SelfAwareContainer):
                             for (fn, db, cf, ix) in itr]
         else:
             raise ValueError('No filenames')
-
 
     @property
     def fitsfiles(self):
@@ -305,7 +310,8 @@ class PhotRun(SelfAwareContainer):
         new = PhotResult()
         new.data = data
         new.std = std
-        new.timedata = stack_arrays(self.attrgetter('timedata'))
+        # convert timedata to recarray for quicker attr access
+        new.timedata = stack_arrays(self.attrgetter('timedata')).view(np.recarray)
         new.target = 0  # since we re-ordered everything
         new.target_name = self.target_name
         new.date = self[0].date
@@ -314,11 +320,11 @@ class PhotRun(SelfAwareContainer):
         return new
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def compute_ls(self, tkw='lmst', **kw):
-        t = self.get_time(tkw)
-
-        for star in self.stars:
-            star.compute_ls(t, **kw)
+    # def compute_ls(self, tkw='lmst', **kw):
+    #     t = self.get_time(tkw)
+    #
+    #     for star in self.stars:
+    #         star.compute_ls(t, **kw)
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_lcs(self, **kw):
@@ -334,7 +340,6 @@ class PhotRun(SelfAwareContainer):
         return ui
 
     # def plot_phased(self, offsets):
-
 
 
 # ****************************************************************************************************
@@ -368,7 +373,7 @@ class Star(object):
                 pl = ph = div
 
             s = np.ma.concatenate(
-                [x[pl:0:-1], x, x[-1:-ph:-1]])  # pad data array with reflection of edges on both sides
+                    [x[pl:0:-1], x, x[-1:-ph:-1]])  # pad data array with reflection of edges on both sides
             iu = -ph + 1
 
         else:
@@ -436,16 +441,17 @@ class Star(object):
         return Spectral(t, signal, **kw)
 
 
-
 class NullPath(type(Path())):
     def exists(self):
         return False
+
     def with_suffix(self, _):
         return
 
 
 class AutoFileToPath(object):
-    # NOTE: this is probably a huge anti-pattern
+    # NOTE: this is probably a huge anti-pattern:
+    # Explicit is better than implicit
     def __getattr__(self, item):
         if item.endswith('path'):
             key = item.replace('path', 'file')
@@ -478,8 +484,10 @@ def _file_checker(filename, what=None, borks=True):
 def exists(filename):
     return filename and os.path.exists(str(filename))
 
+
 def first_exists(*files):
     return next(filter(exists, files), None)
+
 
 # ****************************************************************************************************
 class PhotResult(AutoFileToPath):
@@ -493,16 +501,16 @@ class PhotResult(AutoFileToPath):
 
     # TODO:  STORE/LOAD data AS FITS.
     # TODO:  PICKLE / json?
-    #TODO: maybe autoload class attribute that enable automatic loading with
+    # TODO: maybe autoload class attribute that enable automatic loading with
     # self.datafile = 'some/file/that/exists'
 
-    #TODO: if coordinates are given, we can order the stars logically so that
+    # TODO: if coordinates are given, we can order the stars logically so that
     # stars correspond across cubes.
     # sorting methods? checkout pandas / astropy.table
 
     _skip_init = False
 
-    _flx_sort = True # will order data according to brightness
+    _flx_sort = True  # will order data according to brightness
     _default_cmap = 'nipy_spectral'
     _label_fmt = 'C%i'
     _title_fmt = 'Light curve: {s.fitspath.name}'
@@ -537,7 +545,6 @@ class PhotResult(AutoFileToPath):
         for ext in exts:
             blob.append(reversed(list(self.globsearch(ext))))
         yield from roundrobin(*blob)
-
 
     def __new__(cls, *args, **kws):
         # this is here to handle initializing the object from an already existing
@@ -576,7 +583,7 @@ class PhotResult(AutoFileToPath):
         name_guess = self.fitspath.with_suffix('.time')
         self.timefile = first_exists(timefile, name_guess)
 
-        #optional ephemeris
+        # optional ephemeris
         # self.ephem = ephem
 
         # load info from fitsfile if avaliable
@@ -586,7 +593,7 @@ class PhotResult(AutoFileToPath):
         # store data internally as masked array (Nframes, Nstars, Naps)
         # init null data containers
         self.data = np.ma.empty((0, 0, 0))
-        self.std = np.empty((0,0,0))
+        self.std = np.empty((0, 0, 0))
         self.timedata = np.empty(0)
 
         # load timing data if available
@@ -597,7 +604,6 @@ class PhotResult(AutoFileToPath):
         if exists(self.datafile):
             self.load_data()
             # self.load_times()
-
 
         # NOTE: this is restrictive in that it fixes the Nstars, target, ref across
         # all cubes.  Think of a way of dynamically creating the Stars class
@@ -613,10 +619,8 @@ class PhotResult(AutoFileToPath):
         """Can be indexed numerically, or by using 'target' or 'ref' strings."""
         raise NotImplementedError
         if isinstance(key, (int, np.integer, slice)):
-            #TODO: return lightcurve object
+            # TODO: return lightcurve object
             pass
-
-
 
         if isinstance(key, str):
             key = key.lower()
@@ -650,14 +654,13 @@ class PhotResult(AutoFileToPath):
     def naps(self):
         return self.data.shape[-1]
 
-
     def get_target(self):
         return self._target
 
     def set_target(self, target):
         self._target = target
-        #self.stars.set_names(target, self.target_name)
-        #self.stars.set_colours(target)
+        # self.stars.set_names(target, self.target_name)
+        # self.stars.set_colours(target)
 
     target = property(get_target, set_target)
 
@@ -680,7 +683,6 @@ class PhotResult(AutoFileToPath):
     @property
     def labels(self):
         return list(self.gen_labels(self.target, self.target_name))
-
 
     def gen_labels(self, target=None, target_name=None, fmt=None):
         fmt = fmt or self._label_fmt
@@ -739,11 +741,11 @@ class PhotResult(AutoFileToPath):
             # coo = lz['coords']      #shape (Nframes, Nstars, 2)
 
             lz = np.load(str(filename))
-            self.timedata = lz['t']
+            self.timedata = lz['t'].view(np.recarray)
             self.data = np.ma.array(lz['data'], mask=lz['data_mask'])
             self.std = np.ma.array(lz['std'], mask=lz['std_mask'])
 
-            #todo: target, name etc..
+            # todo: target, name etc..
         except Exception as orr:
             embed()
             raise
@@ -777,7 +779,6 @@ class PhotResult(AutoFileToPath):
         # start = nrs[0]
         # ref = starheads.index('C%s' % start)
 
-
         # timefields = list(map( lambda s: rreplace(s, '() ', '').lower(),
         # filter( lambda s: not s.strip() in ('', 'flux','err'),
         # headline.strip('#').lower().split('  ') ) ))
@@ -802,11 +803,9 @@ class PhotResult(AutoFileToPath):
         # Naps = len(reader.header.aperture_values)
         return table, mag0
 
-
     def load_from_tbl(self, filename, mag0=0):
         tbl = ascii.read(filename)
         self._load_from_table(tbl, mag0)
-
 
     def load_from_mag(self, filename, save='npz'):
         # TODO: default format as class attr
@@ -823,7 +822,7 @@ class PhotResult(AutoFileToPath):
             logging.info('Saving as: %s', outpath.name)
             np.savez(str(outpath),
                      t=self.timedata, data=self.data, std=self.std)
-            #FIXME: NotImplementedError: MaskedArray.tofile() not implemented yet.
+            # FIXME: NotImplementedError: MaskedArray.tofile() not implemented yet.
 
         if save == 'tbl':
             # finally write the table in a more accesible ascii form
@@ -832,7 +831,6 @@ class PhotResult(AutoFileToPath):
                         format='ascii.fast_commented_header',
                         overwrite=True)
 
-
     def _load_from_table(self, table, mag0=0):
 
         # extract magnitudes and their uncertainty # shape (n, naps)
@@ -840,7 +838,7 @@ class PhotResult(AutoFileToPath):
         mags = extract_2Dfloat(table, 'MAG', naps)
         magstd = extract_2Dfloat(table, 'MERR', naps)
 
-        #TODO: optionally show some stats ala table.info
+        # TODO: optionally show some stats ala table.info
 
         # HACK Daophot databases are incredible annoying things. Since some
         # of the stars are sometimes dropped and moreover the filenames
@@ -865,8 +863,8 @@ class PhotResult(AutoFileToPath):
 
     def select_best_ap(self):
         ixap = self.recommend_ap()
-        data = self.data[..., ixap:ixap+1]
-        std = self.std[..., ixap:ixap+1]
+        data = self.data[..., ixap:ixap + 1]
+        std = self.std[..., ixap:ixap + 1]
         return data, std
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -907,7 +905,6 @@ class PhotResult(AutoFileToPath):
 
             fileno = np.mgrid[:nstars, :nframes][1].ravel()
 
-
         # group the stars by the closest matching coordinates in the coordinate file list.
         starmatcher = lambda coo: np.sqrt(np.square(kcoords - coo).sum(1)).argmin()
         for starid, (coo, ix) in groupmore(starmatcher, coords, range(len(bigdata))):
@@ -927,7 +924,6 @@ class PhotResult(AutoFileToPath):
             # bigdata[ix]['Exptime']
             mask[z] = False
             data.mask = mask
-
 
         self.load_times()
 
@@ -960,11 +956,12 @@ class PhotResult(AutoFileToPath):
     def add_phase_info(self, emphem):
         import numpy.lib.recfunctions as rfn
         ph = emphem.phase(self.timedata['bjd'])
-        self.timedata = rfn.append_fields(self.timedata, ('phase', 'phaseMod1'), (ph, ph%1))
-
+        t = rfn.append_fields(
+                self.timedata, ('phase', 'phaseMod1'), (ph, ph % 1))
+        self.timedata = t.view(np.recarray)
 
     def date_split(self):
-        ''#TODO
+        ''  # TODO
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # def optimal_smoothing(self):
@@ -984,10 +981,10 @@ class PhotResult(AutoFileToPath):
         logging.info('Computing differential light curve..')
 
         # summed flux of all non-target stars
-        flx = self.data#[:, self.target, :]
+        flx = self.data  # [:, self.target, :]
         flxRef = self.data[:, self.others, :].sum(1)[:, None]
         # compute std
-        std = self.std#[:, self.target, :]
+        std = self.std  # [:, self.target, :]
         stdRef = quadadd(self.std[:, self.others, :], 1)[:, None]
 
         # scale ref flux
@@ -1009,15 +1006,11 @@ class PhotResult(AutoFileToPath):
         new.date = self.date
         return new
 
-
     def std_cuts(self, lower=0, upper=100):
         l = (lower > self.std) | (self.std > upper)
         self.data[l] = np.ma.masked
 
-
     # def mask_outliers(self):
-
-
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # MultiAperture plot gui
@@ -1043,13 +1036,13 @@ class PhotResult(AutoFileToPath):
         t = self.timedata[tkw]
         title = self._title_fmt.format(s=self)
         xlabel = tkw.upper()
-        ylabel = mode.title() #'Instr. ' +
+        ylabel = mode.title()  # 'Instr. ' +
         axlabels = xlabel, ylabel
 
         # if kw.get('twinx'):
         timescales = {'utsec': 's',
                       'utc': 'h',
-                      }  #TODO etc...
+                      }  # TODO etc...
 
         fig, plots, *rest = tsplt(t, y, e,
                                   title=title,
@@ -1059,7 +1052,6 @@ class PhotResult(AutoFileToPath):
                                   timescale=timescales.get(tkw),
                                   start=self.date,
                                   **kw)
-
 
         # This will plot the target *over* the other light curves
         if self.target:
@@ -1145,7 +1137,6 @@ class PhotResult(AutoFileToPath):
         ax.set_xlabel(tkw.upper())
         ax.legend()
 
-
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_spread(self, tkw='utsec'):
         """plot all aperture data as time series"""
@@ -1168,9 +1159,6 @@ class PhotResult(AutoFileToPath):
 def get_spread(star, sfactor):
     naps = star._data.shape[1]
     return (star._data + np.arange(naps) * sfactor).T
-
-
-
 
 
 class Saver():
@@ -1202,11 +1190,6 @@ class Saver():
 
 
 saver = Saver()
-
-
-
-
-
 
 # ****************************************************************************************************###################################################################
 # import cProfile as cpr
@@ -1256,13 +1239,13 @@ if __name__ == '__main__':
     path = iocheck(args.dir, os.path.exists, 1)
     path = os.path.abspath(path) + os.sep
     args.cubes = parse.to_list(args.cubes, os.path.exists,
-                             path=path, raise_error=1)
+                               path=path, raise_error=1)
     args.mags = parse.to_list(args.mags, os.path.exists,
-                            include=('mag', 'lc'),
-                            path=path, raise_error=1)
+                              include=('mag', 'lc'),
+                              path=path, raise_error=1)
     args.coo = parse.to_list(args.coo, os.path.exists,
-                           include='coo',
-                           path=path, raise_error=0)
+                             include='coo',
+                             path=path, raise_error=0)
 
     # coords = np.loadtxt(args.coo, unpack=0, usecols=(0,1))
     # target = args.target	 #index of target    #WARN IF LARGER THAN LEN COORDS
@@ -1282,7 +1265,6 @@ if __name__ == '__main__':
         if len(cube.stars) > 1:
             cube.ref = ref = cube.check_ref(args.ref)
             # FIXME:  TARGET AND REFERENCE CANNOT BE THE SAME!  CONJOIN WILL MERGE 2 STARS INTO THE SAME!!
-
 
             # cube.check_ref( args.ref )
 
@@ -1384,7 +1366,6 @@ if __name__ == '__main__':
     # HETEROSKEDACITY
     # whichstars = range(Nstars)
     # conjc.heteroskedacity( whichstars, 100, tkw=tkw )
-
 
     #######################################################################################################################
     # DIFFERENTIAL LIGHT CURVE
@@ -1524,8 +1505,6 @@ if __name__ == '__main__':
     fig = plot_spec(conjc)
     # fig.savefig( )
 
-
-
     ######################################################################################################################
     t = conjc.timedata['utsec']
     flux = conjc['t'].clipped
@@ -1543,17 +1522,11 @@ if __name__ == '__main__':
 
     #######################################################################################################################
 
-
-
     ######################################################################################################################
 
     ########################################################################################################################
 
     plt.show()
-
-
-
-
 
     # gix = detect_gaps( conjc.timedata['utsec'] ) +1
     # sst = np.split( conjc['target'].clipped, gix )
