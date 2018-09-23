@@ -3,85 +3,36 @@ Functions for time-stamping SHOC data
 """
 
 import logging
+from pathlib import Path
 from warnings import warn
 from urllib.error import URLError
 
 import numpy as np
 from astropy.time import Time, TimeDelta
-from astropy.table import Table as aTable  # Column
-from astropy.constants import c, G, M_sun  # M_sun = M_sun.value # Solar mass (kg)
+from astropy.table import Table as aTable
+from astropy.constants import c, G, M_sun
 from astropy.coordinates import EarthLocation, FK5
 from astropy.coordinates.angles import Angle
 import spiceypy as spice
 
 from obstools.airmass import Young94, altitude
-from recipes.pprint import minimalNumericFormat
+
+# this should maybe go to __init__.py
+# TODO: automate finding latest kernels:
+# http://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/          (leap second)
+# https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/ (ephemeris)
+# load kernels:
+spice_kernel_path = Path('/home/hannes/work/repos/SpiceyPy/kernels/')
+SPK = str(spice_kernel_path / 'de430.bsp')  # ephemeris kernel:
+LSK = str(spice_kernel_path / 'naif0012.tls')  # leap second kernel
+spice.furnsh(SPK)
+spice.furnsh(LSK)
 
 
 # from decor.profiler import profiler
 # profiler = profile()
 
-def hms(t):
-    """Convert time in seconds to hms tuple"""
-    m, s = divmod(t, 60)
-    h, m = divmod(m, 60)
-    return h, m, s
 
-
-def fmt_hms(t, precision=None, sep='hms', short=None):
-    """
-    Convert time in seconds to sexagesimal representation
-
-    Parameters
-    ----------
-    t : float
-        time in seconds
-    precision: int or None
-        maximum precision to use. Will be ignored if a shorter numerical representation
-        exists
-    sep: str
-        seperator(s) to use for time representation
-    short: bool or None
-        will strip unnecessary parts from the repr if True.
-        eg: '0h00m15.4s' becomes '15.4s'
-
-    Returns
-    -------
-    formatted time str
-
-    Examples
-    --------
-    >>> fmt_hms(1e4)
-    '2h46m40s'
-    >>> fmt_hms(1.333121112e2, 5)
-    '2m13.31211s'
-    >>> fmt_hms(1.333121112e2, 5, ':')
-    '0:02:13.31211'
-    >>> fmt_hms(1.333121112e2, 5, short=False)
-    '0h02m13.31211s'
-    """
-    if len(sep) == 1:
-        sep = (sep, sep, '')
-    if short is None:
-        short = (sep == 'hms')
-        # short representation only really useful if units given
-
-    sexa = hms(t)
-    precision = (0, 0, precision)
-
-    tstr = ''
-    for i, (n, p, s) in enumerate(zip(sexa, precision, sep)):
-        last = (i == 2)
-        ifill = bool(len(tstr)) * 2
-        part = minimalNumericFormat(n, p, ifill)
-        if short and not last and not float(part) and not len(tstr):
-            continue
-        tstr += (part + s)
-
-    return tstr
-
-
-# ====================================================================================================
 def get_updated_iers_table(cache=True, raise_=True):  # TODO: rename
     """Get updated IERS data"""
     from astropy.utils.iers import IERS_A, IERS_A_URL  # import IERS data class
@@ -99,20 +50,20 @@ def get_updated_iers_table(cache=True, raise_=True):  # TODO: rename
         if raise_:
             raise err
         warn('Unable to update IERS table due to the following exception:\n%s'
-             '\nAre you connected to the internet? If not, try re-run with cache=True'
+             '\nAre you connected to the internet? If not, try re-run with'
+             ' cache=True'
              % err)  # TODO with traceback?
         return None
 
 
-# ====================================================================================================
 # @profiler.histogram
 
 # TODO: Check the accuracy of these routines against astropy, utc2bjd, etc....
 
 def light_time_corrections(t, coords, precess=False, abcorr=None):
     """
-    Barycentric julian day.  Corrections done for Romer, Einstein and Shapiro
-    delays.
+    Barycentric julian day TBD.  Corrections done for Rømer, Einstein and
+    Shapiro delays.
 
     Params
     ------
@@ -120,7 +71,7 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
 
     precess - whether or not to precess coordinates
 
-    abcorr - how (if) aberation corrections should be done
+    abcorr - how (if) aberration corrections should be done
 
     Aberation corrections: (from the spice spice.spkpos readme)
 
@@ -129,12 +80,12 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
     location at `et'
     "LT"    Correct for one-way light time (also called "planetary aberration")
             using a Newtonian formulation.
-    LT+S"   Correct for one-way light time and stellar aberration using a
+    "LT+S"  Correct for one-way light time and stellar aberration using a
             Newtonian formulation.
     "CN"    Converged Newtonian light time correction.  In solving the light
             time equation, the "CN" correction iterates until the solution
             converges
-    CN+S"   Converged Newtonian light time and stellar aberration corrections.'
+    "CN+S"  Converged Newtonian light time and stellar aberration corrections.'
 
     "Transmission" case in which photons *depart* from the observer's location
     at `et' and arrive at the target's location at the light-time corrected
@@ -152,18 +103,10 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
     if abcorr in allowed_abc:
         ABCORR = abcorr
     else:
-        warn('Aberation correction specifier {} not understood. Next time use one of {}.\n'
-             'No aberration correction(s) will be done. '
-             '(Abberation effects should be negligible anyway!)'
+        warn('Aberration correction specifier {} not understood. Next time use '
+             'one of {}.\n No aberration correction(s) will be done. '
+             '(Aberration effects should be negligible anyway!)'
              ''.format(abcorr, allowed_abc))
-
-    # TODO: do this when loading the module
-    # load kernels:
-    SPK = '/home/hannes/repos/SpiceyPy/kernels/de430.bsp'  # ephemeris kernel : https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/
-    # TODO: automate finding latest kernels:  http://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/
-    LSK = '/home/hannes/repos/SpiceyPy/kernels/naif0012.tls'  # leap second kernel
-    spice.furnsh(SPK)
-    spice.furnsh(LSK)
 
     xyzObj = get_Obj_coords(t, coords, precess=precess)
     xyzSun, xyzEarth = get_Earth_Sun_coords(t[:1], ABCORR)  # HACK for speed!!!!
@@ -179,7 +122,6 @@ def light_time_corrections(t, coords, precess=False, abcorr=None):
     return t.tdb.jd - rd - ed - shd
 
 
-# ====================================================================================================
 # @profile()
 def get_Earth_Sun_coords(t, ABCORR):
     """
@@ -199,7 +141,8 @@ def get_Earth_Sun_coords(t, ABCORR):
         # Ephemeris time (seconds since J2000 TDB)
         et = spice.utc2et(str(t))
         # Earth geocenter wrt SSB in J2000 coordiantes
-        xyzEarth[i], ltEarth[i] = spice.spkpos(OBSERVER, et, FRAME, ABCORR, 'earth')
+        xyzEarth[i], ltEarth[i] = spice.spkpos(OBSERVER, et, FRAME, ABCORR,
+                                               'earth')
         # Sun heliocenter wrt SSB in J2000 coordiantes
         xyzSun[i], ltSun[i] = spice.spkpos(OBSERVER, et, FRAME, ABCORR, '10')
 
@@ -209,7 +152,6 @@ def get_Earth_Sun_coords(t, ABCORR):
 # def precess(coords, t, every):
 
 
-# ====================================================================================================
 def get_Obj_coords(t, coords, precess=False):
     """ """
     if not precess:
@@ -240,10 +182,10 @@ def get_Obj_coords(t, coords, precess=False):
         raise ValueError
 
 
-# ====================================================================================================
 def romer_delay(xyzEarth, xyzObj):
     """
-    Calculate Rømer delay (classical light travel time correction) in units of days
+    Calculate Rømer delay (classical light travel time correction) in units of
+    days
 
     Notes:
     ------
@@ -258,20 +200,22 @@ def romer_delay(xyzEarth, xyzObj):
     return delay
 
 
-# ====================================================================================================
+rømer_delay = romer_delay  # oh yeah!
+
+
 def einstein_delay(jd_tt):
     """
     Calculate Eistein delay in units of days
     """
     red_jd_tt = jd_tt - 2451545.0
     g = np.radians(357.53 + 0.98560028 * red_jd_tt)  # mean anomaly of Earth
-    L_Lj = np.radians(246.11 + 0.90251792 * red_jd_tt)  # Difference in mean ecliptic longitudea of the Sun and Jupiter
+    # Difference in mean ecliptic longitudea of the Sun and Jupiter
+    L_Lj = np.radians(246.11 + 0.90251792 * red_jd_tt)
     delay = 0.001657 * np.sin(g) + 0.000022 * np.sin(L_Lj)
 
     return delay / 86400.
 
 
-# ====================================================================================================
 def shapiro_delay(xyzEarth, xyzSun, xyzObj):
     """
     Calculate Shapiro delay in units of days
@@ -279,7 +223,8 @@ def shapiro_delay(xyzEarth, xyzSun, xyzObj):
     https://en.wikipedia.org/wiki/Shapiro_delay
     """
     Earth_Sun = xyzEarth - xyzSun  # Earth to Sun vector
-    d_Earth_Sun = np.linalg.norm(Earth_Sun, axis=1)[None].T  # Earth to Sun distance
+    d_Earth_Sun = np.linalg.norm(Earth_Sun, axis=1)[
+        None].T  # Earth to Sun distance
     u_Earth_Sun = Earth_Sun / d_Earth_Sun  # Earth to Sun unit vector
 
     # dot product gives cosine of angle between Earth and Sun
@@ -294,15 +239,16 @@ def shapiro_delay(xyzEarth, xyzSun, xyzObj):
     return delay.to('day').value
 
 
-# ====================================================================================================
-# NOTE: Despite these corrections, there is still a ~0.02s offset between the BJD_TDB computed by
-# NOTE: this code and the IDL code http://astroutils.astronomy.ohio-state.edu/time/. The function below
-# NOTE: can be used to check this
+# NOTE:
+# Despite these corrections, there is still a ~0.02s offset between the
+# BJD_TDB computed by this code and the IDL code at
+# http://astroutils.astronomy.ohio-state.edu/time/.
+# The function below can be used to check this
 
-def utc2bjd(times, coords):
+def utc2bjd(times, coords):  # TODO move
     """
-    Use the html form at http://astroutils.astronomy.ohio-state.edu/time/ to convert to astropy.Time
-    to BJD_TDB
+    Use the html form at http://astroutils.astronomy.ohio-state.edu/time/ to
+    convert to astropy.Time to BJD_TDB
     """
 
     import urllib.request, urllib.parse
@@ -325,8 +271,10 @@ def utc2bjd(times, coords):
     # web form can only handle 1e4 times simultaneously
     if len(times) > 1e4:
         'TODO'  # split time array into chunks
+        raise NotImplementedError
 
-    # encode the times to url format str (urllib does not success convert newlines appropriately)
+    # encode the times to url format str (urllib does not success convert
+    # newlines appropriately)
     newline, spacer, joiner = '%0D%0A', '+', '&'  # html POST code translations
     fixes = ('-', spacer), (':', spacer), (' ', spacer)
     ts = newline.join(times.iso)
@@ -348,24 +296,44 @@ def utc2bjd(times, coords):
 
     # convert back to time object
     bjd_tdb = Time(np.array(jds, float), format='jd')
-
     return bjd_tdb
 
 
-# ****************************************************************************************************
+class HMSrepr(object):
+    """
+    Mixin class that provided numerical objects with `hms` property for pretty
+    representation
+    """
+
+    @property
+    def hms(self):
+        return fmt_hms(self)
+
+
+class TimeDelta(TimeDelta):
+    @property
+    def hms(self):
+        v = self.value
+        precision = 1 if v > 10 else 3
+        return fmt_hms(v, precision)
+
+
+# ******************************************************************************
 class Time(Time):
     """
-    Extends the astropy.time.core.Time class to include method that returns the time in hours.
+    Extends the astropy.time.core.Time class to include method that returns the
+    time in hours.
 
-    The astropy.time package provides functionality for manipulating times and dates. Specific emphasis
-    is placed on supporting time scales (e.g. UTC, TAI, UT1) and time representations (e.g. JD, MJD,
-    ISO 8601) that are used in astronomy. It uses Cython to wrap the C language ERFA time and calendar
-    routines. All time scale conversions are done by Cython vectorized versions of the ERFA routines
-    and are fast and memory efficient.
+    The astropy.time package provides functionality for manipulating times and
+    dates. Specific emphasis is placed on supporting time scales (e.g. UTC,
+    TAI, UT1) and time representations (e.g. JD, MJD, ISO 8601) that are used
+    routines. All time scale conversions are done by Cython vectorized
+    versions of the ERFA routines and are fast and memory efficient.
 
-    All time manipulations and arithmetic operations are done internally using two 64-bit floats to
-    represent time. Floating point algorithms from [1] are used so that the Time object maintains
-    sub-nanosecond precision over times spanning the age of the universe.
+    All time manipulations and arithmetic operations are done internally
+    using  two 64-bit floats to represent time. Floating point algorithms
+    from [1] are used so that the Time object maintains sub-nanosecond
+    precision over times spanning the age of the universe.
 
     [1]     Shewchuk, 1997, Discrete & Computational Geometry 18(3):305-363
     """
@@ -373,16 +341,32 @@ class Time(Time):
     # TODO: HJD:
     # TODO: phase method...
 
-    # ====================================================================================================
     # @property
     def isosplit(self):
         """Split ISO time between date and time (from midnight)"""
         splitter = lambda x: tuple(x.split('T'))
         dtype = [('utdate', 'U20'), ('utc', 'U20')]
-        utdata = np.fromiter(map(splitter, self.utc.isot), dtype)
-        return utdata
+        utdata = np.fromiter(map(splitter,
+                                 np.atleast_1d(self.utc.isot)), dtype)
+        utdate, utc = utdata['utdate'], utdata['utc']
+        if len(utdate) == 1:
+            return utdate[0], utc[0]
+        return utdate, utc
 
-    # =========================================================================================================================
+    @classmethod
+    def isomerge(cls, utdate, utc, **kws):
+        # construct Time object from utdate and utc string arrays
+        a = np.char.add(np.char.add(utdate, 'T'), utc)
+        return cls(a, format='isot', scale='utc', **kws)
+
+    def time_from_local_midnight(self, unit='s'):
+        """
+        get the TimeDelta since local midnight for the date of the first
+        time stamp
+        """
+        utdate0, _ = self[0].isosplit()
+        return (self.utc - Time(utdate0)).to(unit)
+
     # #@property
     # def hours(self):
     #     """Converts time to hours since midnight."""
@@ -398,22 +382,28 @@ class Time(Time):
     #     #else:
     #     return hours
 
-    # =========================================================================================================================
     # @property
     # def sec(self):
     #     return self.hours * 3600.
 
-    # # ====================================================================================================
+    #
     # @property
     # def radians(self):
     #     return np.radians( self.hours*15. )
 
-    # ====================================================================================================
     def check_iers_table(self):
         """
-        For the UT1 to UTC offset, one has to interpolate in observed values provided by the International Earth Rotation and Reference Systems Service. By default, astropy is shipped with the final values provided in Bulletin B, which cover the period from 1962 to shortly before an astropy release, and these will be used to compute the offset if the delta_ut1_utc attribute is not set explicitly. For more recent times, one can download an updated version of IERS B or IERS A (which also has predictions), and set delta_ut1_utc as described in get_delta_ut1_utc
+        For the UT1 to UTC offset, one has to interpolate in observed values
+        provided by the International Earth Rotation and Reference Systems
+        Service. By default, astropy is shipped with the final values provided
+        in Bulletin B, which cover the period from 1962 to shortly before an
+        astropy release, and these will be used to compute the offset if the
+        delta_ut1_utc attribute is not set explicitly. For more recent times,
+        one can download an updated version of IERS B or IERS A (which also
+        has predictions), and set delta_ut1_utc as described in
+        get_delta_ut1_utc
         """
-        from astropy.utils.iers import TIME_BEYOND_IERS_RANGE  # TIME_BEFORE_IERS_RANGE
+        from astropy.utils.iers import TIME_BEYOND_IERS_RANGE
 
         delta, status = self.get_delta_ut1_utc(return_status=True)
         beyond = (status == TIME_BEYOND_IERS_RANGE)
@@ -423,7 +413,6 @@ class Time(Time):
                  ''.format(beyond.sum(), len(beyond)))
         return beyond
 
-    # =========================================================================================================================
     # @profile()
     # def bjd(self, coords, precess='first', abcorr=None): #TODO:  OO
     #
@@ -441,7 +430,6 @@ class Time(Time):
     #
     #     return self.tdb.jd - rd - ed - shd
 
-    # =========================================================================================================================
     # def __add__(self, other):
     #     print( 'INTERCEPTING ADD' )
     #     ts = super(Time, self).__add__(other)
@@ -451,21 +439,24 @@ class Time(Time):
     #
     #     embed()
     #
-    #     t = Time(ts.jd1, ts.jd2, format=ts.format, scale=scale, precision=precision, copy=False, location=self.location)  #gives it the additional methods defined above
+    #     t = Time(ts.jd1, ts.jd2, format=ts.format, scale=scale,
+    #               precision=precision, copy=False, location=self.location)
+    #     #gives it the additional methods defined above
     #     return getattr(t.replicate(format=format), scale)
 
-    # =========================================================================================================================
     # def __sub__(self, other):
     #     print( 'INTERCEPTING SUB!' )
     #     ts = super(Time, self).__sub__(other)
     #     format = ts.format
     #     scale = ts.scale
     #     precision = ts.precision
-    #     t = Time(ts.jd1, ts.jd2, format=ts.format, scale=scale, precision=precision, copy=False, location=self.location)  #gives it the additional methods defined above
+    #     t = Time(ts.jd1, ts.jd2, format=ts.format, scale=scale,
+    #              precision=precision, copy=False, location=self.location)
+    #     gives it the additional methods defined above
     #     return getattr(t.replicate(format=format), scale)
 
 
-# ****************************************************************************************************
+# ******************************************************************************
 def timingFactory(cube):
     if cube.needs_timing:
         return shocTimingOld
@@ -476,18 +467,16 @@ def unknown():
     pass
 
 
-# ****************************************************************************************************
+# ******************************************************************************
 class NoGPSTriggerProvided(Exception):
     pass
 
 
-class Duration(float):
-    @property
-    def hms(self):
-        return fmt_hms(self, None, 'hms', None)
+class Duration(float, HMSrepr):
+    pass
 
 
-class Trigger():
+class Trigger(object):
     def __init__(self, header):
         self.mode = header['trigger']
         self.start = header.get('gpsstart')
@@ -535,8 +524,8 @@ class Trigger():
     # is_gps_all = is_external_start
 
 
-# ****************************************************************************************************
-class shocTimingBase():
+# ******************************************************************************
+class shocTimingBase(object):
     # set location
     # self.location = EarthLocation.of_site(location)
     # TODO: HOW SLOW IS THIS COMPARED TO ABOVE LINE???
@@ -578,21 +567,21 @@ class shocTimingBase():
         #
         #   Mode: 'External':
         #     * KCT, DATE-OBS **not recorded**
-        #     * EXPOSURE - erroneously stores the total accumulated exposure time
+        #     * EXPOSURE - erroneously stores total accumulated exposure time
 
         # Recent SHOC data (post software upgrade)
         # ----------------------------------------
         #   Mode: 'Internal':
-        #     * DATE-OBS  - start time accurate to microsec
+        #     * DATE-OBS  - start time accurate to microsecond
         #   Mode: 'External [Start]':
         #     * GPSSTART  - GPS start time (UTC; external)
         #     * KCT       - Kinetic Cycle Time
         #   Mode: 'External':
-        #     * GPS-INT   - GPS trigger interval (msec)
+        #     * GPS-INT   - GPS trigger interval (milisecond)
 
         self.filename = cube.get_filename()
         self.header = header = cube[0].header
-        self.data = None        # calculated in `set` method
+        self.data = None  # calculated in `set` method
         self.location = location or self.sutherland
 
         # Timing trigger mode
@@ -600,13 +589,15 @@ class shocTimingBase():
 
         # Date (midnight UT)
         date_str = header['date'].split('T')[0]  # or FRAME
-        self.utdate = Time(date_str)  # this should at least be the correct date!
+        self.utdate = Time(date_str)
+        # this should at least be the correct date!
 
         # exposure time
-        # NOTE: The attributes `exp` and `kct` will be None only if we need
-        # the user to provide them explicitly (applicable only to older SHOC data)
         self.texp, self.kct = self.get_kct()
         self.nframes = cube.shape[-1]
+        # NOTE:
+        # The attributes `exp` and `kct` will be None only if we need the
+        # user to provide them explicitly (applicable only to older SHOC data)
 
         # stamps
         self._t0 = None
@@ -617,16 +608,22 @@ class shocTimingBase():
         return self.header['exposure'], self.header['kct']
 
     def get_tdead(self):
-        # dead (readout) time between exposures in s
-        # NOTE: deadtime should always the same value unless the user has (foolishly) changed
-        # NOTE: the vertical clock speed. TODO: MAYBE CHECK stack_header['VSHIFT']
-        # WARNING: EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME TRANSFER MODE!
+        """dead time (readout) between exposures in s"""
+        # NOTE:
+        # deadtime should always the same value unless the user has (foolishly)
+        # changed the vertical clock speed.
+        # TODO: MAYBE CHECK stack_header['VSHIFT']
+        # WARNING:
+        # EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME
+        # TRANSFER MODE!
         return 0.00676
 
-    # NOTE: the following attributes are accessed as properties to account for the
+    # NOTE:
+    # the following attributes are accessed as properties to account for the
     # case of (old) GPS triggered data in which the frame start time and kct
     # are not available upon initialization (they are missing in the header).
     # If missing they will be calculated upon accessing the attribute.
+
     @property
     def duration(self):
         """Duration of the observation"""
@@ -654,11 +651,12 @@ class shocTimingBase():
             dt = self.t0.to_datetime()
             # 1 decimal precision for seconds
             s = round(dt.second + dt.microsecond / 1e6, 1)
-            return dt.strftime('%Y-%m-%d %H:%M:') + str(s)
+            ds = ('%.1f' % (s - int(s))).lstrip('0')
+            return dt.strftime('%Y-%m-%d %H:%M:%S') + ds
 
         except NoGPSTriggerProvided as err:
-            from ansi import as_ansi
-            return as_ansi('unknown', 'red')
+            from motley import codes
+            return codes.apply('unknown', 'r')
 
     @property
     def t0mid(self):
@@ -676,19 +674,19 @@ class shocTimingBase():
 
     def get_time_data(self):  # TODO: rename
         """
-        Return the mid time of the first frame in UTC and the cycle time (exposure + dead time) as
-        TimeDelta object
+        Return the mid time of the first frame in UTC and the cycle time
+        (exposure + dead time) as TimeDelta object
         """
         # new / fixed data!  Rejoice!
         header = self.header
         tStart = header['DATE-OBS']
-        # NOTE: This keyword is confusing (UTC-OBS would be better), but since it is now in common
-        # NOTE: use, we (reluctantly) do the same
+        # NOTE: This keyword is confusing (UTC-OBS would be better), but since
+        # it is now in common  use, we (reluctantly) do the same.
         # time for start of first frame
-        t0 = Time(tStart, format='isot', scale='utc', precision=9, location=self.location)
-        # NOTE: TimeDelta has higher precision than Quantity
+        t0 = Time(tStart, format='isot', scale='utc', precision=9,
+                  location=self.location)
+        # note: TimeDelta has higher precision than Quantity
         td_kct = TimeDelta(self.kct, format='sec')
-
         return t0, td_kct
 
     def set(self, t0, iers_a=None, coords=None):  # TODO: corrections):
@@ -742,9 +740,11 @@ class shocTimingBase():
         timeData.gjd = t.tcg.jd  # geocentric julian date
 
         # do barycentrization
-        if (coords is not None) and (self.location is not None):  # verbose syntax to avoid  #quantity.py:892: FutureWarning
+        if (coords is not None) and (
+                self.location is not None):  # verbose syntax to avoid  #quantity.py:892: FutureWarning
             # barycentric julian date (with light travel time corrections)
-            bjd = light_time_corrections(t, coords, precess='first', abcorr=None)
+            bjd = light_time_corrections(t, coords, precess='first',
+                                         abcorr=None)
             timeData.bjd = bjd
 
             # altitude and airmass
@@ -864,12 +864,12 @@ class shocTimingBase():
     # self.data.airmass = Young94(z)
 
 
-# ****************************************************************************************************
+# ******************************************************************************
 class shocTimingNew(shocTimingBase):
     pass
 
 
-# ****************************************************************************************************
+# ******************************************************************************
 class shocTimingOld(shocTimingBase):
     def get_kct(self):
 
@@ -885,7 +885,8 @@ class shocTimingOld(shocTimingBase):
         # GPS Triggering (External or External Start)
         elif self.trigger.is_gps():
             if self.trigger.is_external_start():  # External Start
-                t_exp = stack_header['EXPOSURE']  # exposure time in sec as in header
+                t_exp = stack_header[
+                    'EXPOSURE']  # exposure time in sec as in header
                 t_dead = self.get_tdead()
                 t_kct = t_dead + t_exp  # Kinetic Cycle Time
             else:
@@ -912,7 +913,8 @@ class shocTimingOld(shocTimingBase):
         # utdate = Time(date_str)     #this should at least be the correct date!
 
         t_exp, t_kct = self.texp, self.kct
-        td_kct = TimeDelta(t_kct, format='sec')  # NOTE: TimeDelta has higher precision than Quantity
+        td_kct = TimeDelta(t_kct,
+                           format='sec')  # NOTE: TimeDelta has higher precision than Quantity
         # td_kct = t_kct * u.sec
 
         if self.trigger.is_internal():
@@ -932,7 +934,8 @@ class shocTimingOld(shocTimingBase):
         if self.trigger.is_gps():
             if self.trigger.start:
                 t0 = self.utdate + self.trigger.start
-                t0 = Time(t0.isot, format='isot', scale='utc', precision=9, location=self.location)
+                t0 = Time(t0.isot, format='isot', scale='utc', precision=9,
+                          location=self.location)
                 t0mid = t0 + 0.5 * td_kct  # set t0 to mid time of first frame
             else:
                 raise NoGPSTriggerProvided(
@@ -942,7 +945,7 @@ class shocTimingOld(shocTimingBase):
         # stack_hdu.flush(output_verify='warn', verbose=1)
         # IF TIMECORR --> NO NEED FOR GPS TIMES TO BE GIVEN EXPLICITLY
         logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',
-                  self.filename, self.trigger.mode.upper(), t0mid, t_kct)
+                      self.filename, self.trigger.mode.upper(), t0mid, t_kct)
 
         return t0mid, td_kct
 

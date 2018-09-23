@@ -20,7 +20,8 @@
 
 # TODO: time / profile sections
 
-from decor.profiler.timers import Chrono, timer, timer_extra
+from motley.profiler.timers import Chrono, timer, timer_extra
+
 chrono = Chrono()
 # NOTE do this first so we can profile import times
 
@@ -41,24 +42,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io.fits.header import Header
 from astropy.coordinates import SkyCoord
+import more_itertools as mit
 
+from recipes.io import parse, iocheck, warn  # , note
+# from recipes.list import flatten
+from recipes.misc import get_terminal_size
+from motley.table import Table as sTable
 
-from pySHOC.core import shocSciRun, shocBiasRun, shocFlatFieldRun #, StructuredRun,
+from pySHOC.core import median_scaled_median, shocSciRun, shocBiasRun, \
+    shocFlatFieldRun  # , GroupedRun,
 from pySHOC.header import get_header_info
 from pySHOC.io import (ValidityTests as validity,
                        Conversion as convert,
                        InputCallbackLoop)
 
-from recipes.io import iocheck, warn  # , note
-from recipes.io import parse
-# from recipes.list import flatten
-from recipes.iter import grouper, partition  # , flatiter
-from recipes.misc import getTerminalSize
-from ansi.table import Table as sTable
-
 # from ansi.progress import ProgressBar
 
-from decor.profiler import profiler
+# from motley import profiler
 # profiler = profile()
 # @profiler.histogram
 
@@ -67,20 +67,20 @@ from IPython import embed
 chrono.mark('imports')
 chrono.report()
 
-
 # setup warnings to print full traceback
 # TODO: enable next section if mode is debug
 # from recipes.io.tracewarn import *
 # warning_traceback_on()
 # logging.captureWarnings(True)
 
+__version__ = 3.14159
 
 
 ################################################################################
 # Misc Function definitions
 ################################################################################
 def section_header(msg, swoosh='=', _print=True):
-    width = getTerminalSize()[0]
+    width = get_terminal_size()[0]
     # swoosh = swoosh * width
     # barfmt = '{1:{1}<{2}}'
     # msgfmt = '{0:^{2}}'
@@ -91,27 +91,11 @@ def section_header(msg, swoosh='=', _print=True):
     return info
 
 
-def imaccess(filename):
-    return True  # i.e. No validity test performed!
-    # try:
-    #     pyfits.open( filename )
-    #     return True
-    # except BaseException as err:
-    #     print( 'Cannot access the file {}...'.format(repr(filename)) )
-    #     print( err )
-    #     return False
-
-
-def median_scaled_median(data, axis):
-    frame_med = np.median(data, (1,2))[:, None, None]
-    scaled = data / frame_med
-    return np.median(scaled, axis)
-
 def plot(**kws):
     pname = mp.current_process().name
     print(pname, 'starting plot')
     im = self.plot(**kws)
-    plt.show()      # child will stop here until the graph is closed
+    plt.show()  # child will stop here until the graph is closed
     print(pname, 'Done')
 
 
@@ -122,7 +106,6 @@ def plot(**kws):
 
 def parse_input():
     """Parse sys.argv arguments from terminal input"""
-    # FIXME: merge -d & -c option in favour of positional argument ??
 
     # exit clause for script parser.exit(status=0, message='')
     from sys import argv
@@ -130,124 +113,134 @@ def parse_input():
 
     # Main parser
     main_parser = argparse.ArgumentParser(
-        description='Data reduction pipeline for SHOC.')
+            prog='pySHOC.pipeline',
+            fromfile_prefix_chars='@',
+            description='Data reduction pipeline for SHOC.')
 
-    # group = parser.add_mutually_exclusive_group()
-    # main_parser.add_argument('-v', '--verbose', action='store_true')
-    # main_parser.add_argument('-s', '--silent', action='store_true')
+    inputOK = [
+        'a directory (all ".fits" files within recursively to relative depth '
+        'of  1)',
+        'name(s) of unprocessed/master {0} cube(s)/file(s)',
+        '"@list.txt", where "list.txt" is a text file containing (2) or (3) as'
+        ' one entry per line',
+        'a glob expression resolving to (2) or (3).  Glob expressions may be '
+        'relative to path provided as input.'
+    ]
+    inputOK = map('%i) %s'.__mod__, enumerate(inputOK, 1))
+    inputOKfmt = '\n\t'.join([''] + list(inputOK))
 
-    inputOK = ['1) a directory (in which case all fits files within will be read)',
-               '2) name(s) of master {0} file(s)',
-               '3) name(s) of unprocessed {0} cube(s)',
-               '4) name of txt list containing (2) or (3) as one entry per line',
-               '5) a glob expression resolving to (2) or (3)']
-    inputOKfmt = '\n\t'.join([''] + inputOK)
+    # main_parser.add_argument( # TODO: remove, or expand
+    #     '-i',
+    #     '--interactive',
+    #     action='store_true',
+    #     default=False,
+    #     dest='interactive',
+    #     help='Run the script in interactive mode.  You will be prompted for
+    #           input when necessary')
 
+    # input options
+    # ==========================================================================
     main_parser.add_argument(
-        '-i',
-        '--interactive',
-        action='store_true',
-        default=False,
-        dest='interactive',
-        help='Run the script in interactive mode.  You will be prompted for input when necessary')
+            'files_or_directory', nargs='*',  # metavar='N',
+            help='Science data cubes to be processed. Requires at least one argument. ')
+    main_parser.add_argument(
+            '-s',
+            '--science',
+            dest='sci',
+            nargs='+',
+            type=str,
+            help='Science data cubes to be processed.  Requires at least one argument. Argument can '
+                 'be explicit list of files, a glob expression, a txt list, or a directory.')
+    main_parser.add_argument(
+            '-b',
+            '--bias',
+            nargs='+',
+            default=False,
+            help='Files to use for bias correction. Requires -s option. Optional argument(s) '
+                 'can be one of the following:' + inputOKfmt.format('bias'))
+    main_parser.add_argument(
+            '-f',
+            '--flats',
+            nargs='+',
+            default=False,
+            help='Files to use for flat field correction.  Requires -s option.  Optional argument(s) '
+                 'can be one of the following:' + inputOKfmt.format(
+                    'flat field'))
 
-    # main_parser.add_argument(
-    #     '-d',
-    #     '--dir',
-    #     default=None,
-    #     help='The data directory. Defaults to current working directory.')
+    # output options
+    # ==========================================================================
+    main_parser.add_argument(
+            '-o',
+            '--outdir',
+            help='The data directory where the reduced data is to be placed. Defaults to input '
+                 'directory')
+    main_parser.add_argument(
+            '-w',
+            '--write-to-file',
+            nargs='?',
+            const=True,
+            default=True,
+            dest='w2f',
+            help='Controls whether the script creates txt list of the files created. Requires -s '
+                 'option. Optionally takes filename base string for txt lists.')
 
-    main_parser.add_argument(
-        'files_or_directory', nargs='*',  # metavar='N',
-        help='Science data cubes to be processed.  Requires at least one argument. ')
+    main_parser.add_argument('--plot', action='store_true', default=True,
+                             help='Do plots')
+    main_parser.add_argument('--no-plots', dest='plot', action='store_false',
+                             help="Don't do plots")
 
-    main_parser.add_argument(
-        '-o',
-        '--outdir',
-        help='The data directory where the reduced data is to be placed. Defaults to input '
-             'directory')
-    main_parser.add_argument(
-        '-w',
-        '--write-to-file',
-        nargs='?',
-        const=True,
-        default=True,
-        dest='w2f',
-        help='Controls whether the script creates txt list of the files created. Requires -c '
-             'option. Optionally takes filename base string for txt lists.')
-    main_parser.add_argument(
-        '-s',
-        '--science',
-        dest='sci',
-        nargs='+',
-        type=str,
-        help='Science data cubes to be processed.  Requires at least one argument. Argument can '
-             'be explicit list of files, a glob expression, a txt list, or a directory.')
-    main_parser.add_argument(
-        '-b',
-        '--bias',
-        nargs='+',
-        default=False,
-        help='Files to use for bias correction. Requires -c option. Optional argument(s) '
-             'can be one of the following:' + inputOKfmt.format('bias'))
-    main_parser.add_argument(
-        '-f',
-        '--flats',
-        nargs='+',
-        default=False,
-        help='Files to use for flat field correction.  Requires -c option.  Optional argument(s) '
-             'can be one of the following:' + inputOKfmt.format('flat field'))
-    main_parser.add_argument(
-        '-x',
-        '--split',
-        nargs='?',
-        const=True,
-        default=False,
-        help='Split (burst) the data cubes into a sequence single-frame fits files. This is utterly'
-             ' unnecessary, inefficient, and unproductive, but you can still do it if you are stuck in'
-             ' your oldschool ways and want to clutter the output folder with cruft. Obviously requires'
-             ' -c option.')
-    main_parser.add_argument(
-        '-t',
-        '--timing',
-        nargs='?',
-        const=True,
-        default=True,
-        help='Calculate the timestamps for data cubes. Note that time-stamping is done by default '
-             'The timing data will be written to a text files with the cube basename and extention '
-             '".time"')     #TODO: eliminate this argument
-    main_parser.add_argument(
-        '-g',
-        '--gps',
-        nargs='+',
-        default=None,
-        help='GPS triggering times. Explicitly or listed in txt file')  # NOTE: only applies to old data
-    main_parser.add_argument(
-        '-k',
-        '--kct',
-        default=[],
-        nargs='+',
-        help='Kinetic Cycle Time for External GPS triggering.')
-    main_parser.add_argument(
-        '-c',
-        '--combine',
-        nargs='+',
-        default=['daily', 'median'],
-        help='Specifies how the bias/flats will be combined. Options are daily/weekly mean/median.')
+    main_parser.add_argument('--verbose', '-v', action='count')
+    main_parser.add_argument('--version', action='version',
+                             version='%(prog)s: {}'.format(__version__))
 
-    main_parser.add_argument('--plot', action='store_true', default=True, help='Do plots')
-    main_parser.add_argument('--no-plots', dest='plot', action='store_false', help="Don't do plots")
+    # workload options
+    # ==========================================================================
+    main_parser.add_argument(
+            '-t',
+            '--timing',
+            nargs='?',
+            const=True,
+            default=True,
+            help='Calculate the timestamps for data cubes. Note that time-stamping is done by default '
+                 'The timing data will be written to a text files with the cube basename and extention '
+                 '".time"')  # TODO: eliminate this argument
+    main_parser.add_argument(
+            '-g',
+            '--gps',
+            nargs='+',
+            default=None,
+            help='GPS triggering times. Explicitly or listed in txt file')
+    main_parser.add_argument(
+            '-k',
+            '--kct',
+            default=[],
+            nargs='+',
+            help='Kinetic Cycle Time for External GPS triggering.')
+    # TODO: add texp for convenience
+    main_parser.add_argument(
+            '-c',
+            '--combine',
+            nargs='+',
+            default=['daily', 'median'],
+            help='Specifies how the bias/flats will be combined. Options are daily/'
+                 'weekly mean/median.')
+    main_parser.add_argument(
+            '-q',
+            '--quick-look',
+            help='Do fast and dirty extraction. No calibration, no aperture '
+                 'optimization.')
 
     args = argparse.Namespace()
 
-    # mx = main_parser.add_mutually_exclusive_group
-    # NOTE: NEED PYTHON3.3 AND MULTIGROUP PATCH FOR THIS...  OR YOUR OWN ERROR ANALYSIS???
+    # TODO: check ArgumentParser.add_argument_group
 
     # Header update parser
     # TODO: -coo  6 38 19.71 -48 59 15.6 ??? will this work??
     # FIXME: why not in main parser????
     # main_parser.add_argument('-u', '--update-headers',  help = 'Update fits file headers.')
 
+    # header update options
+    # ==========================================================================
     head_parser = argparse.ArgumentParser()
     head_parser.add_argument('update-headers',  # TODO: dest=someBetterName
                              nargs='?',
@@ -287,31 +280,35 @@ def parse_input():
     # head_parser.add_argument('-em', '--em-gain', dest='em', default=None, help='Electron Multiplying gain level')
     head_info = argparse.Namespace()
 
-    # Name convension parser
+    # Output file name formatting options #TODO: move to class level
+    # ==========================================================================
     name_parser = argparse.ArgumentParser()
     name_parser.add_argument(
-        'name',
-        nargs='?',
-        help=(
-            "template for naming convension of output files.  "
-            "eg. 'foo{sep}{basename}{sep}{filter}[{sep}b{binning}][{sep}sub{sub}]' where"
-            "the options are: "
-            "basename - the original filename base string (no extention); "
-            "name - object designation (if given or in header); "
-            "sep - separator character(s); filter - filter band; "
-            "binning - image binning. eg. 4x4; "
-            "sub - the subframed region eg. 84x60. "
-            "[] brackets indicate optional parameters."))  # action=store_const?
+            'name',
+            nargs='?',
+            help=(
+                """
+                Template for naming convention of output files.  
+                eg. 'foo{sep}{basename}{sep}{filter}[{sep}b{binning}][{sep}sub{sub}]'
+                where the keywords are: "
+                `basename` - the original filename base string (no extension);
+                `name` - object designation (if given or in header)
+                `sep` - separator character(s)
+                `filter` - filter band
+                `binning` - image binning. eg. '4x4'
+                `sub` - the sub-framed region eg. '84x60'
+                "[] brackets indicate optional parameters.
+                """))  # action=store_const?
     name_parser.add_argument(
-        '-fl',
-        '--flats',
-        nargs=1,
-        default='f[{date}{sep}]{binning}[{sep}sub{sub}][{sep}filt{filter}]')
+            '-fl',  # FIXME: why not -f ??
+            '--flats',
+            nargs=1,
+            default='f[{date}{sep}]{binning}[{sep}sub{sub}][{sep}{filter}]')
     name_parser.add_argument(
-        '-bi',
-        '--bias',
-        default='b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]',
-        nargs=1)
+            '-bi',
+            '--bias',
+            default='b{date}{sep}{binning}[{sep}m{mode}][{sep}t{kct}]',
+            nargs=1)
     name_parser.add_argument('-sc',
                              '--science-frames',
                              nargs=1,
@@ -325,7 +322,6 @@ def parse_input():
     valid_commands = ['update-headers', 'names']
 
     # TODO: get  parser.add_subparsers vibes working to simplify this stuff below.....
-    # NOTE: argparse supports textlist input through @list.txt syntax!
     # ===========================================================================
     def groupargs(arg, currentarg=[None]):
         """Groups the arguments in sys.argv for parsing."""
@@ -353,23 +349,24 @@ def sanity_checks(args, main_parser):
     prix = main_parser.prefix_chars
     prix2 = prix * 2
 
-    # no other keywords allowed in interactive mode # FIXME: thiswill be annoying. find a way to mesh
-    disallowedkw = {'interactive': set(args_dict.keys()) - set(['interactive'])}
-    if args.interactive:
-        for key in disallowedkw['interactive']:
-            if args_dict[key]:
-                # TODO: ignore these with warning
-                raise KeyError('%s (%s) option not allowed in interactive mode'
-                               % (prix + key[0], prix2 + key))
+    # no other keywords allowed in interactive mode
+    #  FIXME: this will be annoying. find a way to mesh
+    # disallowedkw = {'interactive': set(args_dict.keys()) - set(['interactive'])}
+    # if args.interactive:
+    #     for key in disallowedkw['interactive']:
+    #         if args_dict[key]:
+    #             # TODO: ignore these with warning
+    #             raise KeyError('%s (%s) option not allowed in interactive mode'
+    #                            % (prix + key[0], prix2 + key))
 
     # Sanity checks for non-interactive mode
     # any one of these need to be specified for an actionable outcome
     rqd = ['files_or_directory', 'sci', 'bias', 'flats']
     if not any([args_dict[key] for key in rqd]):
         main_parser.print_help()
-        raise ValueError('\nNo files specified! Please specify files to be processed')
+        raise ValueError('No files specified! Please specify files to be '
+                         'processed')
         # ''.format('/'.join(rqd)))
-
 
         ##, 'split', 'timing', 'update_headers', 'names']
         # raise ValueError('No action specified!\n'
@@ -397,12 +394,15 @@ def sanity_checks(args, main_parser):
     #    ('combine',          ['bias', 'flats'])       )
     requiredkw = OrderedDict(required)
     for key in args_dict:
-        if args_dict[key] and (key in requiredkw):  # if this option has required options
+        if args_dict[key] and (
+                key in requiredkw):  # if this option has required options
             if not any(args_dict.get(rqk) for rqk in
-                       requiredkw[key]):  # if none of the required options for this option are given
+                       requiredkw[
+                           key]):  # if none of the required options for this option are given
                 ks = prix2 + key  # long string for option which requires option(s)
                 ks_desc = '%s (%s)' % (ks[1:3], ks)
-                rqks = [prix2 + rqk for rqk in requiredkw[key]]  # list of long string for required option(s)
+                rqks = [prix2 + rqk for rqk in requiredkw[
+                    key]]  # list of long string for required option(s)
                 rqks_desc = ' / '.join(['%s (%s)' % (rqk[1:3], rqk)
                                         for rqk in rqks])
                 raise KeyError('One or more of the following option(s) required'
@@ -410,55 +410,84 @@ def sanity_checks(args, main_parser):
 
 
 ################################################################################################################
-def process_args(namespaces):
+def resolve_args(namespaces):
     from pathlib import Path
 
     # TODO: make so that we can run without science frames
     args, head_info, names = namespaces
 
-    # Positional argument and -c argument mean the same thing, we keep both for convenience
+    # Positional argument and -s / --sci argument mean the same thing
     if args.files_or_directory and not args.sci:
         args.sci = args.files_or_directory
-
-    # embed()
 
     if args.outdir:
         # output directory given explicitly
         args.outdir = iocheck(args.outdir, os.path.exists, 1)
     # else:
-        # infer output directory from images provided
+    # infer output directory from images provided
 
-    _infer_indir = not Path(args.sci[0]).is_dir()       # FIXME: NO sci ?
+    # If input is a directory, process all files in tree!
+    # If outdir given, rebuild the tree for reduced files there.  Otherwise
+    # maintain current tree for reduced files.
+    from pySHOC import treeops
+
+    root = Path(args.sci[0])
+    if root.is_dir():  # this is a directory try process entire tree!
+        _infer_indir = False
+        # first check if still has day-by-day folders
+        # if next(args.sci[0].glob('[01][0-9][0-3][0-9]'), None):
+        #     # try to partition
+        #     treeops.partition_by_source(args.sci[0])
+
+        # get file tree
+        tree = treeops.get_tree(root, '.fits')
+        flats = tree.pop('flats', tree.pop('flat', None))
+        bias = tree.pop('bias', None)
+        if not args.flats:
+            args.flats = flats
+        if not args.bias:
+            args.bias = bias
+
+        # flatten the tree into list of files
+        args.sci = list(mit.flatten(tree.values()))
+
+    else:
+        _infer_indir = True
+
+    # Resolve inputs and get the input folder form resolved file list for
+    # sci / flats / bias
     _infer_outdir = not bool(args.outdir)
-    workdir = ''
-    for name in ('sci', 'flats', 'bias'): #args.dark   # 'sci',
+    work_dir = ''
+    for name in ('sci', 'flats', 'bias'):  # args.dark   # 'sci',
         images = getattr(args, name)
         if images:
             # Resolve the input images
             images = parse.to_list(images,
                                    os.path.exists,
                                    include='*.fits',
-                                   path=workdir,
+                                   path=work_dir,
                                    abspaths=True,
                                    raise_error=1)
+            # put resolved list in arg namespace
             setattr(args, name, images)
             if _infer_indir:
-                workdir = Path(images[0]).parent
+                work_dir = Path(images[0]).parent
                 _infer_indir = False
 
             if _infer_outdir:
                 args.outdir = os.path.split(images[0])[0]
                 _infer_outdir = False
-    # All inputs should now be resolved to lists of filenames
 
+    # All inputs should now be resolved to lists of file names
     if args.sci:
         # Initialize Run
-        args.sci = shocSciRun(filenames=args.sci, label='science')
+        args.sci = shocSciRun.load(args.sci, label='science')
+        # TODO: use kind and set that as label default?
 
         # for cube in args.sci:  # DO YOU NEED TO DO THIS IN A LOOP?
         #     cube._needs_flip = not cube.cross_check(args.sci[0], 'flip_state')
-            # self-consistency check for flip state of science cubes
-            # #NOTE: THIS MAY BE INEFICIENT IF THE FIRST CUBE IS THE ONLY ONE WITH A DIFFERENT FLIP STATE...
+        # self-consistency check for flip state of science cubes
+        # #NOTE: THIS MAY BE INEFICIENT IF THE FIRST CUBE IS THE ONLY ONE WITH A DIFFERENT FLIP STATE...
 
     # ===========================================================================
     if args.gps:
@@ -470,7 +499,7 @@ def process_args(namespaces):
                                 raise_error=-1)  # if valid single time this will return that same str else None
             if not valid_gps:
                 args.gps = parse.to_list(args.gps, validity.RA,
-                                         path=workdir,
+                                         path=work_dir,
                                          abspath=0,
                                          sort=0,
                                          raise_error=1)
@@ -486,9 +515,10 @@ def process_args(namespaces):
         # if any cubes are GPS triggered on each individual frame
         grun = args.sci.that_need_kct()
         if len(args.kct) == 1 and len(grun) != 1:
-            warn('A single GPS KCT provided for multiple externally triggered runs. '
-                 'Assuming this applies for all these files: %s' % grun)
-            args.kct *= len(grun)   # expand by repeating
+            warn(
+                    'A single GPS KCT provided for multiple externally triggered runs. '
+                    'Assuming this applies for all these files: %s' % grun)
+            args.kct *= len(grun)  # expand by repeating
 
         elif len(grun) != len(args.kct):
             l = str(len(args.kct)) or 'No'
@@ -510,8 +540,9 @@ def process_args(namespaces):
         methods = 'sigma clipped',
         funcs = 'mean', 'median'
         vocab = hows + methods + funcs
-        transmap = dict(grouper(hows, 2))
-        understood, misunderstood = map(list, partition(vocab.__contains__, args.combine))
+        transmap = dict(mit.grouper(hows, 2))
+        understood, misunderstood = map(list, mit.partition(vocab.__contains__,
+                                                            args.combine))
         if any(misunderstood):
             raise ValueError('Argument(s) {} for combine not understood.'
                              ''.format(misunderstood))
@@ -524,24 +555,23 @@ def process_args(namespaces):
 
             args.combine = how
             args.fcombine = getattr(np, func)
-            print('\nBias/Flat combination will be done by {}.'.format(' '.join([how, meth, func])))
+            print('\nBias/Flat combination will be done by {}.'.format(
+                    ' '.join([how, meth, func])))
 
-             # TODO: sigma clipping ... even though it sucks
+            # TODO: sigma clipping ... even though it sucks
 
     # ===========================================================================
     if args.flats:
+        # TODO full matching here ...
 
-        #TODO full matching here ...
-
-        # args.flats = parse.to_list(args.flats, imaccess, path=workdir, raise_error=1)
-        args.flats = shocFlatFieldRun(filenames=args.flats, label='flat')
+        # args.flats = parse.to_list(args.flats, imaccess, path=work_dir, raise_error=1)
+        args.flats = shocFlatFieldRun.load(args.flats, label='flat')
 
         # isolate the flat fields that match the science frames. only these will be processed
         match = args.flats.cross_check(args.sci, 'binning', 1)
         args.flats = args.flats[match]
 
         # check which are master flats
-
 
         # for flat in args.flats:
         #     flat._needs_flip = not flat.cross_check(args.sci[0], 'flip_state')
@@ -559,27 +589,30 @@ def process_args(namespaces):
 
     # ===========================================================================
     if args.bias:
-        # args.bias = parse.to_list(args.bias, imaccess, path=workdir, raise_error=1)
-        args.bias = shocBiasRun(filenames=args.bias, label='bias')
+        # args.bias = parse.to_list(args.bias, imaccess, path=work_dir, raise_error=1)
+        args.bias = shocBiasRun.load(args.bias, label='bias')
 
         # match the biases for the science run
         match4sci = args.bias.cross_check(args.sci, ['binning', 'mode'], 0)
         # for bias in args.bias:
         #     bias._needs_flip = bias.cross_check(args.sci[0], 'flip_state')
-            # NOTE: THIS MAY BE INEFICIENT IF THE FIRST CUBE IS THE ONLY ONE WITH A DIFFERENT FLIP STATE...
-        #args.bias[match4sci].flag_sub(args.sci) ?
+        # NOTE: THIS MAY BE INEFICIENT IF THE FIRST CUBE IS THE ONLY ONE WITH A DIFFERENT FLIP STATE...
+        # args.bias[match4sci].flag_sub(args.sci) ?
         args.bias.flag_sub(args.sci)
-        args.bias[match4sci].print_instrumental_setup(description='(for science frames)')
+        args.bias[match4sci].print_instrumental_setup(
+                description='(for science frames)')
 
         # match the biases for the flat run
         if args.flats:
-            match4flats = args.bias.cross_check(args.flats, ['binning', 'mode'], -1)
+            match4flats = args.bias.cross_check(args.flats, ['binning', 'mode'],
+                                                -1)
             # args.bias4flats = args.bias[match4flats]
             # for bias in args.bias4flats:
             #     bias._needs_flip = bias.cross_check(args.flats[0], 'flip_state')
 
             # print table of bias frames
-            args.bias[match4flats].print_instrumental_setup(description='(for flat fields)')
+            args.bias[match4flats].print_instrumental_setup(
+                    description='(for flat fields)')
             match = match4sci & match4flats
         else:
             match = match4sci
@@ -597,7 +630,9 @@ def process_args(namespaces):
         if args.outdir[0]:  # if an output directory is given
             args.outdir = os.path.abspath(args.outdir[0])
             if not os.path.exists(args.outdir):  # if it doesn't exist create it
-                print('Creating reduced data directory {}.\n'.format(args.outdir))
+                print(
+                        'Creating reduced data directory {}.\n'.format(
+                            args.outdir))
                 os.mkdir(args.outdir)
 
     # ===========================================================================
@@ -618,7 +653,8 @@ def process_args(namespaces):
         if hi.ra and hi.dec:
             iocheck(hi.ra, validity.RA, 1)
             iocheck(hi.dec, validity.DEC, 1)
-            hi.coords = SkyCoord(ra=hi.ra, dec=hi.dec, unit=('h', 'deg'))  # , system='icrs'
+            hi.coords = SkyCoord(ra=hi.ra, dec=hi.dec,
+                                 unit=('h', 'deg'))  # , system='icrs'
         else:
             from pySHOC.utils import retrieve_coords_ra_dec
             hi.coords, hi.ra, hi.dec = retrieve_coords_ra_dec(hi.object)
@@ -629,11 +665,14 @@ def process_args(namespaces):
                             (cooA.dec - cooB.dec).value], threshold).all()
 
         for cube in args.sci:  # TODO: select instead of loop
-            if cube.has_coords and hi.coords and not is_close(cube.coords, hi.coords):
+            if cube.has_coords and hi.coords and not is_close(cube.coords,
+                                                              hi.coords):
                 fmt = dict(style='hmsdms', precision=2, sep=' ', pad=1)
-                warn('Supplied coordinates {} will supersede header coordinates {} in {}'
-                     ''.format(hi.coords.to_string(**fmt), cube.coords.to_string(**fmt),
-                               cube.filename()))
+                warn(
+                        'Supplied coordinates {} will supersede header coordinates {} in {}'
+                        ''.format(hi.coords.to_string(**fmt),
+                                  cube.coords.to_string(**fmt),
+                                  cube.filename()))
                 cube.coords = hi.coords
 
         if not hi.date:
@@ -686,7 +725,6 @@ def process_args(namespaces):
     # WARN IF FILE HAS BEEN TRUNCATED -----------> PYFITS DOES NOT LIKE THIS.....WHEN UPDATING:  ValueError: total size of new array must be unchanged
 
 
-
 ################################################################################
 # Headers
 ################################################################################
@@ -714,7 +752,8 @@ def header_proc(run, do_update, head_info, verbose=True):
             ronTable.append(row)
 
     if update_all:
-        print('\n\nUpdating all headers with the following shared information (where necessary):\n')
+        print(
+                '\n\nUpdating all headers with the following shared information (where necessary):\n')
         print(repr(Header(update_all)))
         print()
 
@@ -723,10 +762,10 @@ def header_proc(run, do_update, head_info, verbose=True):
         print('Updating individual headers with the following:\n')
         table = sTable(ronTable,
                        title='Readout Noise',
-                       col_headers=('Filename', ) + tuple(ronDict.keys()), #'SATURATION', 'RON', 'SENSITIVITY',
+                       col_headers=('Filename',) + tuple(ronDict.keys()),
+                       # 'SATURATION', 'RON', 'SENSITIVITY',
                        minimalist=True)
         print(table)
-
 
     verbose = True
     table = []
@@ -753,7 +792,8 @@ def header_proc(run, do_update, head_info, verbose=True):
 
 
 ################################################################################################################
-def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF shocRun CLASS
+def sciproc(args, head_info, names):
+    # TODO: WELL THIS CAN NOW BE A METHOD OF shocRun CLASS
 
     section_header('Science frame processing')
 
@@ -790,8 +830,10 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
 
         # FIXME: grouping not yet needed here!!! since we will flatten below anyway!!
         # TODO: add closest matching to shocRun.cross_check ???
-        _, f_sr = run.match_and_group(args.flats, 'binning', matchdate, threshold_warn)
-        needs_debias += f_sr.flatten()  # NOTE: does not preserve names / ObsClass / runClass
+        _, f_sr = run.match_and_group(args.flats, 'binning', matchdate,
+                                      threshold_warn)
+        needs_debias += f_sr.flatten()
+        # NOTE: does not preserve names / ObsClass / runClass
 
     # ===========================================================================
     # combine bias
@@ -805,10 +847,16 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
         args.bias = args.bias[is_3d]
 
         # match & combine bias
-        srun, sr_b = needs_debias.match_and_group(args.bias, ('binning', 'mode'), 'kct')
-        # NOTE: it may not always be possible to *uniquely* match the science / flat frames to single
-        # NOTE: bias frame.  There are a few option on how to resolve this. 1) use them all, or
-        # NOTE: 2) pick one.  We use (1) as default.  In interactive mode we ask for input.
+        srun, sr_b = needs_debias.match_and_group(args.bias,
+                                                  ('binning', 'mode'), 'kct')
+        # NOTE:
+        # it may not always be possible to *uniquely* match the science / flat
+        # frames to single bias frame. There are a few option on how to
+        # resolve this:
+        #   1) use them all
+        #   2) pick one.
+        # We use (1) as default.  In interactive mode we ask for input.
+
         # ambiguous = np.greater(list(map(len, b_sr.values())), 1)
         # if args.interactive:
         #     msg = ('Ambiguity in matching {} to {}! Cannot uniquely match files for {} {} '
@@ -820,7 +868,8 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
 
         # TODO: CALCULATE UNCERTAINTY ON CALIBRATION FRAMES
         sr_b_masters = sr_b.combined(np.median)
-        sr_b_masters.writeout(args.outdir)                 #TODO: option for writing these to flats/masters/*.fits
+        sr_b_masters.writeout(args.outdir)
+        # TODO: option for writing these to flats/masters/*.fits
         masterbias += sr_b_masters.flatten()
 
         if args.plot:
@@ -835,7 +884,7 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
         idd = srun.flatten().identify()
         # set *srun* so the writeout below works when bool(args.flats) is False
         run = srun = idd.science
-        args.flats = idd.get('flat', [])        # NOTE: now dark subtracted
+        args.flats = idd.get('flat', [])  # NOTE: now dark subtracted
 
     # ===========================================================================
     # Flat fielding
@@ -843,14 +892,15 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
 
         # NOTE: in order to handle combining multiple cubes into a single frame (combine = 'weekly'), need structured run
         # combining each cube in flattened stack is NOT equivalent
-        srun, f_sr = run.match_and_group(args.flats, 'binning', matchdate, threshold_warn)
+        srun, f_sr = run.match_and_group(args.flats, 'binning', matchdate,
+                                         threshold_warn)
         f_sr_cmb = f_sr.combined(median_scaled_median)
         cmb_flats = f_sr_cmb.flatten()
 
         # normalize master flats
         for stack in cmb_flats:
             stack.data /= np.mean(stack.data)
-            #stack.flush(output_verify='warn', verbose=True)
+            # stack.flush(output_verify='warn', verbose=True)
 
         # write masterflats to file
         cmb_flats.writeout(args.outdir)
@@ -859,13 +909,14 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
         masterflats += cmb_flats
 
         # NOTE: need to match again since we are now including the given master flats
-        srun, f_sr = run.match_and_group(masterflats, 'binning', matchdate, threshold_warn)
+        srun, f_sr = run.match_and_group(masterflats, 'binning', matchdate,
+                                         threshold_warn)
         srun.flatfield(f_sr)
 
     #     b_sr.magic_filenames(args.outdir)
-            #
+    #
     #     masterbias = b_sr.compute_master(args.fcombine, load=True, w2f=args.w2f, outdir=args.outdir)
-    #     # StructuredRun for master biases separated by 'binning','mode', 'kct'
+    #     # GroupedRun for master biases separated by 'binning','mode', 'kct'
     #     # s_sr.subframe(b_sr)
     #
     #     s_sr.debias(masterbias)
@@ -897,37 +948,35 @@ def sciproc(args, head_info, names):  # TODO: WELL THIS CAN NOW BE A METHOD OF s
             outname = os.path.join(args.outdir, 'sci.bff.txt')
             run.export_filenames(outname)
 
-
-
-
     # animate(sbff[0])
 
     # ===========================================================================
     # splitting the cubes
-    if args.split:
-        # User input for science frame output designation string
-        if args.interactive:
-            print('\n' * 2)
-            msg = ('You have entered %i science cubes with %i different binnings'
-                   ' (listed above).\nPlease enter a naming convension:\n' %
-                   (len(args.sci), len(sbff)))
-            names.science = InputCallbackLoop.str(msg, '{basename}', check=validity.trivial,
-                                                  example='s{sep}{filter}{binning}{sep}')
-            msg = 'Please enter a naming option:\n1] Sequential \n2] Number suffix\n'
-            nm_option = InputCallbackLoop.str(msg, '2', check=lambda x: x in [1, 2])
-            sequential = 1 if nm_option == 1 else 0
-        else:
-            sequential = 0
+    # if args.split:
+    #     # User input for science frame output designation string
+    #     if args.interactive:
+    #         print('\n' * 2)
+    #         msg = ('You have entered %i science cubes with %i different binnings'
+    #                ' (listed above).\nPlease enter a naming convention:\n' %
+    #                (len(args.sci), len(sbff)))
+    #         names.science = InputCallbackLoop.str(msg, '{basename}', check=validity.trivial,
+    #                                               example='s{sep}{filter}{binning}{sep}')
+    #         msg = 'Please enter a naming option:\n1] Sequential \n2] Number suffix\n'
+    #         nm_option = InputCallbackLoop.str(msg, '2', check=lambda x: x in [1, 2])
+    #         sequential = 1 if nm_option == 1 else 0
+    #     else:
+    #         sequential = 0
+    #
+    #     run.magic_filenames(args.outdir)
+    #     run.unpack(sequential, w2f=args.w2f)
+    # else:
 
-        run.magic_filenames(args.outdir)
-        run.unpack(sequential, w2f=args.w2f)
-    else:
-        # One can do photometry without splitting the cubes!!
-        # TODO: check w2f???
-        # run.make_slices(suffix)
-        run.export_times(with_slices=False)
-        # run.make_obsparams_file(suffix)
-        run.export_headers()
+    # One can do photometry without splitting the cubes!!
+    # TODO: check w2f???
+    # run.make_slices(suffix)
+    run.export_times(with_slices=False)
+    # run.make_obsparams_file(suffix)
+    run.export_headers()
 
     return run
 
@@ -938,7 +987,7 @@ def setup():
     args, head_info, names = namespaces
     # print(args)
     sanity_checks(args, parser)
-    return process_args(namespaces)
+    return resolve_args(namespaces)
 
 
 ################################################################################################################
@@ -951,7 +1000,6 @@ if __name__ == '__main__':
 
     args, head_info, names = setup()
     run = sciproc(args, head_info, names)
-
 
     # def goodbye():
     #     """switch back to original working directory"""

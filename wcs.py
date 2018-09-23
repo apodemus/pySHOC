@@ -25,7 +25,7 @@ from matplotlib.transforms import Affine2D
 # WARNING: the optimization methods here are somewhat add hoc, and are not robust
 # TODO: plug in an MCMC sampler.  then you can discover flip states and measure FoV!!!!!
 
-def rotation_matrix_2D(theta):
+def rotation_matrix_2d(theta):
     '''Rotation matrix'''
     cos = np.cos(theta)
     sin = np.sin(theta)
@@ -35,14 +35,14 @@ def rotation_matrix_2D(theta):
 
 def transform(X, p):
     """rotate and translate"""
-    rotm = rotation_matrix_2D(p[-1])
+    rotm = rotation_matrix_2d(p[-1])
     Xnew = (rotm @ X.T).T + p[:2]
     return Xnew
 
 
 def transform_yx(X, p):
     """rotate and translate"""
-    rotm = rotation_matrix_2D(p[-1])
+    rotm = rotation_matrix_2d(p[-1])
     Xnew = (rotm @ X[:, ::-1].T).T + p[1::-1]
     return Xnew[:, ::-1]
 
@@ -224,7 +224,7 @@ class MatchImages():
         thetas = np.arctan2(v * x - u * y, u * x + v * y)
         theta = np.median(np.delete(thetas, ix))
         # calc final offset in DSS coordinates
-        rotm = rotation_matrix_2D(-theta)
+        rotm = rotation_matrix_2d(-theta)
         yxoff = yo, xo = np.median(cooDSSsub - (rotm @ coo[ic].T).T, 0)
 
         p = (yo, xo, theta)
@@ -300,7 +300,7 @@ class MatchDSS(MatchImages):
         crpix = np.array([h['crpix1'], h['crpix2']])  # target object pixel coordinates
         crpixDSS = crpix - 0.5  # convert to pixel llc coordinates
         cram = crpixDSS / self.pixscale  # convert to arcmin
-        rotm = rotation_matrix_2D(-theta)
+        rotm = rotation_matrix_2d(-theta)
         crpixSHOC = (rotm @ (cram - yxoff)) / pxscl
         # target coordinates in degrees
         xtrg = self.targetCoords
@@ -487,7 +487,7 @@ class MosaicPlotter():
 
 
 # gridr = ndgrid.like(imr)
-# rotm = rotation_matrix_2D(np.radians(p[-1]))
+# rotm = rotation_matrix_2d(np.radians(p[-1]))
 # gridn = gridr.swapaxes(0, -1) @ rotm + p[:2]
 
 if __name__ == '__main__':

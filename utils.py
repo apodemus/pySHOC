@@ -7,25 +7,25 @@ from astropy.coordinates import SkyCoord
 from astropy.coordinates.name_resolve import NameResolveError
 
 from recipes.io import warn
-from obstools.jparser import Jparser
-from decor.misc import persistant_memoizer
-from decor.profiler.timers import timer
-
+from obstools import jparser
+# from decor.misc import persistent_memoizer
+from recipes.decor import memoize
+from motley.profiler.timers import timer
 
 # get coordinate cache file
-here = inspect.getfile(inspect.currentframe())
+here = inspect.getfile(inspect.currentframe())  # this_filename
 moduleDir = Path(here).parent
 cooCacheName = '.coordcache'
 cooCachePath = moduleDir / cooCacheName
 
-@persistant_memoizer(cooCachePath)
+
+@memoize.to_file(cooCachePath)
 def resolver(name):
     """Get the target coordinates from object name if known"""
-    # try extract J coordinates from name.  We do this first, since it is faster than a sesame query
-    try:
-        return Jparser(name).skycoord()
-    except ValueError:
-        pass
+    # try extract J coordinates from name.  We do this first, since it is
+    # faster than a sesame query
+    if jparser.search(name):
+        return jparser.to_skycoord(name)
 
     # Attempts a SIMBAD Sesame query with the given object name
     logging.info('Querying SIMBAD database for %r.', name)
@@ -37,8 +37,6 @@ def retrieve_coords(name):
     Attempts to retrieve coordinates from name, first by parsing the name, or by
     doing SIMBAD Sesame query for the coordinates associated with name
 
-    P
-
     Examples
     --------
     coords = retrieve_coords('MASTER J061451.7-272535.5')
@@ -47,19 +45,18 @@ def retrieve_coords(name):
     """
     try:
         coo = resolver(name)
-        # if verbose:
         fmt = dict(precision=2, sep=' ', pad=1)
         ra = coo.ra.to_string(unit='h', **fmt)
         dec = coo.dec.to_string(unit='deg', alwayssign=1, **fmt)
         logging.info(
-            'The following ICRS J2000.0 coordinates were retrieved:\n'
-            'RA = %s, DEC = %s', ra, dec)
+                'The following ICRS J2000.0 coordinates were retrieved:\n'
+                'RA = %s, DEC = %s', ra, dec)
         return coo
 
-    except NameResolveError as e:
+    except (NameResolveError, AttributeError) as e:
         logging.exception(
-            'Coordinates for object %r could not be retrieved due to the '
-            'following exception: ', name)
+                'Coordinates for object %r could not be retrieved due to the '
+                'following exception: ', name)
 
 
 def retrieve_coords_ra_dec(name, verbose=True, **fmt):
@@ -98,20 +95,21 @@ def combine_single_images(ims, func):  # TODO MERGE WITH shocObs.combine????
         comment = 'Contributors to combined output image' if i == 0 else ''
         header['ICMB' + imnr] = (im.get_filename(), comment)
 
-    # outname = next( ims[0].filename_gen() )  #uses the FilenameGenerator of the first image in the shocRun
+    # uses the FilenameGenerator of the first image in the shocRun
+    # outname = next( ims[0].filename_gen() )
 
-    # pyfits.writeto(outname, data, header=header, output_verify='warn', overwrite=True)
     return pyfits.PrimaryHDU(data, header)  # outname
-
 
 
 dssCacheName = '.dsscache'
 dssCachePath = moduleDir / dssCacheName
+
+
 @timer
-@persistant_memoizer(dssCachePath)
+@memoize.to_file(dssCachePath)
 def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
     """
-    Grab a image from STScI server and pull it into pyfits.
+    Grab a image from STScI server and load as HDUList
 
     Parameters
     ----------
@@ -128,18 +126,18 @@ def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
 
     import textwrap
     from io import BytesIO
-    import urllib.request #, urllib.error, urllib.parse
+    import urllib.request  # , urllib.error, urllib.parse
 
     known_servers = ('poss2ukstu_blue', 'poss1_blue',
                      'poss2ukstu_red', 'poss1_red',
-                       'poss2ukstu_ir',
-                       'all')
+                     'poss2ukstu_ir',
+                     'all')
     if not imserver in known_servers:
         raise ValueError('Unknown server: %s.  Please select from: %s'
                          % (imserver, str(known_servers)))
 
     # resolve size
-    h, w = size      # FIXME: if number
+    h, w = size  # FIXME: if number
 
     # make url
     url = textwrap.dedent('''\
@@ -150,18 +148,17 @@ def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
             h=%f&w=%f&
             f=fits&
             c=none''' % (imserver, ra, dec, epoch, h, w)
-            ).replace('\n', '')
+                          ).replace('\n', '')
     # log
     logging.info("Retrieving %s'x %s' image for object at J%.1f coordinates "
-                 "RA = %.3f; DEC = %.3f from %r", h, w, epoch, ra, dec, imserver)
+                 "RA = %.3f; DEC = %.3f from %r", h, w, epoch, ra, dec,
+                 imserver)
     # load into fits
     fitsData = BytesIO()
     data = urllib.request.urlopen(url).read()
     fitsData.write(data)
     fitsData.seek(0)
     return pyfits.open(fitsData, ignore_missing_end=True)
-
-
 
 
 import numpy as np

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import numbers
 import re
 import os
 import copy
@@ -12,18 +12,19 @@ from datetime import date as Date
 
 import numpy as np
 import matplotlib.pyplot as plt
+from IPython import embed
 from astropy.io import ascii
 
 from tsa import fold
 from tsa.smoothing import smoother
 from tsa.spectral import Spectral
-from grafico.ts import TSplotter
-from grafico.multitab import MplMultiTab
+from graphical.ts import TSplotter
+from graphical.multitab import MplMultiTab
 from obstools.fastfits import quickheader
 # from recipes.list import flatten
 from recipes.iter import (interleave, groupmore, first_true_idx,
                           roundrobin)
-# from grafico.interactive import PointSelector
+# from graphical.interactive import PointSelector
 # from tsa.tfr import TimeFrequencyRepresentation as TFR
 # from tsa.outliers import WindowOutlierDetection, generalizedESD
 
@@ -32,9 +33,20 @@ from pySHOC.io import Conversion as convert
 # from IPython import embed
 # import decor
 # profiler = decor.profile.profile()
-# from ansi.core import banner
+# from motley.core import banner
+
+from recipes.string import get_module_name
+
+# module level logger
+logger = logging.getLogger(get_module_name(__file__, 2))
+
 
 tsplt = TSplotter()  # TODO: attach to PhotResult class
+
+# TODO: from tsa.ts import TimeSeries
+
+# class LightCurve(TimeSeries):
+#     pass
 
 
 def quadadd(a, axis):
@@ -102,14 +114,16 @@ def load_times(timefile):
     from recipes.io import read_file_line
 
     hline = read_file_line(timefile, 0)  # read header line
-    colnames = hline.strip('\n #').lower().split()  # extract column names (lower case)
+    colnames = hline.strip(
+            '\n #').lower().split()  # extract column names (lower case)
 
     t = np.genfromtxt(str(timefile),
                       dtype=None,
                       names=colnames,
                       skip_header=1,
                       usecols=range(1, len(colnames)),
-                      encoding=None  # this prevents np.VisibleDeprecationWarning
+                      encoding=None
+                      # this prevents np.VisibleDeprecationWarning
                       )
     # if len(t)
     # TODO: check that it is consistent with data
@@ -136,8 +150,8 @@ class SelfAwareContainer(object):
     _skip_init = False
 
     def __new__(cls, *args):
-        # this is here to handle initializing the object from an already existing
-        # istance of the class
+        # this is here to handle initializing the object from an already
+        # existing instance of the class
         if len(args) and isinstance(args[0], cls):
             instance = args[0]
             instance._skip_init = True
@@ -147,16 +161,28 @@ class SelfAwareContainer(object):
 
 
 # ****************************************************************************************************
-class PhotRun(SelfAwareContainer):
-    """ Class for containing / merging / plotting PhotResult objects."""
+# NOTE: there can be a generalized construction layer here that should be
+# able to easily make containers of their constituent class.
+# automatically get attributes as list if subclass has those
+# attributes. ie vectorized operations across instances
+
+# Create an abstraction layer that can split and merge multiple time
+# series data sets
+
+class PhotRun(SelfAwareContainer):  # make dataclass ???
+    """ Class for collecting / merging / plotting PhotResult (objects."""
 
     # TODO: inherit from OrderedDict / list ??
     # TODO: merge by: target; date; etc...
     # TODO: multiprocess generic methods
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: make picklable !!!!!!!!!
+
+    # TODO: methods to plot on same axes... !!!
+
     def __init__(self, filenames, databases=None, coordinates=None,
                  targets=None, target_name='', outpath=None):
+        # FIXME: dont need all this crap filenames / databases?
 
         if self._skip_init:
             # self._skip_init = False
@@ -194,6 +220,9 @@ class PhotRun(SelfAwareContainer):
 
     # TODO: attrsetter
 
+    # def inner(self):
+
+
     def set_targets(self, targets):
         # assert len(targets) == len(self)
         tmp = np.zeros(len(self))
@@ -207,9 +236,10 @@ class PhotRun(SelfAwareContainer):
 
     targets = property(get_targets, set_targets)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __getitem__(self, key):
-        """Can be indexed numerically, or by corresponding filename / basename."""
+        """
+        Can be indexed numerically, or by corresponding filename / basename.
+        """
 
         if isinstance(key, str):
             if key.endswith('.fits'):
@@ -222,11 +252,9 @@ class PhotRun(SelfAwareContainer):
         else:
             return self.results[key]
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __len__(self):
         return len(self.results)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __str__(self):
         return '%s of %i observation%s: %s' \
                % (self.__class__.__name__,
@@ -234,15 +262,15 @@ class PhotRun(SelfAwareContainer):
                   's' * bool(len(self) - 1),
                   '| '.join(self.basenames))
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # def __repr__(self):
     #     return str(self)
 
     def remove_empty(self):
         self.results = [r for r in self.results if r.datafile]
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def get_outname(self, with_name=True, extension='txt', sep='.'):  # TODO: MERGE WITH gen_filename??
+    def get_outname(self, with_name=True, extension='txt',
+                    sep='.'):
+        # TODO: filenaming.FilenameGenerator?
         name = ''
         if with_name:
             name = self.target_name.replace(' ', '') + sep
@@ -251,7 +279,6 @@ class PhotRun(SelfAwareContainer):
         outname = '{}{}.{}'.format(name, date_str, extension)
         return os.path.join(self.data_path, outname)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def add_cube(self, filename, Nstars=None):
         """add a cube to the run."""
         Nstars = Nstars if Nstars else self.nstars
@@ -262,12 +289,12 @@ class PhotRun(SelfAwareContainer):
         self.basenames.append(basename)
         self.results.append(PhotResult(filename, Nstars))
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # def get_date(self, fn):
-        # ds = pyfits.getval( self.template, 'date' )                #fits generation date and time
-        # self.date = ds.split('T')[0].strip('\n')                         #date string e.g. 2013-06-12
+        # ds = pyfits.getval( self.template, 'date' )
+        # #fits generation date and time
+        # self.date = ds.split('T')[0].strip('\n')
+        #       #date string e.g. 2013-06-12
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_time(self, tkw):
         # if not tkw in self.Tkw:
         # raise ValueError( '{} is not an valid time format.  Choose from {}'.format(tkw, self.Tkw) )
@@ -275,7 +302,6 @@ class PhotRun(SelfAwareContainer):
         t = np.concatenate([getattr(cube, tkw) for cube in self])
         return t
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # @decor.expose.args()
     def conjoin(self):
         """Join cubes together to form contiguous data block."""
@@ -294,24 +320,20 @@ class PhotRun(SelfAwareContainer):
         std.mask = True
         cum = np.cumsum(npoints)
 
-        try:
-            for i, obs in enumerate(self.results):
-                end = cum[i]
-                start = end - obs.npoints
-                # FIXME:  match stars!
-                order = obs.reorder
-                data[start:end, :obs.nstars] = obs.data[:, order]
-                std[start:end, :obs.nstars] = obs.std[:, order]
-        except Exception as err:
-            print(str(err))
-            embed()
-            raise
+        for i, obs in enumerate(self.results):
+            end = cum[i]
+            start = end - obs.npoints
+            # FIXME:  match stars!  cross_calibrate?
+            order = obs.reorder
+            data[start:end, :obs.nstars] = obs.data[:, order]
+            std[start:end, :obs.nstars] = obs.std[:, order]
+
 
         new = PhotResult()
         new.data = data
         new.std = std
         # convert timedata to recarray for quicker attr access
-        new.timedata = stack_arrays(self.attrgetter('timedata')).view(np.recarray)
+        new.t = stack_arrays(self.attrgetter('t')).view(np.recarray)
         new.target = 0  # since we re-ordered everything
         new.target_name = self.target_name
         new.date = self[0].date
@@ -319,14 +341,74 @@ class PhotRun(SelfAwareContainer):
 
         return new
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # def split_by_date(self):
+    #     ''  # TODO
+
+    # TODO:
+    def phase_select(self, min_phase=0, max_phase=1):
+        # Split light curves by cycle since we have the ephemeris
+
+        # prs = np.size(phase_range)
+        # if prs == 0:
+        #     min_phase, max_phase = (0, 1)
+        # elif prs == 1:
+        #     # interpret as maximal phase
+        #     max_phase = float(phase_range[0])
+        #     min_phase = 0.
+        # elif prs == 2:
+        #     min_phase, max_phase = sorted(phase_range)
+        # else:
+        #     raise ValueError('phase range not understood')
+
+        # checks
+        for arg in (min_phase, max_phase):
+            assert isinstance(arg, numbers.Real)
+            assert arg > 0
+
+        fluxes = []
+        phases = []
+        stds = []
+
+        # embed()
+        # print(min_phase, max_phase)
+
+        j = 0
+        for lc in self:
+            pack = ph, data, std = \
+                lc.t.phase, lc.data[:, lc.target, 0], lc.std[:, lc.target, 0]
+            # get the split positions
+
+            ix = np.where(np.diff(np.floor(ph - max_phase)))[0] + 1
+            # iterate through the segments
+            for phSub, dataSub, stdSub in zip(
+                    *(np.split(item, ix) for item in pack)):
+                phSub0 = phSub - np.floor(phSub[-1])
+                # print(id(lc), j, phSub[[0, -1]],  phSub0[[0, -1]])
+                l = (phSub0 >= min_phase) & (phSub0 <= max_phase)
+                if l.any():
+                    j += 1
+                    # TODO: better: itemized print for each LightCurve being
+                    # split / created
+                    logger.info('Splitting: %i / %i. phase: %.2f - %.2f',
+                                l.sum(), len(l), *phSub[l][[0, -1]])
+                    fluxes.append(dataSub[l])
+                    phases.append(phSub0[l])
+                    stds.append(stdSub[l])
+        # TODO: return list of LightCurve / MultiVariateTS objects
+        return phases, fluxes, stds
+
+    # def phase_fold(self, min_phase=0, max_phase=1):
+
+        # merge and sort
+
+
+
     # def compute_ls(self, tkw='lmst', **kw):
     #     t = self.get_time(tkw)
     #
     #     for star in self.stars:
     #         star.compute_ls(t, **kw)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_lcs(self, **kw):
 
         figs = []
@@ -351,7 +433,6 @@ class PhotRun(SelfAwareContainer):
 # ****************************************************************************************************
 class Star(object):
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def running_stats(self, nwindow, center=True, which='clipped'):
         import pandas as pd
 
@@ -373,23 +454,26 @@ class Star(object):
                 pl = ph = div
 
             s = np.ma.concatenate(
-                    [x[pl:0:-1], x, x[-1:-ph:-1]])  # pad data array with reflection of edges on both sides
+                    [x[pl:0:-1], x, x[
+                                    -1:-ph:-1]])  # pad data array with reflection of edges on both sides
             iu = -ph + 1
 
         else:
             pl = nwindow - 1
-            s = np.ma.concatenate([x[pl:0:-1], x])  # pad data array with reflection of the starting edge
+            s = np.ma.concatenate([x[pl:0:-1],
+                                   x])  # pad data array with reflection of the starting edge
             iu = len(s)
 
         s[s.mask] = np.nan
         max_nan_frac = 0.5  # maximum fraction of invalid values (nans) of window that will still yield a result
         mp = int(nwindow * (1 - max_nan_frac))
-        self.median = pd.rolling_median(s, nwindow, center=center, min_periods=mp)[pl:iu]
-        self.var = pd.rolling_var(s, nwindow, center=center, min_periods=mp)[pl:iu]
+        self.median = pd.rolling_median(s, nwindow, center=center,
+                                        min_periods=mp)[pl:iu]
+        self.var = pd.rolling_var(s, nwindow, center=center, min_periods=mp)[
+                   pl:iu]
 
         # return med, var
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_clippings(self, *args):
         # TODO:  plot clippings from outliers.py
         ax, t, nwindow = args
@@ -400,7 +484,8 @@ class Star(object):
         threshold = self.sig_thresh
 
         ax.plot(t, self.clipped, 'g.', ms=2.5, label='data')
-        ax.plot(t[self.clipped.mask], lc[self.clipped.mask], 'x', mfc='None', mec='r', mew=1, label='clipped')
+        ax.plot(t[self.clipped.mask], lc[self.clipped.mask], 'x', mfc='None',
+                mec='r', mew=1, label='clipped')
 
         # print( 'top', len(top), 'bottom', len(bottom), 't', len(t[st:end]) )
         sigma_label = r'{}$\sigma$ ($N_w={}$)'.format(threshold, nwindow)
@@ -422,17 +507,14 @@ class Star(object):
         ax.invert_yaxis()
         ax.legend(loc='best')
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def smooth(self, nwindow, window='hanning', fill='mean'):
         # data = self.clipped[~self.clipped.mask]
         self.smoothed = smoother(self.clipped, nwindow, window, fill)
         return self.smoothed
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def argmin(self):
         return np.argmin(self.counts())
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def compute_ls(self, t, signal, **kw):
         print('Doing Lomb Scargle for star {}'.format(self.name))
         """Do a LS spectrum on light curve of star.
@@ -489,15 +571,42 @@ def first_exists(*files):
     return next(filter(exists, files), None)
 
 
+class PhotFileManager:
+
+    #                                             ↓ kill
+    _default_search_order = ('npz', 'tbl', 'mag', 'dlc')
+
+    def __init__(self, filename):
+        self.filename = filename
+
+    @property
+    def basename(self):
+        if self.fitsfile:
+            return self.fitspath.stem
+
+    def globsearch(self, ext):
+        if self.fitsfile:
+            fp = self.fitspath
+            pattern = '%s*.%s' % (fp.stem, ext)
+            yield from fp.parent.glob(pattern)
+        return
+
+    def discover_files(self, *exts):
+        blob = []
+        for ext in exts:
+            blob.append(reversed(list(self.globsearch(ext))))
+        yield from roundrobin(*blob)
+
+
 # ****************************************************************************************************
-class PhotResult(AutoFileToPath):
+class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
     """
-    Data container for photometry results.  Datna stored internally as
+    Data container for photometry results.  Data stored internally as
     array of fluxes (npoints, nstars, naps)
     """
     # TODO: some elements here are FileManagement, some are Plotting
     # TODO: split classes to avoid god-objects
-    # TODO: integrate with shocObs
+    # TODO: integrate with shocObs / LightCurve
 
     # TODO:  STORE/LOAD data AS FITS.
     # TODO:  PICKLE / json?
@@ -508,9 +617,10 @@ class PhotResult(AutoFileToPath):
     # stars correspond across cubes.
     # sorting methods? checkout pandas / astropy.table
 
-    _skip_init = False
-
+    _skip_init = False  # initializer flag
     _flx_sort = True  # will order data according to brightness
+
+    # plotting config
     _default_cmap = 'nipy_spectral'
     _label_fmt = 'C%i'
     _title_fmt = 'Light curve: {s.fitspath.name}'
@@ -547,8 +657,8 @@ class PhotResult(AutoFileToPath):
         yield from roundrobin(*blob)
 
     def __new__(cls, *args, **kws):
-        # this is here to handle initializing the object from an already existing
-        # istance of the class
+        # this is here to handle initializing the object from an already
+        # existing istance of the class
         if len(args) > 0 and isinstance(args[0], cls):
             instance = args[0]
             instance._skip_init = True
@@ -556,7 +666,6 @@ class PhotResult(AutoFileToPath):
         else:
             return super().__new__(cls)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, fitsfile=None, datafile=None, timefile=None,
                  coordfile=None, target=None, target_name=None, ephem=None):
         """
@@ -573,8 +682,10 @@ class PhotResult(AutoFileToPath):
         if self._skip_init:
             logging.debug('PhotResult Skipping init')
             return
-            # this happens if the first argument to the initializer is already an
+            # this happens if the first argument to __init__ is already an
             # instance of the class
+
+        # TODO: maybe put the stuff below in a load classmethod ?
 
         self.fitsfile = str(fitsfile) if fitsfile else None
         self.datafile = datafile
@@ -592,13 +703,13 @@ class PhotResult(AutoFileToPath):
 
         # store data internally as masked array (Nframes, Nstars, Naps)
         # init null data containers
+        self.t = np.empty(0)                    # TimeIndex ????
         self.data = np.ma.empty((0, 0, 0))
         self.std = np.empty((0, 0, 0))
-        self.timedata = np.empty(0)
 
         # load timing data if available
         if self.timefile:
-            self.timedata = load_times(self.timefile)
+            self.t = load_times(self.timefile)
 
         # load data if available
         if exists(self.datafile):
@@ -614,30 +725,28 @@ class PhotResult(AutoFileToPath):
         #         logging.warning('Non-existant %s file: %r', name,
         #                         getattr(self, '%sfile' %name))
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __getitem__(self, key):
         """Can be indexed numerically, or by using 'target' or 'ref' strings."""
         raise NotImplementedError
-        if isinstance(key, (int, np.integer, slice)):
-            # TODO: return lightcurve object
-            pass
-
-        if isinstance(key, str):
-            key = key.lower()
-            if key.startswith('t'):
-                return self[self.target]
-            # if key.startswith('r') or key == 'c0':
-            #     return self.stars[self._ref]
-            # if key.startswith('c'):
-            #     return self.stars[self._others[int(key.lstrip('c')) - 1]]
-
-        else:
-            raise KeyError
+        # if isinstance(key, (int, np.integer, slice)):
+        #     # TODO: return lightcurve object
+        #     pass
+        #
+        # if isinstance(key, str):
+        #     key = key.lower()
+        #     if key.startswith('t'):
+        #         return self[self.target]
+        #     # if key.startswith('r') or key == 'c0':
+        #     #     return self.stars[self._ref]
+        #     # if key.startswith('c'):
+        #     #     return self.stars[self._others[int(key.lstrip('c')) - 1]]
+        #
+        # else:
+        #     raise KeyError
 
     # def __str__(self):
     #     'TODO'
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __len__(self):
         # Number of data points *not* stars
         return self.data.shape[0]
@@ -650,7 +759,7 @@ class PhotResult(AutoFileToPath):
     def nstars(self):
         return self.data.shape[1]
 
-    @property
+    @property  # TODO: derive MultiAperturePhotResult?
     def naps(self):
         return self.data.shape[-1]
 
@@ -662,7 +771,7 @@ class PhotResult(AutoFileToPath):
         # self.stars.set_names(target, self.target_name)
         # self.stars.set_colours(target)
 
-    target = property(get_target, set_target)
+    target = property(get_target, set_target)  # fixme: won't be inherited
 
     @property
     def others(self):
@@ -671,7 +780,7 @@ class PhotResult(AutoFileToPath):
     @property
     def reorder(self):
         if self._flx_sort and self.data.size:
-            order = list(self.data.mean(0)[:, -1].argsort()[::-1])
+            order = list(self._ordered_by_flux())
         else:
             order = list(range(self.nstars))
 
@@ -679,6 +788,9 @@ class PhotResult(AutoFileToPath):
             order.insert(0, order.pop(order.index(self.target)))
 
         return order
+
+    def _ordered_by_flux(self):
+        return self.data.mean(0)[:, -1].argsort()[::-1]
 
     @property
     def labels(self):
@@ -709,7 +821,6 @@ class PhotResult(AutoFileToPath):
     #
     #     return [p['color'] for p in list(cyc[:len(self)])]
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_data(self, filename=None, coordfile=None, **kws):
         # if (filename is None) and self.datapath.exists():
         #     filename = self.datafile
@@ -732,7 +843,6 @@ class PhotResult(AutoFileToPath):
 
         self.datafile = filename
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_from_npz(self, filename):
 
         try:
@@ -741,7 +851,7 @@ class PhotResult(AutoFileToPath):
             # coo = lz['coords']      #shape (Nframes, Nstars, 2)
 
             lz = np.load(str(filename))
-            self.timedata = lz['t'].view(np.recarray)
+            self.t = lz['t'].view(np.recarray)
             self.data = np.ma.array(lz['data'], mask=lz['data_mask'])
             self.std = np.ma.array(lz['std'], mask=lz['std_mask'])
 
@@ -752,7 +862,6 @@ class PhotResult(AutoFileToPath):
 
         self.load_times()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_from_lc(self, filename, mag2flux=False, mag0=0):
         """load from ascii lc"""
         (metaline, starline, headline), data = read(filename)
@@ -787,12 +896,11 @@ class PhotResult(AutoFileToPath):
         timefields = 'utsec', 'utdate'
         formats = float, 'U30'
         # data[:,:len(timefields)]
-        self.timedata = np.recarray(len(data),
-                                    dtype=list(zip(timefields, formats)))
-        self.timedata['utsec'] = data[:, 0]
-        self.timedata['utdate'] = self.date
+        self.t = np.recarray(len(data),
+                             dtype=list(zip(timefields, formats)))
+        self.t['utsec'] = data[:, 0]
+        self.t['utdate'] = self.date
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # @profiler.histogram
     def _load_daophot(self, filename):
         """load data from IRAF daophot multi-aperture ascii database."""
@@ -821,7 +929,7 @@ class PhotResult(AutoFileToPath):
         if save == 'npz':
             logging.info('Saving as: %s', outpath.name)
             np.savez(str(outpath),
-                     t=self.timedata, data=self.data, std=self.std)
+                     t=self.t, data=self.data, std=self.std)
             # FIXME: NotImplementedError: MaskedArray.tofile() not implemented yet.
 
         if save == 'tbl':
@@ -840,9 +948,14 @@ class PhotResult(AutoFileToPath):
 
         # TODO: optionally show some stats ala table.info
 
-        # HACK Daophot databases are incredible annoying things. Since some
-        # of the stars are sometimes dropped and moreover the filenames
-        # are cut by the way-too-small fixed column width of (23 characters)
+        # HACK
+        # Daophot databases are incredible inefficient and annoying data
+        # structures. Since sometimes results for a particular star may be
+        # silently omitted, and moreover, since the filename entries are
+        # truncated by the fixed column width of (23 characters), and the
+        # naming convention for SHOC data eg.: SHA_20181212.001.003.fits
+        # (is longer than 23 characters!) it may not be possible to
+        # match the table row entry with the star it belongs to a priori.
         ids, counts = np.unique(table['LID'], return_counts=True)
         nstars = len(ids)
         any_dropped = len(np.unique(counts)) > 1
@@ -856,18 +969,19 @@ class PhotResult(AutoFileToPath):
         self.load_times()
 
     def recommend_ap(self):
-        # for multiaperture dbs. determine aperture with highest mean SNR
+        # TODO: Move! better to have MultiApertureResult
+        # for multi-aperture dbs. determine aperture with highest mean SNR
         snr = self.data / self.std
         ixap = int(np.ceil(snr.argmax(-1).mean()))
         return ixap
 
     def select_best_ap(self):
+        # TODO: Move! better to have MultiApertureResult
         ixap = self.recommend_ap()
         data = self.data[..., ixap:ixap + 1]
         std = self.std[..., ixap:ixap + 1]
         return data, std
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_from_apcor(self, filename, coofile, splitfile=None):
         """load data from aperture correction ascii database."""
 
@@ -887,27 +1001,37 @@ class PhotResult(AutoFileToPath):
 
         try:
             get_fileno = lambda fn: int(fn.strip(']').rsplit(',', 1)[-1])
-            fileno = np.fromiter(map(get_fileno, bigdata['Image'].astype(str)), int)
+            fileno = np.fromiter(map(get_fileno, bigdata['Image'].astype(str)),
+                                 int)
         except ValueError:
             try:  # Older data with different naming convention
-                get_fileno = lambda fn: int(fn.rstrip('.fits').rsplit('.', 1)[-1])
-                fileno = np.fromiter(map(get_fileno, bigdata['Image'].astype(str)), int)
+                get_fileno = lambda fn: int(
+                        fn.rstrip('.fits').rsplit('.', 1)[-1])
+                fileno = np.fromiter(
+                        map(get_fileno, bigdata['Image'].astype(str)), int)
             except ValueError:
                 pass
 
-            # WARNING:  This will only work if there are no dropped frames! (IRAF SUX!!)
+            # WARNING:  This will only work if there are no dropped frames!
+            # (IRAF SUX!!)
             nstars, ndata = len(kcoords), len(bigdata)
             nframes, remainder = divmod(ndata, nstars)
             if remainder:
-                raise ValueError(('Dropped Frames in {}! '
-                                  'Number of data lines ({}) does not equally divide '
-                                  'by number of stars {}').format(filename, ndata, nstars))
+                raise ValueError(
+                        ('Dropped Frames in {}!  Number of data lines ({}) '
+                         'does not equally divide  by number of stars {}'
+                         ).format(filename,
+                                  ndata,
+                                  nstars))
 
             fileno = np.mgrid[:nstars, :nframes][1].ravel()
 
-        # group the stars by the closest matching coordinates in the coordinate file list.
-        starmatcher = lambda coo: np.sqrt(np.square(kcoords - coo).sum(1)).argmin()
-        for starid, (coo, ix) in groupmore(starmatcher, coords, range(len(bigdata))):
+        # group the stars by the closest matching coordinates in the
+        # coordinate  file list.
+        starmatcher = lambda coo: np.sqrt(
+                np.square(kcoords - coo).sum(1)).argmin()
+        for starid, (coo, ix) in groupmore(starmatcher, coords,
+                                           range(len(bigdata))):
             ix = np.array(ix)
             stardata = bigdata[ix]
 
@@ -927,51 +1051,53 @@ class PhotResult(AutoFileToPath):
 
         self.load_times()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_times(self, filename=None):
         filename = _file_checker(filename or self.timefile, 'time')
         logging.info('Loading timing data from %r', os.path.basename(filename))
-        self.timedata = load_times(filename)
+        self.t = load_times(filename)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def fix_ut(self, set_=True):
-        """fix UTSEC to be relative to midnight on the starting date of the first frame"""
-        t = self.timedata['utsec'].copy()
-        dates = self.timedata['utdate']
+    def fix_ut(self, set_=True):  # TODO: more descriptive name please
+        """
+        fix UTSEC to be relative to midnight on the starting date of the
+        first frame"""
+        t = self.t['utsec'].copy()
+        dates = self.t['utdate']
         dateset = set(dates)
-        delim = b'-' if isinstance(next(iter(dateset)), (bytes, np.bytes_)) else '-'
+        delim = b'-' if isinstance(next(iter(dateset)),
+                                   (bytes, np.bytes_)) else '-'
         to_datetime = lambda d: Date(*map(int, d.split(delim)))  # .decode()
         if len(dateset) > 1:
-            warnings.warn('Data spans multiple UTC dates! Adjusting time origin.')
+            warnings.warn(
+                    'Data spans multiple UTC dates! Adjusting time origin.')
 
             d0 = to_datetime(dates[0])
             for i, d in enumerate(dateset - {dates[0]}):
                 tshift = (to_datetime(d) - d0).total_seconds()
                 t[dates == d] += tshift
                 if set_:
-                    self.timedata['utsec'] = t
+                    self.t['utsec'] = t
 
         return t
 
     def add_phase_info(self, emphem):
         import numpy.lib.recfunctions as rfn
-        ph = emphem.phase(self.timedata['bjd'])
-        t = rfn.append_fields(
-                self.timedata, ('phase', 'phaseMod1'), (ph, ph % 1))
-        self.timedata = t.view(np.recarray)
 
-    def date_split(self):
-        ''  # TODO
+        # Get the phases
+        ph = emphem.phase(self.t['bjd'])
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # def optimal_smoothing(self):
-    #     """Determine the optimal amount of smoothing for differential photometry
-    #     by minimising the variance of the differentail light curve for the given
-    #     length of the smoothing window.  Note: This operation may be slow..."""
-    #
-    #     data = self.datablock('clipped')
+        # add to time array
+        if 'phase' in self.t.dtype.names:
+            # overwrite
+            self.t['phase'] = ph
+            self.t['phase'] = ph % 1
+        else:
+            # append
+            t = rfn.append_fields(
+                self.t, ('phase', 'phaseMod1'), (ph, ph % 1))
+            # make it a recarray
+            self.t = t.view(np.recarray)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     def compute_dl(self, mode='flux', **kws):
 
         if self.target is None:
@@ -1000,7 +1126,7 @@ class PhotResult(AutoFileToPath):
         new = self.__class__()
         new.data = flxRatio
         new.std = stdRatio
-        new.timedata = self.timedata
+        new.t = self.t
         new.target = self.target
         new.target_name = self.target_name
         new.date = self.date
@@ -1012,7 +1138,6 @@ class PhotResult(AutoFileToPath):
 
     # def mask_outliers(self):
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # MultiAperture plot gui
 
     def plot_lc(self, tkw='utsec', ixap=None, **kw):
@@ -1020,8 +1145,9 @@ class PhotResult(AutoFileToPath):
         if self.naps == 1:
             ixap = 0
         elif ixap is None:
+            # fixme: elliminate the need for this shitty hack!!
             ixap = self.recommend_ap()
-            logging.info('Choosing aperture %i (highest SNR)', ixap)
+            self.logger.info('Choosing aperture %i (highest SNR)', ixap)
 
         # Reshape for plotting
         y = self.data[:, self.reorder, ixap].T
@@ -1030,10 +1156,10 @@ class PhotResult(AutoFileToPath):
         # If target specified, re-order the array so we get a consistent
         # colour sequence
 
-        logging.info('Plotting light curves for %s', self)
+        # self.logger.info('Plotting light curves for %s', self)
         mode = kw.pop('mode', 'flux')
 
-        t = self.timedata[tkw]
+        t = self.t[tkw]
         title = self._title_fmt.format(s=self)
         xlabel = tkw.upper()
         ylabel = mode.title()  # 'Instr. ' +
@@ -1071,13 +1197,12 @@ class PhotResult(AutoFileToPath):
 
     def save_npz(self, filename):
         filename = str(filename)
-        logging.info('saving as: %s', filename)
+        self.logger.info('saving as: %s', filename)
         np.savez(filename,
-                 t=self.timedata,
+                 t=self.t,
                  data=self.data.data, data_mask=self.data.mask,
                  std=self.std.data, std_mask=self.std.mask)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def save_lc(self, filename=None, which='raw', tkw=('utsec',), clobber=None):
         # TODO: MAYBE YOU CAN FIX THE ASTROPY TABLE TO ALIGN COLUMN NAMES WITH VALUES
 
@@ -1092,7 +1217,7 @@ class PhotResult(AutoFileToPath):
             nstars = len(self.stars)
 
             # get time columns
-            times = self.timedata[list(tkw)].view(float).reshape(-1, len(tkw))
+            times = self.t[list(tkw)].view(float).reshape(-1, len(tkw))
             # get data columns
             datablock = np.ma.array(self.datablock(which, 1))
             output = datablock.T.reshape(datablock.shape[-1], -1)
@@ -1108,17 +1233,18 @@ class PhotResult(AutoFileToPath):
             except AttributeError:
                 dbs = self.database
 
-            header0 = 'Fluxes for {} stars extracted from {}.'.format(nstars, dbs)
+            header0 = 'Fluxes for {} stars extracted from {}.'.format(nstars,
+                                                                      dbs)
             header1 = saver.make_header_line(col_head, fmt, delimiter)
             header2 = saver.make_header_line(col_head2, fmt, delimiter)
             header = '\n'.join([header0, header1, header2])  # header0,
 
-            np.savetxt(filename, output, header=header, fmt=fmt, delimiter=delimiter)
+            np.savetxt(filename, output, header=header, fmt=fmt,
+                       delimiter=delimiter)
             print('Halleluja!', filename)
         else:
             print('Nothing written')
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def heteroskedacity(self, whichstars, nwindow, window='flat', tkw='lmst'):
 
         fig, ax = plt.subplots()
@@ -1137,14 +1263,13 @@ class PhotResult(AutoFileToPath):
         ax.set_xlabel(tkw.upper())
         ax.legend()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_spread(self, tkw='utsec'):
         """plot all aperture data as time series"""
         fig, axes = plt.subplots(2, 1, figsize=(18, 12),
                                  sharex=True,
                                  gridspec_kw=dict(hspace=0))
 
-        t = self.timedata[tkw]
+        t = self.t[tkw]
 
         print(t)
 
@@ -1155,7 +1280,6 @@ class PhotResult(AutoFileToPath):
             tsplt(t, sdata, ax=ax, labels=labels)
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def get_spread(star, sfactor):
     naps = star._data.shape[1]
     return (star._data + np.arange(naps) * sfactor).T
@@ -1175,7 +1299,8 @@ class Saver():
     def clobber_check(filename, clobber):
         if os.path.exists(filename):
             if clobber is None:
-                msg = 'A file named {} already exists! Overwrite ([y]/n)?? '.format(filename)
+                msg = 'A file named {} already exists! Overwrite ([y]/n)?? '.format(
+                        filename)
                 return InputLoop.str(msg, 'y', convert=convert.yn2TF)
             return clobber
         else:
@@ -1191,8 +1316,7 @@ class Saver():
 
 saver = Saver()
 
-# ****************************************************************************************************###################################################################
-# import cProfile as cpr
+# ****************************************************************************************************
 if __name__ == '__main__':
     import os, sys, argparse
     from recipes.io import iocheck, parse
@@ -1217,7 +1341,8 @@ if __name__ == '__main__':
                         help='Database file containing star magnitudes.')
     parser.add_argument('-c', '--cubes', nargs='+', type=str,
                         help='Science data cubes to be processed.  Requires at least one argument.  Argument can be explicit list of files, a glob expression, or a txt list.')
-    parser.add_argument('-w', '--write-to-file', action='store_true', default=False, dest='w2f',
+    parser.add_argument('-w', '--write-to-file', action='store_true',
+                        default=False, dest='w2f',
                         help='Controls whether the script writes the light curves to file.')
 
     parser.add_argument('-t', '--target', default=0, type=int,
@@ -1226,13 +1351,16 @@ if __name__ == '__main__':
                         help='The position of the reference star in the coordinate file.')
 
     # parser.add_argument('-i', '--instrument', default='SHOC', nargs=None, help='Instrument. Switches behaviour for loading the data.')
-    parser.add_argument('-l', '--image-list', default='all.split.txt', dest='ims',
+    parser.add_argument('-l', '--image-list', default='all.split.txt',
+                        dest='ims',
                         help='File containing list of image fits files.')
 
     # Arguments for light curve / spectral analysis
-    parser.add_argument('-dl', '--diff-phot', default=True, action='store_true', dest='dl',
+    parser.add_argument('-dl', '--diff-phot', default=True, action='store_true',
+                        dest='dl',
                         help="Perform differential photometry?  The star with lowest variance will be used reference star ( Unless explicitly given via the 'r' argument.)")
-    parser.add_argument('-ls', '--lomb-scargle', default=False, action='store_true', dest='ls',
+    parser.add_argument('-ls', '--lomb-scargle', default=False,
+                        action='store_true', dest='ls',
                         help='Perform Lomb-Scargle periodogram on light curves?')
     args = parser.parse_args()
 
@@ -1295,7 +1423,6 @@ if __name__ == '__main__':
             outname = run.get_outname(with_name=False, extension='lc')
             conjc.save_lc(outname)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Plots setup
     import matplotlib as mpl
 
@@ -1464,12 +1591,14 @@ if __name__ == '__main__':
 
             delimiter = ' '
             dbs = '; '.join(map(os.path.basename, self.databases))
-            header0 = '{} for {} stars extracted from {}.'.format('RMS Power', nstars, dbs)
+            header0 = '{} for {} stars extracted from {}.'.format('RMS Power',
+                                                                  nstars, dbs)
             header1 = saver.make_header_line(col_head, fmt, delimiter)
             header2 = saver.make_header_line(col_head2, fmt, delimiter)
             header = '\n'.join([header0, header1, header2])
 
-            np.savetxt(filename, data, header=header, fmt=fmt, delimiter=delimiter)
+            np.savetxt(filename, data, header=header, fmt=fmt,
+                       delimiter=delimiter)
             print('Halleluja!', filename)
         else:
             print('Nothing written')
@@ -1506,7 +1635,7 @@ if __name__ == '__main__':
     # fig.savefig( )
 
     ######################################################################################################################
-    t = conjc.timedata['utsec']
+    t = conjc.t['utsec']
     flux = conjc['t'].clipped
     # flux = np.ma.masked_where( np.isnan(flux), flux )
     tfr = TFR(t, flux,
@@ -1528,10 +1657,10 @@ if __name__ == '__main__':
 
     plt.show()
 
-    # gix = detect_gaps( conjc.timedata['utsec'] ) +1
+    # gix = detect_gaps( conjc.t['utsec'] ) +1
     # sst = np.split( conjc['target'].clipped, gix )
     # ssr = np.split( conjc['ref'].clipped, gix )
-    # ts = np.split( conjc.timedata['utsec'], gix )
+    # ts = np.split( conjc.t['utsec'], gix )
     # Sp = []
     # for t, ft, fr in zip(ts, sst, ssr):
     # specT = Spectral( t, ft, nwindow=2**10, overlap=0, detrend=0, normalise='rms' )
@@ -1552,3 +1681,4 @@ if __name__ == '__main__':
     # ax2.grid()
     ##ax2.plot( specR.frq,  )
     # ax1.legend( framealpha=0.25 )
+

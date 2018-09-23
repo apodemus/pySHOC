@@ -4,6 +4,10 @@
 *~
 *.bak
 /__pycache__
+*.swp
+
+#notebooks
+/.ipynb_checkpoints/
 
 #cache
 .coordcache
@@ -12,6 +16,7 @@ dev
 .todo
 caltest.py
 mp_test.py
+ideas.py
 
 examples
 
