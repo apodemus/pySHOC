@@ -1,19 +1,18 @@
-from astropy.io.fits.hdu.base import register_hdu
+"""
+pySHOC - Data analysis tools for the Sutherland High-Speed Optical Cameras
+"""
 
+from astropy.io.fits.hdu.base import register_hdu
 from recipes.iter import flatiter, itersubclasses
 
-from .readnoise import ReadNoiseTable
-from .core import *
+from .core import *  # FIXME: THIS IS BAD!!!
 
 
-# readNoiseTable singleton
-readNoiseTable = ReadNoiseTable()
-
-# register HDU classes
+# register HDU classes (order is important!)
+register_hdu(shocBiasHDU)
+register_hdu(shocFlatHDU)
 register_hdu(shocNewHDU)
 register_hdu(shocOldHDU)
-# TODO: Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at
-#  obstype keywords
 
 
 # Collect named cubes in a dict
@@ -43,5 +42,5 @@ def load(filenames, kind='science'):
     -------
 
     """
-    run = shocCube.load(filenames=filenames, kind=kind)
+    run = shocRun.load(filenames=filenames, kind=kind)
     return run

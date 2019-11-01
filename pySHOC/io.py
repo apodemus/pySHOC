@@ -1,14 +1,14 @@
-from recipes.io import iocheck, warn
+from recipes.io import iocheck
 
 class InputCallbackLoop(object):
     # TODO: class __call__ method that implements the main callback loop
-    #retrieve input from user
-    #INPUT    : query - string query passed to raw_input
+    # retrieve input from user
+    # INPUT    : query - string query passed to raw_input
     #         : default - the default input option
-    #OPTIONAL: verify - Boolean for whether to ask for verification of user input
+    # OPTIONAL: verify - Boolean for whether to ask for verification of user input
     #        : check - a function that returns True if the input is valid or False otherwise
     #        : example -
-    #==========================================================================
+    # ==========================================================================
     @staticmethod
     def str(query, default=None, **kw):
         """
@@ -51,7 +51,7 @@ class InputCallbackLoop(object):
 
         return convert(instr)
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def list(query, check, default=None, empty_allowed=False):
         """
@@ -72,16 +72,16 @@ class InputCallbackLoop(object):
             if default in ['', None]:
                 default_str = ''
             else:
-                default_str = ' or ENTER for the default %s.\n' %repr(default)
+                default_str = ' or ENTER for the default %s.\n' % repr(default)
 
-            instr = input(query + default_str)                              #cmd
+            instr = input(query + default_str)  # cmd
 
             if not instr:
                 if default not in ['', None]:
                     instr = default
                     # this means the default option needs to be a string
                 elif empty_allowed:
-                    return instr                    #returns an empty string
+                    return instr  # returns an empty string
                 else:
                     pass
 
@@ -91,49 +91,49 @@ class InputCallbackLoop(object):
                     inls = [s.strip(' ,;') for s in inls]
                     break
 
-            #if inls[0]=='*all':   #NOT YET TESTED..................
-                #inls = dirnames
-                #break
-            #print('VT')
-            #print( check )
+            # if inls[0]=='*all':   #NOT YET TESTED..................
+            # inls = dirnames
+            # break
+            # print('VT')
+            # print( check )
             inls = ValidityTests.test_ls(inls, check)
-            repeat = not bool( inls )
+            repeat = not bool(inls)
         inls = [s.strip() for s in inls]
         return inls
 
+
 ################################################################################
-#Conversion functions for user input
+# Conversion functions for user input
 ################################################################################
 class Conversion(object):
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def trivial(instr):
         return instr
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def yn2TF(instr):
         return instr in ('y', 'Y')
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def RA(val):
         return Angle(val, 'h').to_string(sep=':', precision=2)
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def DEC(val):
         return Angle(val, 'deg').to_string(sep=':', precision=2)
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def ws2cs(instr):
         """convert from whitespace separated to colon separated triplets."""
         h, m, s = instr.split()
-        return '{:d}:{:02d}:{:02f}'.format( int(h), int(m), float(s) )
+        return '{:d}:{:02d}:{:02f}'.format(int(h), int(m), float(s))
 
-
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def ws2ds(instr):
         """convert from whitespace separated to dash separated triplets."""
@@ -141,29 +141,32 @@ class Conversion(object):
             return instr
         try:
             h, m, s = instr.split()
-            return '{:d}-{:02d}-{:02f}'.format( int(h), int(m), float(s) )
+            return '{:d}-{:02d}-{:02f}'.format(int(h), int(m), float(s))
         except ValueError:
             return float(instr)
 
+
 ################################################################################
-#Validity tests for user input
+# Validity tests for user input
 ################################################################################
 
 from astropy.coordinates.angles import Angle
 
+
 class ValidityTests(object):
     MAX_CHECK = 25
-    #===========================================================================
+
+    # ===========================================================================
     @staticmethod
-    def trivial(instr):    #CHECK FOR INVALID CHARACTERS???????????
+    def trivial(instr):  # CHECK FOR INVALID CHARACTERS???????????
         return True
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def yn(instr):
-        return instr in ['y','n','Y','N']
+        return instr in ['y', 'n', 'Y', 'N']
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def float(num_str):
         try:
@@ -172,7 +175,7 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def int(num_str):
         try:
@@ -181,36 +184,35 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #validity test function for the naming convention
-    #===========================================================================
+    # validity test function for the naming convention
+    # ===========================================================================
     @staticmethod
     def name_convention(num_str):
 
-
         return valid
 
-    #Validity tests for number triplet input
-    #===========================================================================
+    # Validity tests for number triplet input
+    # ===========================================================================
     @staticmethod
     def triplet(triplet):
         HMS = triplet.split()
-        if len(HMS)==1:
+        if len(HMS) == 1:
             HMS = triplet.split(':')
-        if len(HMS)==1:
+        if len(HMS) == 1:
             HMS = triplet.split('-')
-        if len(HMS)==1:
+        if len(HMS) == 1:
             HMS = triplet.split('\t')
 
         try:
-            h,m,s = [float(hms) for hms in HMS]
+            h, m, s = [float(hms) for hms in HMS]
             valid = True
         except:
-            h,m,s = [None]*3
+            h, m, s = [None] * 3
             valid = False
 
-        return valid, h,m,s
+        return valid, h, m, s
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def RA(RA):
         """Validity tests for RA"""
@@ -220,7 +222,7 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def DEC(DEC):
         """Validity tests for DEC"""
@@ -230,7 +232,7 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def epoch(epoch):
         try:
@@ -238,7 +240,7 @@ class ValidityTests(object):
         except ValueError:
             return False
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def DATE(DATE):
         """Validity tests for DATE"""
@@ -246,24 +248,24 @@ class ValidityTests(object):
             float(DATE)
             return True
         except ValueError:
-            valid, y,m,d = ValidityTests.triplet(DATE)
-            #TODO: warn if different from date in filename / file creation date in header?
+            valid, y, m, d = ValidityTests.triplet(DATE)
+            # TODO: warn if different from date in filename / file creation date in header?
             if valid:
                 try:
                     from datetime import date
-                    date(year=int(y),month=int(m),day=int(d))
+                    date(year=int(y), month=int(m), day=int(d))
                 except ValueError:
                     valid = False
         return valid
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def test(instr, check, raise_error=0):
-        warn( 'FIX THIS LAME FUNCTION!!' )
+        warn('FIX THIS LAME FUNCTION!!')
         return iocheck(instr, check, raise_error)
 
-    #===========================================================================
+    # ===========================================================================
     @staticmethod
     def test_ls(inls, check=None, **kw):
-        warn( 'FIX THIS LAME FUNCTION!!' )
-        return parselist( inls, check, **kw)
+        warn('FIX THIS LAME FUNCTION!!')
+        return parselist(inls, check, **kw)

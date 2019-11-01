@@ -5,7 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from obstools.fastfits import fastheader, FitsCube
+from obstools.fastfits import fast_header, FitsCube
 from recipes.array import unique_rows
 
 from .core import shocRun
@@ -71,7 +71,7 @@ def get_fits(root, ignore=None):
         ignore = {}
 
     for fitsfile in with_ext_gen(root, '.fits'):
-        header = fastheader(fitsfile)
+        header = fast_header(fitsfile)
         skip = False
         for key, ign in ignore.items():
             if header.get(key, '') in ign:
@@ -293,7 +293,7 @@ def partition_by_source(root, fits_only=False, remove_empty=True, dry_run=False)
     # partFunc = lambda f: fastheader(f).get('obstype', None)
     partDict = defaultdict(list)
     for path in fitsfiles:
-        id_ = fastheader(path).get('obstype', None)
+        id_ = fast_header(path).get('obstype', None)
         # if id_ is not None: we don't know the obstype
         partDict[id_].append(path)
 
@@ -302,7 +302,7 @@ def partition_by_source(root, fits_only=False, remove_empty=True, dry_run=False)
 
     # partition the objects into directories
     for filename in objFiles:
-        name = fastheader(filename).get('object', None)
+        name = fast_header(filename).get('object', None)
         name = name.replace(' ', '_')
         partDict[name].append(filename)
 

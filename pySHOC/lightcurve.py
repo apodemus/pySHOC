@@ -21,7 +21,7 @@ from tsa.spectral import Spectral
 from graphical import ts
 from graphical.multitab import MplMultiTab
 from obstools.fastfits import quickheader
-# from recipes.list import flatten
+# from recipes.containers.list import flatten
 from recipes.iter import interleave, group_more, first_true_idx
 
 # from graphical.interactive import PointSelector
@@ -153,28 +153,12 @@ def get_name_date(fitsfile=None):
     return None, None, None
 
 
-class SelfAwareContainer(object):
-    _skip_init = False
-
-    def __new__(cls, *args, **kws):
-        # this is here to handle initializing the object from an already
-        # existing instance of the class
-        if len(args) and isinstance(args[0], cls):
-            instance = args[0]
-            instance._skip_init = True
-            return instance
-        else:
-            return super().__new__(cls)
 
 
-# ****************************************************************************************************
-# NOTE: there can be a generalized construction layer here that should be
-#  able to easily make containers of their constituent class.
-#  automatically get attributes as list if subclass has those
-#  attributes. ie vectorized operations across instances
+# class LightCurve
 
-# Create an abstraction layer that can split and merge multiple time
-# series data sets
+
+
 
 class PhotRun(SelfAwareContainer):  # make dataclass ???
     """ Class for collecting / merging / plotting PhotResult (objects."""
@@ -386,7 +370,7 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
         tkw = 'jd' if jd else 'bjd'
 
         j = 0
-        n_total = n_points = 0
+        n_total = n_select = 0
         for lc in self:
             # TODO: for all stars
             jd, data, std = lc.t[tkw], lc.data[lc.target], lc.std[lc.target]

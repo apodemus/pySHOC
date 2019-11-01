@@ -7,7 +7,7 @@ import os
 
 import more_itertools as mit
 
-from recipes.set import OrderedSet
+from recipes.containers.set_ import OrderedSet
 
 
 def adapt_path(base, path, extension, output_type):
@@ -29,7 +29,7 @@ def unique_filenames(run, path='', extension='.fits', pattern=None,
 
 class NamingConvention(object):
     """
-    Implements  very basic mini language to name multiple files in a sequence
+    Implements a very basic mini language to name multiple files in a sequence
     using the shortest possible unique names. Uniqueness is determined by a
     set of keys that map to attributes of the shocRun
     """

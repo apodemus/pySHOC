@@ -45,7 +45,7 @@ from astropy.coordinates import SkyCoord
 import more_itertools as mit
 
 from recipes.io import parse, iocheck, warn  # , note
-# from recipes.list import flatten
+# from recipes.containers.list import flatten
 from recipes.misc import get_terminal_size
 from motley.table import Table as sTable
 

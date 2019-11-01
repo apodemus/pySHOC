@@ -12,7 +12,7 @@ from scipy.spatial.distance import cdist
 from scipy.optimize import minimize
 from astropy.coordinates import SkyCoord
 
-from recipes.dict import AttrDict
+from recipes.containers.dict import AttrDict
 from obstools.phot.segmentation import SegmentationHelper
 # from obstools.phot.segmentation import sourceFinder
 # from motley.profiling.timers import timer
@@ -391,7 +391,7 @@ class ImageRegistration(LoggingMixin):
     def _match_final(self, xy):
 
         from scipy.spatial.distance import cdist
-        from recipes.list import where_duplicate
+        from recipes.containers.list import where_duplicate
 
         # transform
         xy = self.to_pixel_coords(xy)

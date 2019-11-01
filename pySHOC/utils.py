@@ -6,19 +6,23 @@ import astropy.io.fits as pyfits
 from astropy.coordinates import SkyCoord
 from astropy.coordinates.name_resolve import NameResolveError
 
-from recipes.io import warn
 from obstools import jparser
 # from decor.misc import persistent_memoizer
 from recipes.decor import memoize
 # from motley.profiling.timers import timer
 
+from recipes.introspection.utils import get_module_name
+
+# module level logger
+logger = logging.getLogger(get_module_name(__file__))
+
 # get coordinate cache file
 here = inspect.getfile(inspect.currentframe())  # this_filename
 moduleDir = Path(here).parent
-cooCacheName = '.coordcache'
+cooCacheName = '.cache/coords'
 cooCachePath = moduleDir / cooCacheName
 
-dssCacheName = '.dsscache'
+dssCacheName = '.cache//dss'
 dssCachePath = moduleDir / dssCacheName
 
 
@@ -27,6 +31,10 @@ def resolver(name):
     """Get the target coordinates from object name if known"""
     # try extract J coordinates from name.  We do this first, since it is
     # faster than a sesame query
+
+    # FIXME: this now accepted as a PR:
+    #  https://github.com/astropy/astropy/pull/7830
+
     if jparser.search(name):
         return jparser.to_skycoord(name)
 
@@ -67,9 +75,9 @@ def retrieve_coords(name):
         return coo
 
     except (NameResolveError, AttributeError) as e:
-        logging.exception(
+        logging.warning(
                 'Coordinates for object %r could not be retrieved due to the '
-                'following exception: ', name)
+                'following exception: \n%s', name, str(e))
 
 
 def retrieve_coords_ra_dec(name, verbose=True, **fmt):

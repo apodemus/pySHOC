@@ -19,29 +19,38 @@ import numpy as np
 # import matplotlib.pyplot as plt
 import astropy.io.fits as pyfits
 from astropy.io.fits.hdu import HDUList, PrimaryHDU
+from astropy.utils import lazyproperty
 import more_itertools as mit
 
 import recipes.iter as itr
-from recipes.io import warn
-from recipes.set import OrderedSet
-from recipes.list import sorter
+# from recipes.io import warn
 from recipes.logging import LoggingMixin
-from recipes.dict import AttrReadItem as AttrRepr
+from recipes.containers import Grouped
+from recipes.containers.set_ import OrderedSet
+from recipes.containers.list_ import sorter
+from recipes.containers.dict_ import AttrReadItem as AttrRepr
 from recipes import pprint
 from motley.table import Table as sTable
+
+# TODO: do really want pySHOC to depend on obstools ?????
 from obstools.stats import mad, median_scaled_median
-from obstools.phot.utils import ImageSamplerHDUMixin
+from obstools.phot.campaign import ImageSamplerHDUMixin, PhotCampaign
 
 # TODO: choose which to use for timing: spice or astropy
 # from .io import InputCallbackLoop
 from .utils import retrieve_coords, convert_skycoords
-from .timing import timingFactory, Time, get_updated_iers_table
-from .header import shocHeader
+from .timing import Time, shocTimingOld, shocTimingNew, get_updated_iers_table
+from .header import shocHeader, HEADER_KEYS_MISSING_OLD
 from .convert_keywords import KEYWORDS as kw_old_to_new
 from .filenaming import NamingConvention
+from .readnoise import readNoiseTables
 
-# debugging
-from IPython import embed
+# TODO: maybe from .specs import readNoiseTables, SERIAL_NRS
+
+#            SHOC1, SHOC2
+SERIAL_NRS = [5982, 6448]
+
+# noinspection PyPep8Naming
 
 # from motley.profiling.timers import timer  # , profiler
 
@@ -61,17 +70,13 @@ from IPython import embed
 # TODO: can you pickle these classes
 #
 
-# Regex to match end of FITS header
-MATCH_END = re.compile(rb'END {77}\s*')
-# Regex to identify type of observation bias / dark / flats / science
-kindRegex = rb"""
-(?:OBSTYPE)     # keywords (non-capture group if `capture_keywords` False)
-\s*?=\s+        # (optional) whitespace surrounding value indicator '='
-'?([^'\s/]*)'?  # value associated with any of the keys (un-quoted)
-"""
-kindMatcher = re.compile(kindRegex, re.VERBOSE)
 
-SERIAL_IDS = [5982, 6448]
+# Regex to identify type of observation bias / dark / flats / science
+# SRE_OBSTYPE = re.compile(rb"""
+# (?:OBSTYPE)     # keywords (non-capture group if `capture_keywords` False)
+# \s*?=\s+        # (optional) whitespace surrounding value indicator '='
+# '?([^'\s/]*)'?  # value associated with any of the keys (un-quoted)
+# """, re.VERBOSE)
 
 # Field of view of telescopes in arcmin
 FOV74 = (1.29, 1.29)
@@ -87,47 +92,38 @@ FOVr = {'74': FOV74r,
         '1.9': FOV74r}
 
 
-def get_obstype(filename):
-    filesize = os.path.getsize(filename)
-    with open(filename, 'rb') as fileobj:
-        filemap = mmap.mmap(
-                fileobj.fileno(), filesize, access=mmap.ACCESS_READ
-        )
-        mo = MATCH_END.search(filemap)
-        if mo is None:
-            raise IOError('Could not match header')
-
-        m = kindMatcher.search(filemap[:mo.end()])
-        if m is None:
-            return  # obstype unknown!
-
-        return m.group(1).decode()
-
-
-# def attrgetter_default(*attrs, **kw):
-#     """
-#     Like attrgetter, but defaults to None (or specified default) if attr
-#     doesn't exist.
-#     Always returns tuple, even if only one in attrs (unlike attrgetter)
-#     """
-#     default = kw.pop('default', None)
-#     if kw:
-#         raise TypeError("attrgetter_default() got unexpected "
-#             "keyword argument(s): %r" % sorted(kw))
-#     def fn(obj):
-#         getter = lambda attr: getattr(obj, attr, default)
-#         return tuple(map(getter, attrs))
-#     return fn
-
-
 def apply_stack(func, *args, **kws):  # TODO: move to proc
     # TODO:  MULTIPROCESS HERE!
     return func(*args, **kws)
 
 
+from collections import defaultdict
+
+
+def headers_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
+    agg = defaultdict(list)
+    if keys is None:
+        keys = set(itt.chain(*run.calls('header.keys')))
+
+    for key in keys:
+        if key in ignore:
+            continue
+        for header in run.attrs('header'):
+            agg[key].append(header.get(key, '--'))
+
+    return agg
+    # return Table(agg, order='r', minimalist=True,
+    # width=[5] * 35, too_wide=False)
+
+
 ################################################################################
 # class definitions
 ################################################################################
+
+class ClassProperty(property):
+    def __get__(self, cls, owner):
+        return self.fget.__get__(None, owner)()
+
 
 class Date(datetime.date):
     """
@@ -139,12 +135,6 @@ class Date(datetime.date):
     def __repr__(self):
         return str(self)
 
-    # def fn_repr(self):
-
-
-# class AttrRepr(AttrReadItem):
-#     pass
-
 
 class yxTuple(tuple):
     def __init__(self, *args):
@@ -153,79 +143,491 @@ class yxTuple(tuple):
 
 
 class Binning(yxTuple):
-    def __str__(self):
+    def __repr__(self):
         return '%ix%i' % self
 
 
-@dataclass(order=True)
-class Mode:
-    readoutFrq: float
+@dataclass()
+class OutAmpMode(object):
+    mode_long: str
+    emGain: str = ''
+
+    # note the gain is sometimes erroneously recorded in the header as having a
+    #  non-zero value even though the pre-amp mode is CON.
+    def __post_init__(self):
+        self.mode = 'CON' if self.mode_long.startswith('C') else 'EM'
+
+    def __repr__(self):
+        return ': '.join(map(str, filter(None, (self.mode, self.emGain))))
+
+
+@dataclass(order=True)  # (frozen=True)
+class ReadoutMode:
+    frq: float
     preAmpGain: float
-    outAmpMode: str
-    nullGainStr: ClassVar = '--'
-    emGain: Union[int, str] = nullGainStr
-    acqMode: str = field(default='', repr=False)
+    outAmp: OutAmpMode
+    ccdMode: str = field(repr=False)
+    serial: int = field(repr=False)
+
+    @classmethod
+    def from_header(cls, header):
+        # readout speed
+        frq = 1. / header['READTIME']
+        frq = int(round(frq / 1.e6))  # MHz
+        #
+        outAmp = OutAmpMode(header['OUTPTAMP'], header.get('GAIN', ''))
+        return cls(frq, header['PREAMP'], outAmp, header['ACQMODE'],
+                   header['SERNO'])
 
     def __post_init__(self):
-        self.isEM = (self.outAmpMode == 'EM')
-        # the gain is sometimes erroneously recorded in the header as having a
-        # non-zero value even though the pre-amp mode is CON. We wrap the
-        # attribute as a property to retrieve the correct value
-        if not self.isEM:
-            self.emGain = self.nullGainStr
+        self.isEM = (self.outAmp.mode == 'EM')
+        self._mode = repr(self) # cheat!!
+        # Readout noise
+        # set the correct values here as attributes of the instance. These
+        # values are absent in the headers
+        (self.bit_depth, self.sensitivity, self.noise, self.time,
+         self.saturation, self.bias_level) = \
+            readNoiseTables[self.serial][
+                (self.frq, self.outAmp.mode, self.preAmpGain)]
 
-    def fn_repr(self):
-        return 'γ{:g}@{:g}MHz.{:s}'.format(self.preAmpGain, self.readoutFrq,
-                                           self.outAmpMode)
+    def __repr__(self):
+        return '{} MHz {}'.format(self.frq, self.outAmp)
 
-    def __hash__(self):
-        return hash((self.readoutFrq, self.preAmpGain,
-                     self.outAmpMode, self.emGain))
+    # def _repr_short(self, with_units=True):
+    #     """short representation for tables etc"""
+    #     if with_units:
+    #         units = (' e⁻/ADU', ' MHz')
+    #     else:
+    #         units = ('', '')
+    #     return 'γ={0:.1f}{2:s}; f={1:.1f}{3:s}'.format(self.gain,
+    #                                                    self.freq, *units)
 
-    # def __lt__(self, other):
+    # def fn_repr(self):
+    #     return 'γ{:g}@{:g}MHz.{:s}'.format(
+    #             self.preAmpGain, self.frq, self.outAmp.mode)
+
+    # def adc_bit_depth(self):
+    #     if self.frq > 1:
+    #         return 14
+    #     else:
+    #         return 16
 
 
-class PPrintHelper(object):
-    # handle default attributes for `pprint` and `get_instrumental_setup`
-    _default_attrs = [('target',),  # FIXME: this should be only for science??
-                      ('shape',),
-                      ('binning',),
-                      ('preAmpGain',),
-                      ('outAmpMode',),
-                      ('mode.emGain', 'emGain'),
-                      #
-                      ('timing.trigger.mode', 'trigger.mode'),
-                      ('timing.t0repr', 't0 (UTC)'),
-                      # TODO: separate date and t0 for even more compact repr
-                      ('timing.duration', 'duration'),
-                      ('timing.texp', 'tExp (s)'), ]  # 'ron'
+# def __hash__(self):
+#     return hash((self.frq, self.preAmpGain, self.outAmp.mode, self.emGain))
 
-    # for each tuple in list _default_attrs, item 0 is attr name, item 1
-    # (optional) is the display name
+# def __lt__(self, other):
 
-    def __init__(self, attrs=None):
 
-        if attrs is None:
-            attrs = self._default_attrs
+class Filters(object):
+    def __init__(self, a, b):
+        self.A = a or 'Empty'
+        self.B = b or 'Empty'
 
-        self.attrs, self.headers = [], []
-        for attr in attrs:
-            self.add_attr(*attr)
 
-    def add_attr(self, attr, header=None):
+def str2tup(keys):
+    if isinstance(keys, str):
+        keys = keys,  # a tuple
+    return keys
 
-        if not isinstance(attr, str):
-            raise ValueError('Attribute must be a str')
 
-        if header is None:
-            header = attr
+from recipes.containers import AttrTable as PPrintHelper
+import functools as ftl
 
-        # avoid duplication
-        if attr in self.attrs:
-            return
 
-        self.attrs.append(attr)
-        self.headers.append(header)
+class shocCampaign(PhotCampaign):  # TODO shocRun
+
+    pprinter = PPrintHelper(
+            ['name',
+             'target', 'obstype',
+             'filters.A', 'filters.B',
+             'nframes', 'ishape', 'binning',
+             'readout.preAmpGain',
+             'readout.mode',
+
+             'timing._t0_repr',
+             'timing.t_expose',
+             'timing.duration',
+             ],
+            column_headers={
+                'nframes': 'n',
+                'binning': 'bin',
+                'readout.preAmpGain': 'γₚᵣₑ',
+                'timing.t_expose': 'tExp (s)',
+                'timing._t0_repr': 't0',
+            },
+            formatters={
+                'timing.duration': ftl.partial(pprint.hms, unicode=True,
+                                               precision=1)
+            },
+            title_props=dict(bg='g'),
+            too_wide=False,
+            total=['n', 'duration'])
+
+    def new_groups(self):
+        return shocObsGroups(self.__class__)
+
+    def pprint(self, attrs=None, **kws):
+        flags = {}
+        for key, fun in [('timing._t0_repr', 'timing.trigger.is_gps'),
+                         ('timing.t_expose', 'timing.trigger.is_gps_loop')]:
+            _flags = self.calls(fun)
+            flags[self.pprinter.headers[key]] = \
+                np.choose(_flags, [' ' * any(_flags), '*'])
+
+        return super().pprint(attrs, flags=flags, **kws)
+
+    def thumbnails(self, statistic='mean', depth=10, subset=(0, 10)):
+        """
+        Display a sample image from each of the observations laid out in a grid.
+        Image thumbnails are all the same size, even if they are shaped
+        differently, so the size of displayed pixels may be different
+
+        Parameters
+        ----------
+        statistic: str
+            statistic for the sample
+        depth: int
+            number of images in each observation to combine
+        subset: int or tuple
+            index interval for subset of the full observation to draw from
+
+        Returns
+        -------
+
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        from graphical.imagine import ImageDisplay
+
+        n = len(self)
+        assert n, 'No observation to plot!'
+
+        # get sample images
+        sample_images = self.calls(f'sampler.{statistic}', depth, subset)
+
+        # get grid layout
+        n_rows, n_cols = auto_grid(n)
+        cbar_size = 3
+
+        # create figure
+        fig = plt.figure(figsize=(10.5, 9))
+        # Use gridspec rather than ImageGrid since the latter tends to resize
+        # the axes
+        gs = GridSpec(n_rows, n_cols * (100 + cbar_size),
+                      hspace=0.005,
+                      wspace=0.005,
+                      left=0.03,
+                      right=0.98,
+                      bottom=0.03,
+                      top=0.98)
+
+        art = []
+        indices = np.ndindex(n_rows, n_cols)
+        axes = np.empty((n_rows, n_cols), 'O')
+        for i, (j, k) in enumerate(indices):
+            if i >= n:
+                break
+
+            axes[j, k] = ax = fig.add_subplot(gs[j:j + 1,
+                                              (100 * k):(100 * (k + 1))])
+            imd = ImageDisplay(sample_images[i], ax=ax,
+                               cbar=False, hist=False, sliders=False,
+                               origin='lower left')
+            art.append(imd.imagePlot)
+
+            t = (j == 0)
+            l = (k == 0)
+            b = (j == n_rows - 1)
+            # r = (j == n_cols - 1)
+            if not l:
+                ax.set_yticklabels([])
+            if not (b or t):
+                ax.set_xticklabels([])
+            # if r:
+            #     ax.yaxis.tick_right()
+            if t:
+                ax.xaxis.tick_top()
+
+        # labels (names
+        for i, (ax, name) in enumerate(zip(axes.ravel(), self.attrs('name'))):
+            ax.text(0.025, 0.95, f'{i: <2}: {name}', color='w', va='top',
+                    fontweight='bold', transform=ax.transAxes)
+
+        # colorbar
+        cax = fig.add_subplot(gs[:, -cbar_size * n_cols:])
+        # noinspection PyUnboundLocalVariable
+        fig.colorbar(imd.imagePlot, cax)
+
+        # https://matplotlib.org/3.1.1/gallery/images_contours_and_fields/multi_image.html
+        # Make images respond to changes in the norm of other images (e.g. via
+        # the "edit axis, curves and images parameters" GUI on Qt), but be
+        # careful not to recurse infinitely!
+        def update(changed_image):
+            for im in art:
+                if (changed_image.get_cmap() != im.get_cmap()
+                        or changed_image.get_clim() != im.get_clim()):
+                    im.set_cmap(changed_image.get_cmap())
+                    im.set_clim(changed_image.get_clim())
+
+        for im in art:
+            im.callbacksSM.connect('changed', update)
+
+        return fig, axes
+
+    def guess_obstype(self, plot=False):
+        """
+        Identify what type of observation each dataset represents by running
+        'guess_obstype' on each.
+
+        Parameters
+        ----------
+        plot
+
+        Returns
+        -------
+
+        """
+        names = self.attrs('name')
+        obstypes, stats = zip(*self.calls('guess_obstype', return_stats=True))
+        stats = np.array(stats)
+        idx = defaultdict(list)
+        for i, lbl in enumerate(obstypes):
+            idx[lbl].append(i)
+
+        if plot:
+            from matplotlib import pyplot as plt
+            n = stats.shape[1]
+            fig, axes = plt.subplots(1, n, figsize=(12.5, 8), sharey=True,
+                                     gridspec_kw=dict(top=0.96,
+                                                      bottom=0.045,
+                                                      left=0.14,
+                                                      right=0.975,
+                                                      hspace=0.2,
+                                                      wspace=0, ))
+
+            for j, ax in enumerate(axes):
+                ax.set_title(['mean', 'std', 'ptp'][j])
+                m = 0
+                for lbl, i in idx.items():
+                    ax.plot(stats[i, j], range(m, m + len(i)), 'o', label=lbl)
+                    m += len(i)
+                ax.grid()
+
+            ax.invert_yaxis()
+            ax.legend()
+
+            # filenames as ticks
+            z = []
+            list(map(z.extend, idx.values()))
+            ax = axes[0]
+            ax.set_yticklabels(np.take(names, z))
+            ax.set_yticks(np.arange(len(self) + 1) - 0.5)
+            for tick in ax.yaxis.get_ticklabels():
+                tick.set_va('top')
+            # plt.yticks(np.arange(len(self) + 1) - 0.5,
+            #            np.take(names, z),
+            #            va='top')
+
+        return obstypes
+
+    def match(self, other, exact, closest=None, threshold_warn=7,
+              print_=1):
+        """
+        Match these observations with those in `other` according to their
+        attribute values. Matches exactly the attributes given in `exact`,
+        and as closely as possible to those in `closest`. Group both
+        campaigns by the values at attributes.
+
+        Parameters
+        ----------
+        other: shocCampaign
+            shocCampaign instance from which observations will be picked to
+            match those in this list
+        exact: tuple or str
+            single or multiple attribute names to check for equality between
+            the two runs. For null matches, None is returned.
+        closest: tuple or str
+            single or multiple keywords to match as closely as possible between
+            the two runs. The attributes which are pointed to by these should
+            support item subtraction
+        threshold_warn: int, optional
+            If the difference in attribute values for attributes in `closest`
+            are greater than `threshold_warn`, a warning is emitted
+        print_: bool
+            whether to print the resulting matches in a table
+
+        Returns
+        -------
+        g0: shocObsGroups
+            a dict-like object keyed on the attribute values at `keys` and
+            mapping to unique shocRun instances
+        out_sr
+        """
+
+        # self.logger.info(
+        #         'Matching %s frames to %s frames by:\tExact %s;\t Closest %r',
+        #         other.kind.upper(), self.kind.upper(), exact, closest)
+
+        # create the GroupedRun for science frame and calibration frames
+        exact, closest = str2tup(exact), str2tup(closest)
+        keys = OrderedSet(filter(None, mit.flatten([exact, closest])))
+
+        assert len(keys), ('Need at least one key (attribute name) by which '
+                           'to match')
+        assert len(other), 'Need at least one key observation to match'
+
+        g0 = self.group_by(*keys)
+        g1 = other.group_by(*keys)
+
+        # Do the matching - map observation to those in `other` with attribute
+        # values matching most closely
+
+        # keys are attributes of the HDUs
+        vals0 = self.attrs(*keys)
+        vals1 = other.attrs(*keys)
+        # get set of science frame attributes
+        val_set0 = np.array(list(set(vals0)), object)
+        val_set1 = np.array(list(set(vals1)), object)
+
+        # get state array to indicate where in data threshold is exceeded (used
+        # to colourise the table)
+        # sss = val_set0.shape
+        # states = np.zeros((2 * sss[0], sss[1] + 1))
+
+        #
+        out = self.new_groups()
+        # table = []
+        lme = len(exact)
+        # cls_of_vals = list(map(type, vals0))
+        # assumming consistent types across runs for each attribute
+
+        for vals in val_set0:
+            # those HDUs in `other` with same vals (that need closest matching)
+            equals = np.all(val_set1[:, :lme] == vals[:lme], axis=1)
+            deltas = np.abs(val_set1[:, lme:] - vals[lme:])
+
+            if ~equals.any():  # NO exact matches
+                gid = (None, ) * len(keys)
+            else:  # some equal
+                # amongst those that that have exact matches, get those that
+                # also have  minimal delta values
+                # (closest match for any attribute in `closest`)
+                closest = (deltas == deltas[equals].min(1)).any(1)
+                gid = tuple(val_set1[equals & closest][0])
+
+            # array to tuple for hashing
+            out[tuple(vals)] = g1.get(gid)
+
+        return g0, out
+
+        #     Threshold warnings
+        #     FIXME:  MAKE WARNINGS MORE READABLE
+        #     if threshold_warn:
+        #         # type cast the attribute for comparison
+        #         # (datetime.timedelta for date attribute, etc..)
+        #         cls_of_val = type(deltas[0])
+        #         threshold = cls_of_val(threshold_warn)
+        #         if np.any(deltas[matched] > cls_of_val(0)):
+        #             states[2 * i:2 * (i + 1), lme + 1] += 1
+        #
+        #         # compare to threshold value
+        #         if np.any(deltas[matched] > threshold):
+        #             fns = ' and '.join(run.names)
+        #             sci_fns = ' and '.join(g0[vals].get_filenames())
+        #             msg = (f'Closest match of {} {} in {}\n'
+        #                    '\tto {} in {}\n'
+        #                    '\texcedees given threshold of {}!!\n\n'
+        #                    ).format(vals[lme], closest[0].upper(), fns,
+        #                             gid[lme], sci_fns, threshold_warn)
+        #             self.logger.warning(msg)
+        #             states[2 * i:2 * (i + 1), lme + 1] += 1
+        #
+        #     FIXME:  tables with 'mode' not printing nicely
+        #     table.append((str(g0[vals]),) + vals)
+        #     table.append((str(run),) + gid)
+        #     attmap[vals] = gid
+
+        # out_sr = GroupedRun(runmap)
+        # out_sr.label = other.label
+        # out_sr.groupId = g0.groupId
+
+        #
+        # if print_:
+        #     # Generate data table of matches
+        #     col_head = ('Filename(s)',) + tuple(map(str.upper, keys))
+        #     where_row_borders = range(0, len(table) + 1, 2)
+        #
+        #     tbl = sTable(table,
+        #                    title='Matches',
+        #                    title_props=dict(text='bold', bg='blue'),
+        #                    col_headers=col_head,
+        #                    hlines=where_row_borders,
+        #                    precision=3, minimalist=True,
+        #                    width=range(140))
+        #
+        #     # colourise   #TODO: highlight rows instead of colourise??
+        #     unmatched = [None in row for row in table]
+        #     unmatched = np.tile(unmatched, (len(keys) + 1, 1)).T
+        #
+        #     states[unmatched] = 3
+        #     colours = ('default', 'yellow', 202, 'red')
+        #     table.colourise(states, colours)
+        #
+        #     self.logger.info('The following matches have been made:')
+        #     print(table)
+
+        # return g0, out
+
+
+def auto_grid(n):
+    x = int(np.floor(np.sqrt(n)))
+    y = int(np.ceil(n / x))
+    return x, y
+
+
+class shocObsGroups(Grouped):
+    def pprint(self, **kws):
+        """
+        Run pprint on each
+        """
+
+        from motley.table import vstack, hstack
+
+        kws.pop('title', None)
+        kws['compact'] = False  #
+        tables = []
+        braces = ''
+        # brace_space = int('total' in kws) + 1
+
+        pp = shocCampaign.pprinter
+        headers = pp.get_headers(pp.attrs)
+
+        totals = pp.kws['total']
+        if totals:
+            # convert totals to numeric since we remove column headers for
+            # lower tables
+            kws['total'] = list(map(headers.index, totals))
+
+        for i, (gid, run) in enumerate(self.items()):
+            title = None if i else self.__class__.__name__
+            tbl = run.pprinter.get_table(run, title=title, **kws)
+            brace_space = '\n' * (tbl.has_totals + bool(i))
+            braces += brace_space + hbrace(tbl.data.shape[0], gid)
+            tables.append(tbl)
+            kws['col_headers'] = None
+            kws['col_groups'] = None
+
+        print(hstack((vstack(tables), braces), spacing=1, offset=3))
+
+
+def hbrace(size, name=''):
+    d, r = divmod(int(size) - 3, 2)
+    return '\n'.join(['⎫'] +
+                     ['⎪'] * d +
+                     ['⎬ %s' % name] +
+                     ['⎪'] * (d + r) +
+                     ['⎭'])
 
 
 # class shocObsBase()
@@ -234,8 +636,40 @@ class PPrintHelper(object):
 #     """helper class for photometry interface"""
 
 
+# TODO: add these keywords to old SHOC headers:
+
+
+# TODO: remove from headers
+#  ACT
+#  KCT
+
+from obstools.phot.utils import Resample
+
+
+class ResampleFlip(Resample):
+
+    def __init__(self, data, sample_size=None, subset=None, axis=0, flip=''):
+        super().__init__(data, sample_size, subset, axis)
+        slices = [slice(None), slice(None), slice(None)]
+        if 'y' in flip:
+            slices[-2] = slice(None, None, -1)
+        if 'x' in flip:
+            slices[-1] = slice(None, None, -1)
+        #
+        self.o = tuple(slices)
+
+    def draw(self, n=None, subset=None):
+        data = super().draw(n, subset)
+        return data[self.o]
+
+
+# class shocImageSampler(object):
+#
+#     _sampler = None
+#
+
 # HDU Subclasses
-class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
+class shocHDU(PrimaryHDU, LoggingMixin):
     def __init__(self, data=None, header=None, do_not_scale_image_data=False,
                  ignore_blank=False, uint=True, scale_back=None):
         PrimaryHDU.__init__(self,
@@ -245,30 +679,11 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
                             ignore_blank=ignore_blank,
                             scale_back=scale_back)
 
-        # convert to shocHeader. Passing to the `PrimaryHDU` init does not
-        # create the right type of object
-        # print(type(self.header))
+        # ImageSamplerHDUMixin.__init__(self)
 
-        # try:
-        #     if not isinstance(self.header, shocHeader):
-        #         self.header = shocHeader(self.header)
-        #     else:
-        #         print('WEIRD??!!') # this maybe autoreload issue?
-        # except Exception as err:
-        #     from IPython import embed
-        #     import traceback
-        #     import textwrap
-        #     embed(header=textwrap.dedent(
-        #         """\
-        #         Caught the following %s:
-        #         ------ Traceback ------
-        #         %s
-        #         -----------------------
-        #         Exception will be re-raised upon exiting this embedded interpreter.
-        #         """) % (err.__class__.__name__, traceback.format_exc()))
-        #     raise
-
-        shocNr = SERIAL_IDS.index(header['SERNO']) + 1
+        #
+        serial = header['SERNO']
+        shocNr = SERIAL_NRS.index(serial) + 1
         self.instrument = 'SHOC %i' % shocNr
         self.telescope = header.get('TELESCOP')
 
@@ -284,14 +699,6 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
         # image binning
         self.binning = Binning(header['%sBIN' % _] for _ in 'VH')
 
-        # image dimensions
-        # self.ndims = header['NAXIS']  # Number of image dimensions
-        # Pixel dimensions
-        # self.ishape = header['NAXIS1'], header['NAXIS2']
-        # self.nframes = header.get('NAXIS3', 1)
-        # self.shape = tuple(header['NAXIS%i' % i]
-        #                    for i in range(1, self.ndims + 1))
-
         # sub-framing
         self.subrect = np.array(header['SUBRECT'].split(','), int)
         # subrect stores the sub-region of the full CCD array captured for this
@@ -303,52 +710,97 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
         self.subSlices = list(map(slice, *np.transpose(self.sub)))
 
         # Readout stats
-        # set the correct values here as attributes of the instance. These
-        # though not values may be absent in the headers
-        # FIXME:
-        # self.ron, self.sensitive, self.saturate = header.get_readnoise()
 
         # CCD mode
-        self.acqMode = header['ACQMODE']
-        self.preAmpGain = header['PREAMP']
-        outAmpModeLong = header['OUTPTAMP']
-        self.outAmpMode = 'CON' if outAmpModeLong.startswith('C') else 'EM'
-
-        # readout speed
-        readoutFrq = 1. / header['READTIME']
-        self.readoutFrq = int(round(readoutFrq / 1.e6))  # MHz
-
-        # gain   # should be printed as '--' when mode is CON
-        self._emGain = header.get('GAIN', None)
-        # Mode tuple
-        self.mode = Mode(self.readoutFrq, self.preAmpGain,
-                         self.outAmpMode, self._emGain)
+        self.readout = ReadoutMode.from_header(header)
 
         # orientation
         self.flip_state = yxTuple(header['FLIP%s' % _] for _ in 'YX')
-        # NOTE: row, column order
-        # WARNING: flip state wrong for old SHOC data : TODO confirm this
+        # WARNING: flip state wrong for EM!!
+        # NOTE: IMAGE ORIENTATION reversed for EM mode data since it gets read
+        #  out in opposite direction in the EM register to CON readout.
 
         # filters
-        Filters = namedtuple('Filters', list('AB'))
-        self.filters = Filters(*(header.get('WHEEL%s' % _) for _ in 'AB'))
-
-        # Timing
-        # self.kct = self.timing.kct
-        # self.trigger_mode = self.timing.trigger.mode
-        # self.duration
+        self.filters = Filters(*(header.get(f'FILTER{_}', 'Empty') for _ in
+                                 'AB'))
 
         # object name
         self.target = header.get('OBJECT')  # objName
+        self.obstype = header.get('OBSTYPE')
 
-        # coordinates
-        self.coords = self.get_coords()
-        # note: self.coords may be None
+    @lazyproperty
+    def sampler(self):
+        """
+        An image sampler mixin for SHOC data that automatically corrects the
+        orientation of images so they are oriented North up, East left.
 
-    def get_coords(self):
+        Images taken in CON mode are flipped left-right.
+        Images taken in EM  mode are left unmodified
+        """
+        # reading subset of data for performance
+        # FitsPartial(self._file.name, *subset)
+        flip = '' if self.readout.isEM else 'x'
+        return ResampleFlip(self.section, flip=flip)
+
+    @lazyproperty
+    def timing(self):
+        # Initialise timing
+        # this is delayed from init on the hdu above since this class may
+        # initially be created with a _`BasicHeader` only, in which case we
+        # will not yet have all the correct keywords available yet to identify
+        # old vs new.
+        # return shocTimingBase(self)
+        if 'shocOld' in self.__class__.__name__:
+            return shocTimingOld(self)
+        else:
+            return shocTimingNew(self)
+
+    # @property
+    # def kct(self):
+    #     return self.timing.kct
+
+    @property
+    def file_path(self):
+        """file name as a Path object"""
+        return Path(self._file.name)
+
+    @property
+    def name(self):
+        return self.file_path.stem
+
+    @property
+    def nframes(self):
+        """Total number of images in observation"""
+        return self.shape[0]  #
+
+    @property
+    def ishape(self):
+        """Image frame shape"""
+        return self.shape[-2:]
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @lazyproperty
+    def coords(self):
+        """
+        The target coordinates.  This function will look in multiple places
+        to find the coordinates.
+        1. header 'OBJRA' 'OBJDEC'
+        2. use coordinates pointed to in SIMBAD if target name in header under
+           'OBJECT' key available and connection available.
+        3. header 'TELRA' 'TELDEC'.  warning emit
+
+        Returns
+        -------
+        astoropy.coordinates.SkyCoord
+
+        """
+        # target coordinates
         header = self.header
 
-        ra, dec = header.get('objra'), header.get('objdec')
+        ra, dec = header.get('OBJRA'), header.get('OBJDEC')
         coords = convert_skycoords(ra, dec)
         if coords:
             return coords
@@ -366,7 +818,7 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
         # data for which these keywords are available in the header
         # note: These will lead to slightly less accurate timing solutions,
         #  so emit warning
-        ra, dec = header.get('telra'), header.get('teldec')
+        ra, dec = header.get('TELRA'), header.get('TELDEC')
         coords = convert_skycoords(ra, dec)
 
         # TODO: optionally query for named sources in this location
@@ -376,10 +828,6 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
                                 'being less accurate.')
 
         return coords
-
-    def get_sample_image(self, size, interval=None, func='median', channel=...):
-        return np.fliplr(
-                super().get_sample_image(size, interval, func, channel))
 
     # NOTE: for the moment, the methods below are duplicated while migration
     #  to this class in progress
@@ -432,29 +880,113 @@ class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
     def get_rotation(self):
         return 0
 
+    def guess_obstype(self, sample_size=10, subset=(0, 100),
+                      return_stats=False):
+        """
+        Guess the observation type based on statistics of a sample frame.
+        Very basic decision tree based on 3 features: mean, stddev, peak-to-peak
+        values normalized to the saturation value of the CCD given the
+        instrumental setup. Comes with no guarantees whatsoever.
 
-class shocNewHDU(shocHDU):
-    @classmethod
-    def match_header(cls, header):
-        old, new = zip(*kw_old_to_new)
-        return all([kw in header for kw in new])
+        Since for SHOC 0-time readout is impossible, the label 'bias' is
+        technically erroneous, we use the label 'dark'
 
+        Returns
+        -------
+        label: {'object', 'flat', 'dark', 'bad'}
+
+        """
+        img = self.sampler.median(sample_size, subset)
+        m, s, p = np.divide([img.mean(), img.std(), img.ptp()],
+                            self.readout.saturation)
+
+        # s = 0 implies all constant pixel values.  These frames are sometimes
+        # created erroneously by SHOC
+        if s == 0 or m >= 1.5:
+            o = 'bad'
+
+        # Flat fields are usually about halfway to the saturation value
+        elif 0.25 <= m < 1.5:
+            o = 'flat'
+
+        # dark frames have narrow distribution
+        elif p < 0.0035:
+            o = 'dark'
+
+        # what remains must be on sky!
+        else:
+            o = 'object'
+
+        if return_stats:
+            return o, (m, s, p)
+
+        return o
+
+    @property
+    def needs_timing(self):
+        """
+        check for date-obs keyword to determine if header information needs updating
+        """
+        return not ('date-obs' in self.header)
+        # TODO: is this good enough???
+
+    def display(self, **kws):
+        """Display the data"""
+        if self.ndims == 2:
+            from graphical.imagine import ImageDisplay
+            im = ImageDisplay(self.data, **kws)
+
+        elif self.ndims == 3:
+            from graphical.imagine import VideoDisplay
+            im = VideoDisplay(self.data, **kws)
+
+        else:
+            raise TypeError('Not an image!! WTF?')
+
+        im.figure.canvas.set_window_title(self.file_path.name)
+        return im
+
+
+from pathlib import Path
+
+
+# _BaseHDU creates a _BasicHeader, which does not contain hierarch keywords,
+# so for SHOC we cannot tell if it's the old format header by checking those
 
 class shocOldHDU(shocHDU):
     @classmethod
     def match_header(cls, header):
+        return any((kw not in header for kw in HEADER_KEYS_MISSING_OLD))
+
+    #
+    # header['OBJEPOCH'] = (2000, 'Object coordinate epoch')
+
+
+class shocNewHDU(shocHDU):
+    @classmethod
+    def match_header(cls, header):
+        # first check not calibration stack
+        for c in [shocBiasHDU, shocFlatHDU]:
+            if c.match_header(header):
+                return False
+
         old, new = zip(*kw_old_to_new)
-        return any((kw in header for kw in old))
+        return all([kw in header for kw in new])
 
 
-# # TODO:
-# Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at obstype
-# keywords
-#
-from astropy.io.fits.hdu import register_hdu
+class shocBiasHDU(shocHDU):
+    @classmethod
+    def match_header(cls, header):
+        return 'bias' in header.get('OBSTYPE', '')
 
-register_hdu(shocNewHDU)
-register_hdu(shocOldHDU)
+    def get_coords(self):
+        return
+
+
+class shocFlatHDU(shocBiasHDU):
+    @classmethod
+    def match_header(cls, header):
+        return 'flat' in header.get('OBSTYPE', '')
 
 
 class shocObs(HDUList, LoggingMixin):
@@ -468,7 +1000,7 @@ class shocObs(HDUList, LoggingMixin):
     kind = 'science'
     location = 'sutherland'
 
-    pprinter = PPrintHelper()
+    pprinter = None  # PPrintHelper()
 
     @classmethod
     def load(cls, fileobj, kind=None, mode='update', memmap=False,
@@ -557,6 +1089,34 @@ class shocObs(HDUList, LoggingMixin):
         sep = '; '
         return '%s (%s): %s' % (clsname, filename, sep.join(attrRep))
 
+    def get_attr_repr(self):
+        return AttrRepr(sep='.',
+                        kind=self.kind,
+                        obj=self.target,
+                        # filter=header.get('FILTER', 'WL'),
+                        basename=self.get_filename(0, 0),
+                        date=self.nameDate,
+                        binning=str(self.binning),
+                        mode=self.mode.fn_repr(),
+                        kct=self.timing.td_kct.hms)
+
+    def get_instrumental_setup(self, attrs=None, headers=None):
+        # TODO: units
+
+        filename = self.get_filename() or '<Unsaved>'
+        attrNames, attrDisplayNames = attrs, headers
+        if attrs is None:
+            attrNames = self.pprinter.attrs[:]
+
+        if headers is None:
+            attrDisplayNames = self.pprinter.headers[:]
+
+        # check correct number of attrs / headers
+        assert len(attrNames) == len(attrDisplayNames)
+        attrVals = operator.attrgetter(*attrNames)(self)
+
+        return filename, attrDisplayNames, attrNames, attrVals
+
     def instrumental_setup(self):
         """
         Retrieve the relevant information about the observational setup from
@@ -568,7 +1128,7 @@ class shocObs(HDUList, LoggingMixin):
 
         # instrument
         serno = header['SERNO']
-        shocNr = SERIAL_IDS.index(serno) + 1
+        shocNr = SERIAL_NRS.index(serno) + 1
         self.instrument = 'SHOC %i' % shocNr
         self.telescope = header.get('telescop')
 
@@ -589,6 +1149,7 @@ class shocObs(HDUList, LoggingMixin):
         # Pixel dimensions
         self.ishape = header['NAXIS1'], header['NAXIS2']
         self.nframes = header.get('NAXIS3', 1)
+
         self.shape = tuple(header['NAXIS%i' % i]
                            for i in range(1, self.ndims + 1))
 
@@ -678,17 +1239,6 @@ class shocObs(HDUList, LoggingMixin):
 
         return sep.join(filter(None, parts + suffix + ext))
 
-    def get_attr_repr(self):
-        return AttrRepr(sep='.',
-                        kind=self.kind,
-                        obj=self.target,
-                        # filter=header.get('FILTER', 'WL'),
-                        basename=self.get_filename(0, 0),
-                        date=self.nameDate,
-                        binning=str(self.binning),
-                        mode=self.mode.fn_repr(),
-                        kct=self.timing.td_kct.hms)
-
     def get_coords(self, verbose=False):
         header = self.header
 
@@ -709,19 +1259,20 @@ class shocObs(HDUList, LoggingMixin):
         # LAST resort use TELRA, TELDEC. This will only work for newer SHOC
         # data for which these keywords are available in the header
         # note: These will lead to slightly less accurate timing solutions
-        ra, dec = header.get('telra'), header.get('teldec')
+        ra, dec = header.get('TELRA'), header.get('TELDEC')
         coords = convert_skycoords(ra, dec)
 
         # TODO: optionally query for named sources in this location
         if coords:
-            warn('Using telescope pointing coordinates.')
+            self.logger.warning('Using telescope pointing coordinates.')
 
         return coords
 
     @property
     def needs_timing(self):
         """
-        check for date-obs keyword to determine if header information needs updating
+        check for date-obs keyword to determine if header information needs
+        updating
         """
         return not ('date-obs' in self.header)
         # TODO: is this good enough???
@@ -729,37 +1280,6 @@ class shocObs(HDUList, LoggingMixin):
     @property
     def has_coords(self):
         return self.coords is not None
-
-    def get_instrumental_setup(self, attrs=None, headers=None):
-        # TODO: units
-
-        filename = self.get_filename() or '<Unsaved>'
-        attrNames, attrDisplayNames = attrs, headers
-        if attrs is None:
-            attrNames = self.pprinter.attrs[:]
-
-        if headers is None:
-            attrDisplayNames = self.pprinter.headers[:]
-
-        try:
-            # check correct number of attrs / headers
-            assert len(attrNames) == len(attrDisplayNames)
-            attrVals = operator.attrgetter(*attrNames)(self)
-        except Exception as err:
-            from IPython import embed
-            import traceback
-            import textwrap
-            embed(header=textwrap.dedent(
-                    """\
-                    Caught the following %s:
-                    ------ Traceback ------
-                    %s
-                    -----------------------
-                    Exception will be re-raised upon exiting this embedded interpreter.
-                    """) % (err.__class__.__name__, traceback.format_exc()))
-            raise
-
-        return filename, attrDisplayNames, attrNames, attrVals
 
     def get_field_of_view(self, telescope=None, unit='arcmin',
                           with_focal_reducer=False):
@@ -1018,10 +1538,7 @@ class shocObs(HDUList, LoggingMixin):
 
         return count
 
-    # def writeto(self, fileobj, output_verify='exception', overwrite=False, checksum=False):
-    #     self._in_write = True
-
-    def plot(self, **kws):  # TODO: display...
+    def display(self, **kws):
         """Display the data"""
         if self.ndims == 2:
             from graphical.imagine import ImageDisplay
@@ -1038,10 +1555,13 @@ class shocObs(HDUList, LoggingMixin):
         return im
 
     # def animate(self):
-    #   TODO: OR incorporate in VideoDisplay
+    #   TODO: VideoDisplay(self.data).run()
+
+    # def writeto(self, fileobj, output_verify='exception', overwrite=False,
+    #               checksum=False):
+    #     self._in_write = True
 
 
-################################################################################
 class shocBiasObs(shocObs):  # FIXME: DARK?
     kind = 'bias'
 
@@ -1075,11 +1595,6 @@ class shocFlatFieldObs(shocBiasObs):
         return master
 
 
-class ClassProperty(property):
-    def __get__(self, cls, owner):
-        return self.fget.__get__(None, owner)()
-
-
 ################################################################################
 class shocRun(LoggingMixin):
     # TODO: merge method?
@@ -1107,7 +1622,7 @@ class shocRun(LoggingMixin):
     # compactify the table representation form the `print_instrumental_setup`
     # method by removing columns (attributes) that are equal across all
     # constituent cubes and printing them as a top row in the table
-    pprinter = PPrintHelper()
+    pprinter = None  # PPrintHelper()
 
     @ClassProperty  # so we can access via shocRun.kind and shocRun().kind
     @classmethod
@@ -1341,7 +1856,7 @@ class shocRun(LoggingMixin):
                        title_props=dict(text='bold', bg=self.displayColour),
                        col_headers=attrDisplayNames,
                        row_headers=['filename'] + list(filenames),
-                       number_rows=True,
+                       row_nrs=True,
                        precision=5, minimalist=True, compact=True,
                        formatters={'duration': pprint.hms},
                        #  FIXME: uniform precision hms
@@ -1428,10 +1943,10 @@ class shocRun(LoggingMixin):
         if self.check_rollover_state():
             times = self.get_rolled_triggers(times)
             msg = ('A single GPS trigger was provided. Run contains '
-                   'auto-split observation cubes (filesystem rollover due to '
+                   'auto-split fits files (filesystem rollover due to '
                    '2Gb threshold on old windows server). Start time for  '
-                   'rolled over ecubes will be inferred  from the length of '
-                   'the preceding cube(s).\n')
+                   'rolled-over files will be inferred from the number of '
+                   'frames in the preceding file(s).\n')
             self.logger.info(msg)
 
         # at this point we expect one trigger time per cube
@@ -2027,7 +2542,7 @@ class shocRun(LoggingMixin):
                            title='Matches',
                            title_props=dict(text='bold', bg='blue'),
                            col_headers=col_head,
-                           where_row_borders=where_row_borders,
+                           hlines=where_row_borders,
                            precision=3, minimalist=True,
                            width=range(140))
 
@@ -2047,7 +2562,7 @@ class shocRun(LoggingMixin):
     def identify(self):
         """Split science and calibration frames"""
         from recipes.iter import itersubclasses
-        from recipes.dict import AttrDict
+        from recipes.containers.dict import AttrDict
 
         idd = AttrDict()
         sr = self.group_by('kind')

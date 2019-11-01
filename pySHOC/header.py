@@ -5,6 +5,7 @@
 # import logging
 import re
 import itertools as itt
+import logging
 
 import numpy as np
 from astropy.io.fits import Header
@@ -13,7 +14,51 @@ from .convert_keywords import KEYWORDS as kw_old_to_new
 from .io import (ValidityTests as validity,
                  Conversion as convert,
                  InputCallbackLoop)
-from recipes.io import warn
+from recipes.introspection.utils import get_module_name
+
+# from recipes.io import warn
+
+# module level logger
+logger = logging.getLogger(get_module_name(__file__))
+
+HEADER_KEYS_MISSING_OLD = \
+    [
+        'OBJECT',
+        'OBJEPOCH',
+        # 'OBJEQUIN',  # don't need both 'OBJEPOCH' and 'OBJEQUIN'
+        'OBJRA',
+        'OBJDEC',
+        'OBSERVER',
+        'OBSTYPE',
+        'DATE-OBS',
+
+        # 'TELESCOP',
+        # 'TELFOCUS',
+        # 'TELRA',
+        # 'TELDEC',
+        # 'INSTRUME',
+        # 'INSTANGL',
+        #
+        # 'WHEELA',
+        # 'WHEELB',
+        # 'DATE-OBS',
+        # 'GPS-INT',
+        # 'GPSSTART',
+        #
+        # 'HA',
+        # 'AIRMASS',
+        # 'ZD',
+
+        # 'DOMEPOS',  # don't know post facto
+
+        # # Spectrograph stuff
+        # 'ESHTMODE',
+        # 'INSTSWV',
+        # 'NSETHSLD',
+        # 'RAYWAVE',
+        # 'CALBWVNM',
+
+    ]
 
 
 def match_term(kw, header_keys):
@@ -23,8 +68,8 @@ def match_term(kw, header_keys):
     # 'FILTERA'). Tiebreak on witch match contains the greatest fraction of
     # the matched key
     f = [np.diff(m.span())[0] / len(k) if m else m
-            for k in header_keys
-                 for m in (matcher.search(k),)]
+         for k in header_keys
+         for m in (matcher.search(k),)]
     f = np.array(f, float)
     if np.isnan(f).all():
         # print(kw, 'no match')
@@ -82,15 +127,20 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
     egDEC = "'+27:18:28.1' or '27 18 28.1'"
     # key, comment, example, assumed_if_not_given, check_function, conversion_function, ask_for_if_not_given
     table = [
-        ('OBJECT', 'IAU name of observed object', '', None, validity.trivial, convert.trivial),
+        ('OBJECT', 'IAU name of observed object', '', None, validity.trivial,
+         convert.trivial),
         ('OBJRA', 'Right Ascension', egRA, None, validity.RA, convert.RA),
         ('OBJDEC', 'Declination', egDEC, None, validity.DEC, convert.DEC),
-        ('EPOCH', 'Coordinate epoch', '2000', 2000, validity.epoch, convert.trivial),
+        ('EPOCH', 'Coordinate epoch', '2000', 2000, validity.epoch,
+         convert.trivial),
         # ('OBSERVAT', 'Observatory', '', validity.trivial, convert.trivial, 0),
-        ('TELESCOP', 'The telescope name', '', '1.9m', validity.trivial, convert.trivial),
-        ('FILTERA', 'The active filter in wheel A', 'Empty', 'Empty', validity.trivial,  convert.trivial,),
+        ('TELESCOP', 'The telescope name', '', '1.9m', validity.trivial,
+         convert.trivial),
+        ('FILTERA', 'The active filter in wheel A', 'Empty', 'Empty',
+         validity.trivial, convert.trivial,),
         # ('FILTERB', 'The active filter in wheel B', 'Empty', validity.trivial,  convert.trivial, 0),
-        ('OBSERVER', 'Observer who acquired the data', '', None, validity.trivial,  convert.trivial, )
+        ('OBSERVER', 'Observer who acquired the data', '', None,
+         validity.trivial, convert.trivial,)
         # ('RON', 'CCD Readout Noise',  '', validity.trivial, convert.trivial),
     ]
 
@@ -103,7 +153,7 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
            'to populate the image header. If you enter nothing that item '
            'will not be updated.')
     said = False
-    if do_update:      # args.update_headers
+    if do_update:  # args.update_headers
         supplied_keys = from_terminal.__dict__.keys()
         for term_key in supplied_keys:
             # match the terminal (argparse) input arguments with the keywords in
@@ -139,7 +189,7 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
                                              what=comment, convert=converter)
             elif assumed and not default:
                 # assume likely values and warn user
-                warn('Assuming %s is %r' %(header_key, assumed))
+                logger.warning('Assuming %s is %r' % (header_key, assumed))
                 info = assumed
 
             if info:
@@ -152,7 +202,6 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
 
 class shocHeader(Header):
     """Extend the pyfits.Header class for interactive user input"""
-
 
     def has_old_keys(self):
         old, new = zip(*kw_old_to_new)
@@ -174,7 +223,8 @@ class shocHeader(Header):
                 else:
                     self.rename_keyword(new, old)
             except ValueError as e:
-                warn('Could not rename keyword %s due to the following exception\n%s' %(old, e))
+                logger.warning( 'Could not rename keyword %s due to the '
+                                'following exception \n%s' % (old, e))
                 success = False
 
         return success
@@ -191,9 +241,9 @@ class shocHeader(Header):
         Readout noise, sensitivity, saturation as taken from ReadNoiseTable
         """
         data = self.get_readnoise()
-        keywords = 'RON', 'SENSITIV',  'SATURATE'
+        keywords = 'RON', 'SENSITIV', 'SATURATE'
         if with_comments:
-            comments = ('CCD Readout Noise',  'CCD Sensitivity',
+            comments = ('CCD Readout Noise', 'CCD Sensitivity',
                         'CCD saturation counts')
             data = zip(data, comments)
         return dict(zip(keywords, data))
@@ -221,9 +271,3 @@ class shocHeader(Header):
                 if verbose:
                     print("%s will not be updated" % key)
         return to_update
-
-
-
-
-
-

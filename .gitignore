@@ -3,13 +3,14 @@
 *.kate-swp
 *~
 *.bak
-/__pycache__
+__pycache__
 *.swp
 
 #notebooks
 /.ipynb_checkpoints/
 
-#cache
+#caches
+.cache
 .coordcache
 
 dev

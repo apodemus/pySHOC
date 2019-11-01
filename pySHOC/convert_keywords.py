@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-"""A utility for users to convert between different versions of header keywords."""
+"""
+A utility for users to convert between different versions of header keywords.
+"""
 
 __version__ = '1.0'
 
@@ -8,7 +10,6 @@ import os
 import argparse
 
 from astropy.io import fits
-
 
 # A mapping of old to new keywords.
 KEYWORDS = [
@@ -30,7 +31,6 @@ KEYWORDS = [
     ('HIERARCH AVERAGINGFACTOR', 'AVGFCTR'),
     ('HIERARCH FRAMECOUNT', 'FRMCNT'),
 ]
-
 
 try:
     input = raw_input
@@ -66,13 +66,15 @@ def convert(cube, forward=True):
     filename = '{0}_converted.fits'.format(basename)
     while os.path.exists(filename):
         overwrite = get_input(
-            "The file '{0}' already exists. Would you like to overwrite it? [y/n] ".format(filename),
-            validator=lambda r: r.lower() in ('y', 'n')).lower()
+                "The file '{0}' already exists. Would you like to overwrite it?"
+                " [y/n] ".format(filename),
+                validator=lambda r: r.lower() in ('y', 'n')).lower()
 
         if overwrite == 'y':
             overwrite = get_input(
-                "Are you sure that you want to overwrite '{0}'? [y/n] ".format(filename),
-                validator=lambda r: r.lower() in ('y', 'n')).lower()
+                    "Are you sure that you want to overwrite '{0}'? "
+                    "[y/n] ".format(filename),
+                    validator=lambda r: r.lower() in ('y', 'n')).lower()
 
         if overwrite == 'n':
             filename = get_input('Please enter a new filename: ')
@@ -87,7 +89,8 @@ def convert(cube, forward=True):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=convert.__doc__)
     parser.add_argument('files', nargs='+', help='Files to convert.')
-    parser.add_argument('-r', '--revert', action='store_false', help='Revert the headers of an already converted file.')
+    parser.add_argument('-r', '--revert', action='store_false',
+                        help='Revert the headers of an already converted file.')
 
     arguments = parser.parse_args()
 
