@@ -10,13 +10,16 @@ from recipes.io import warn
 from obstools import jparser
 # from decor.misc import persistent_memoizer
 from recipes.decor import memoize
-from motley.profiler.timers import timer
+# from motley.profiling.timers import timer
 
 # get coordinate cache file
 here = inspect.getfile(inspect.currentframe())  # this_filename
 moduleDir = Path(here).parent
 cooCacheName = '.coordcache'
 cooCachePath = moduleDir / cooCacheName
+
+dssCacheName = '.dsscache'
+dssCachePath = moduleDir / dssCacheName
 
 
 @memoize.to_file(cooCachePath)
@@ -30,6 +33,16 @@ def resolver(name):
     # Attempts a SIMBAD Sesame query with the given object name
     logging.info('Querying SIMBAD database for %r.', name)
     return SkyCoord.from_name(name)
+
+
+def convert_skycoords(ra, dec, verbose=False):
+    """Try convert ra dec to SkyCoord"""
+    if ra and dec:
+        try:
+            return SkyCoord(ra=ra, dec=dec, unit=('h', 'deg'))
+        except ValueError as err:
+            if verbose:
+                warn('Could not interpret coordinates: %s; %s' % (ra, dec))
 
 
 def retrieve_coords(name):
@@ -73,16 +86,6 @@ def retrieve_coords_ra_dec(name, verbose=True, **fmt):
     return coords, ra, dec
 
 
-def convert_skycooords(ra, dec, verbose=False):
-    """Try convert ra dec to SkyCoord"""
-    if ra and dec:
-        try:
-            return SkyCoord(ra=ra, dec=dec, unit=('h', 'deg'))
-        except ValueError as err:
-            if verbose:
-                warn('Could not interpret coordinates: %s; %s' % (ra, dec))
-
-
 def combine_single_images(ims, func):  # TODO MERGE WITH shocObs.combine????
     """Combine a run consisting of single images."""
     header = copy(ims[0][0].header)
@@ -101,11 +104,11 @@ def combine_single_images(ims, func):  # TODO MERGE WITH shocObs.combine????
     return pyfits.PrimaryHDU(data, header)  # outname
 
 
-dssCacheName = '.dsscache'
-dssCachePath = moduleDir / dssCacheName
+class STScIServerError(Exception):
+    pass
 
 
-@timer
+# @timer
 @memoize.to_file(dssCachePath)
 def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
     """
@@ -153,9 +156,14 @@ def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
     logging.info("Retrieving %s'x %s' image for object at J%.1f coordinates "
                  "RA = %.3f; DEC = %.3f from %r", h, w, epoch, ra, dec,
                  imserver)
+    # get data from server
+    data = urllib.request.urlopen(url).read()
+    if b'ERROR' in data[:1000]:
+        msg = data[76:194].decode().replace('\n<PRE>\n', ' ')
+        raise STScIServerError(msg)
+
     # load into fits
     fitsData = BytesIO()
-    data = urllib.request.urlopen(url).read()
     fitsData.write(data)
     fitsData.seek(0)
     return pyfits.open(fitsData, ignore_missing_end=True)

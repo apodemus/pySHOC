@@ -2,22 +2,30 @@ from astropy.io.fits.hdu.base import register_hdu
 
 from recipes.iter import flatiter, itersubclasses
 
+from .readnoise import ReadNoiseTable
 from .core import *
+
+
+# readNoiseTable singleton
+readNoiseTable = ReadNoiseTable()
 
 # register HDU classes
 register_hdu(shocNewHDU)
 register_hdu(shocOldHDU)
-# TODO: Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at obstype keywords
+# TODO: Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at
+#  obstype keywords
 
 
 # Collect named cubes in a dict
 namedObsClasses = {cls.kind: cls
-                    for cls in flatiter((itersubclasses(shocObs), shocObs))}
+                   for cls in flatiter((itersubclasses(shocObs), shocObs))}
 namedRunClasses = {cls.obsClass.kind: cls
-                    for cls in flatiter((itersubclasses(shocRun), shocRun))}
+                   for cls in flatiter((itersubclasses(shocRun), shocRun))}
 
-def cubeFactory(kind):      # not really a factory
+
+def cubeFactory(kind):  # not really a factory
     return namedObsClasses.get(kind, shocObs)
+
 
 def runFactory(kind):
     return namedRunClasses.get(kind, shocRun)

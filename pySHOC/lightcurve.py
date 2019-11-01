@@ -18,30 +18,33 @@ from astropy.io import ascii
 from tsa import fold
 from tsa.smoothing import smoother
 from tsa.spectral import Spectral
-from graphical.ts import TSplotter
+from graphical import ts
 from graphical.multitab import MplMultiTab
 from obstools.fastfits import quickheader
 # from recipes.list import flatten
-from recipes.iter import (interleave, groupmore, first_true_idx,
-                          roundrobin)
+from recipes.iter import interleave, group_more, first_true_idx
+
 # from graphical.interactive import PointSelector
 # from tsa.tfr import TimeFrequencyRepresentation as TFR
 # from tsa.outliers import WindowOutlierDetection, generalizedESD
 
 from pySHOC.io import Conversion as convert
 
+import more_itertools as mit
+
 # from IPython import embed
 # import decor
 # profiler = decor.profile.profile()
 # from motley.core import banner
 
-from recipes.string import get_module_name
+from recipes.introspection.utils import get_module_name
 
 # module level logger
 logger = logging.getLogger(get_module_name(__file__, 2))
 
 
-tsplt = TSplotter()  # TODO: attach to PhotResult class
+# tsplt = TSplotter()  # TODO: attach to PhotResult class
+
 
 # TODO: from tsa.ts import TimeSeries
 
@@ -97,7 +100,7 @@ def _make_ma(data):
 
 def read(filename):
     from recipes.io import read_data_from_file
-    header = read_data_from_file(filename, N=3)  # read first 3 lines
+    header = read_data_from_file(filename, n=3)  # read first 3 lines
     (metaline, starline, headline) = header
 
     fill_value = -99
@@ -109,19 +112,23 @@ def read(filename):
     return header, data
 
 
-def load_times(timefile):
+def load_times(filename):
     """read timestamps from file."""
+
+    # TODO: move to obstools.lc ????
+
     from recipes.io import read_file_line
 
-    hline = read_file_line(timefile, 0)  # read header line
-    colnames = hline.strip(
-            '\n #').lower().split()  # extract column names (lower case)
+    # read header line
+    hline = read_file_line(filename, 0)
+    # extract column names (lower case)
+    col_names = hline.strip('\n #').lower().split()
 
-    t = np.genfromtxt(str(timefile),
+    t = np.genfromtxt(str(filename),
                       dtype=None,
-                      names=colnames,
+                      names=col_names,
                       skip_header=1,
-                      usecols=range(1, len(colnames)),
+                      usecols=range(len(col_names)),
                       encoding=None
                       # this prevents np.VisibleDeprecationWarning
                       )
@@ -149,7 +156,7 @@ def get_name_date(fitsfile=None):
 class SelfAwareContainer(object):
     _skip_init = False
 
-    def __new__(cls, *args):
+    def __new__(cls, *args, **kws):
         # this is here to handle initializing the object from an already
         # existing instance of the class
         if len(args) and isinstance(args[0], cls):
@@ -162,9 +169,9 @@ class SelfAwareContainer(object):
 
 # ****************************************************************************************************
 # NOTE: there can be a generalized construction layer here that should be
-# able to easily make containers of their constituent class.
-# automatically get attributes as list if subclass has those
-# attributes. ie vectorized operations across instances
+#  able to easily make containers of their constituent class.
+#  automatically get attributes as list if subclass has those
+#  attributes. ie vectorized operations across instances
 
 # Create an abstraction layer that can split and merge multiple time
 # series data sets
@@ -175,13 +182,16 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
     # TODO: inherit from OrderedDict / list ??
     # TODO: merge by: target; date; etc...
     # TODO: multiprocess generic methods
-
     # TODO: make picklable !!!!!!!!!
-
     # TODO: methods to plot on same axes... !!!
 
-    def __init__(self, filenames, databases=None, coordinates=None,
-                 targets=None, target_name='', outpath=None):
+    # @classmethod
+    # def from_list(cls, stack):
+    #
+    #     self.results = stack
+
+    def __init__(self, filenames, databases=(), coordinates=(),
+                 targets=(), target_name=None):
         # FIXME: dont need all this crap filenames / databases?
 
         if self._skip_init:
@@ -191,13 +201,17 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
 
         self.target_name = target_name
 
+        # TODO: implement optional ephemeris that allows:
+        #  - plot folded light curve etc...
+
         # FIXME: check if filenames are non-str sequence
         if len(filenames):
             itr = itt.zip_longest(filenames,
-                                  databases or [],  # magnitudes database files
-                                  coordinates or [],
-                                  targets or [])
-            self.results = [PhotResult(fn, db, cf, ix)
+                                  databases,  # magnitudes database files
+                                  coordinates,
+                                  targets)
+
+            self.results = [PhotResult(fn, db, None, cf, ix, target_name)
                             for (fn, db, cf, ix) in itr]
         else:
             raise ValueError('No filenames')
@@ -221,7 +235,6 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
     # TODO: attrsetter
 
     # def inner(self):
-
 
     def set_targets(self, targets):
         # assert len(targets) == len(self)
@@ -328,7 +341,6 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
             data[start:end, :obs.nstars] = obs.data[:, order]
             std[start:end, :obs.nstars] = obs.std[:, order]
 
-
         new = PhotResult()
         new.data = data
         new.std = std
@@ -345,7 +357,7 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
     #     ''  # TODO
 
     # TODO:
-    def phase_select(self, min_phase=0, max_phase=1):
+    def phase_select(self, eph, min_phase=0, max_phase=1, jd=True, bjd=False):
         # Split light curves by cycle since we have the ephemeris
 
         # prs = np.size(phase_range)
@@ -365,43 +377,58 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
             assert isinstance(arg, numbers.Real)
             assert arg > 0
 
-        fluxes = []
-        phases = []
-        stds = []
+        t, y, e = [], [], []
 
         # embed()
         # print(min_phase, max_phase)
+        if bjd:
+            jd = False
+        tkw = 'jd' if jd else 'bjd'
 
         j = 0
+        n_total = n_points = 0
         for lc in self:
-            pack = ph, data, std = \
-                lc.t.phase, lc.data[:, lc.target, 0], lc.std[:, lc.target, 0]
-            # get the split positions
+            # TODO: for all stars
+            jd, data, std = lc.t[tkw], lc.data[lc.target], lc.std[lc.target]
+            ph = eph.phase(jd)
 
-            ix = np.where(np.diff(np.floor(ph - max_phase)))[0] + 1
+            # adjust zero point for light curve with negative phase
+            if ph[0] < 0:
+                ph -= np.floor(ph[0])
+
             # iterate through the segments
-            for phSub, dataSub, stdSub in zip(
-                    *(np.split(item, ix) for item in pack)):
-                phSub0 = phSub - np.floor(phSub[-1])
-                # print(id(lc), j, phSub[[0, -1]],  phSub0[[0, -1]])
-                l = (phSub0 >= min_phase) & (phSub0 <= max_phase)
-                if l.any():
-                    j += 1
+            ph_range = np.floor(ph[[0, -1]] + [0, 1])
+            # print('ph', ph[[0, -1]])
+            # print(np.arange(*ph_range))
+            n_select = 0
+            n_total += len(ph)
+            for zero_point in np.arange(*ph_range):
+                ph0 = ph - zero_point
+                # todo could be faster if array already  split?
+                selected = (ph0 >= min_phase) & (ph0 <= max_phase)
+                if selected.any():
                     # TODO: better: itemized print for each LightCurve being
-                    # split / created
-                    logger.info('Splitting: %i / %i. phase: %.2f - %.2f',
-                                l.sum(), len(l), *phSub[l][[0, -1]])
-                    fluxes.append(dataSub[l])
-                    phases.append(phSub0[l])
-                    stds.append(stdSub[l])
-        # TODO: return list of LightCurve / MultiVariateTS objects
-        return phases, fluxes, stds
+                    #  split / created
+                    n_points = selected.sum()
+                    n_select += n_points
+
+                    print('E{: <2d}: Splitting: {:d} / {:d}'.format(
+                            int(zero_point), n_points, len(selected)))
+                    #
+                    y.append(data[selected])
+                    t.append(jd[selected])
+                    e.append(std[selected])
+                    j += 1
+                else:
+                    print('E%i: nothing selected' % zero_point)
+
+        print(f'Selected {j} segments: {n_select} / {n_total}')
+        # TODO: return list of LightCurve / MultiVariateTimeSeries objects
+        return t, y, e
 
     # def phase_fold(self, min_phase=0, max_phase=1):
 
-        # merge and sort
-
-
+    # merge and sort
 
     # def compute_ls(self, tkw='lmst', **kw):
     #     t = self.get_time(tkw)
@@ -413,8 +440,8 @@ class PhotRun(SelfAwareContainer):  # make dataclass ???
 
         figs = []
         for obs in self:
-            fig, lines = obs.plot_lc(**kw)
-            figs.append(fig)
+            tsp = obs.plot_lc(**kw)
+            figs.append(tsp.fig)
 
         ui = MplMultiTab(figures=figs, labels=self.basenames)
         ui.show()
@@ -572,7 +599,6 @@ def first_exists(*files):
 
 
 class PhotFileManager:
-
     #                                             ↓ kill
     _default_search_order = ('npz', 'tbl', 'mag', 'dlc')
 
@@ -595,7 +621,9 @@ class PhotFileManager:
         blob = []
         for ext in exts:
             blob.append(reversed(list(self.globsearch(ext))))
-        yield from roundrobin(*blob)
+        yield from mit.roundrobin(*blob)
+
+
 
 
 # ****************************************************************************************************
@@ -616,6 +644,10 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
     # TODO: if coordinates are given, we can order the stars logically so that
     # stars correspond across cubes.
     # sorting methods? checkout pandas / astropy.table
+
+    # TODO: - implement pdm, lomb-scargle
+
+    # TODO: `data` attr must be `TimeSeries` object
 
     _skip_init = False  # initializer flag
     _flx_sort = True  # will order data according to brightness
@@ -654,12 +686,15 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
         blob = []
         for ext in exts:
             blob.append(reversed(list(self.globsearch(ext))))
-        yield from roundrobin(*blob)
+        yield from mit.roundrobin(*blob)
 
     def __new__(cls, *args, **kws):
         # this is here to handle initializing the object from an already
-        # existing istance of the class
-        if len(args) > 0 and isinstance(args[0], cls):
+        # existing instance of the class
+        # embed()
+        if len(args) > 0 and (args[0].__class__.__name__ == cls.__name__):
+            # autoreload hack!
+            # isinstance(args[0], cls):
             instance = args[0]
             instance._skip_init = True
             return instance
@@ -667,7 +702,7 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
             return super().__new__(cls)
 
     def __init__(self, fitsfile=None, datafile=None, timefile=None,
-                 coordfile=None, target=None, target_name=None, ephem=None):
+                 coordfile=None, target=None, target_name=None):
         """
 
         Parameters
@@ -679,11 +714,12 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
             if given, this star will be plotted over all others
         """
 
-        if self._skip_init:
-            logging.debug('PhotResult Skipping init')
-            return
-            # this happens if the first argument to __init__ is already an
-            # instance of the class
+        # if self._skip_init:
+        #     logging.debug('PhotResult Skipping init')
+        #     # print('hi   ')
+        #     return
+        # this happens if the first argument to __init__ is already an
+        # instance of the class
 
         # TODO: maybe put the stuff below in a load classmethod ?
 
@@ -699,13 +735,16 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
 
         # load info from fitsfile if avaliable
         self.target_name, self.date, self.size = get_name_date(self.fitsfile)
+        # FIXME: move to subclass ??
         # FIXME: self.date should be self.startdate ???
+        if target_name is not None:
+            self.target_name = target_name
 
         # store data internally as masked array (Nframes, Nstars, Naps)
         # init null data containers
-        self.t = np.empty(0)                    # TimeIndex ????
-        self.data = np.ma.empty((0, 0, 0))
-        self.std = np.empty((0, 0, 0))
+        self.t = np.empty(0)  # TimeIndex ????
+        self.data = np.ma.empty((0, 0))
+        self.std = np.empty((0, 0))
 
         # load timing data if available
         if self.timefile:
@@ -749,19 +788,19 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
 
     def __len__(self):
         # Number of data points *not* stars
-        return self.data.shape[0]
+        return self.data.shape[1]
 
     @property
     def npoints(self):
-        return self.data.shape[0]
+        return self.data.shape[1]
 
     @property
     def nstars(self):
-        return self.data.shape[1]
+        return self.data.shape[0]
 
-    @property  # TODO: derive MultiAperturePhotResult?
-    def naps(self):
-        return self.data.shape[-1]
+    # @property  # TODO: derive MultiAperturePhotResult?
+    # def naps(self):
+    #     return self.data.shape[-1]
 
     def get_target(self):
         return self._target
@@ -790,7 +829,7 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
         return order
 
     def _ordered_by_flux(self):
-        return self.data.mean(0)[:, -1].argsort()[::-1]
+        return self.data.mean(1).argsort()[::-1]
 
     @property
     def labels(self):
@@ -845,20 +884,20 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
 
     def load_from_npz(self, filename):
 
-        try:
-            # lz = np.load(str(filename))  # psf_flux, psf_fwhm, problematic
-            # self.data = lz['flux_ap']  # shape (Nframes, Nstars, Naps)
-            # coo = lz['coords']      #shape (Nframes, Nstars, 2)
+        # try:
+        # lz = np.load(str(filename))  # psf_flux, psf_fwhm, problematic
+        # self.data = lz['flux_ap']  # shape (Nframes, Nstars, Naps)
+        # coo = lz['coords']      #shape (Nframes, Nstars, 2)
 
-            lz = np.load(str(filename))
-            self.t = lz['t'].view(np.recarray)
-            self.data = np.ma.array(lz['data'], mask=lz['data_mask'])
-            self.std = np.ma.array(lz['std'], mask=lz['std_mask'])
+        lz = np.load(str(filename))
+        self.t = lz['t'].view(np.recarray)
+        self.data = np.ma.array(lz['data'], mask=lz['data_mask'])
+        self.std = np.ma.array(lz['std'], mask=lz['std_mask'])
 
-            # todo: target, name etc..
-        except Exception as orr:
-            embed()
-            raise
+        # todo: target, name etc..
+        # except Exception as orr:
+        #     embed()
+        #     raise
 
         self.load_times()
 
@@ -866,8 +905,11 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
         """load from ascii lc"""
         (metaline, starline, headline), data = read(filename)
 
-        data_start_col = first_true_idx(headline.split('\t'),
-                                        lambda s: s.startswith('MAG'))
+        data_start_col = first_true_idx(
+                filter(None, headline.split('  ')),  # '\t'
+                lambda s: s.startswith(('MAG', 'Flux')))
+        # print('DATA START COL', data_start_col)
+
         newdata = fold.fold(data.T[data_start_col:], 2)
         signals, std = np.swapaxes(newdata, 1, 0)
 
@@ -875,8 +917,8 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
             signals, std = as_flux(signals, std, mag0=mag0)
 
         # upcast for consistency
-        self.data = signals[..., None]
-        self.std = std[..., None]
+        self.data = signals[...]
+        self.std = std[...]
 
         # extract headers
         # starheads = list(filter(None, map(str.strip, starline.strip('#').split('  '))))
@@ -967,6 +1009,7 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
         self.data = flx.reshape(-1, nstars, naps)
         self.std = std.reshape(-1, nstars, naps)
         self.load_times()
+        # print(self.data.shape, '!!!!!!!!!!!!!!!!!!!!!!!!!')
 
     def recommend_ap(self):
         # TODO: Move! better to have MultiApertureResult
@@ -1030,8 +1073,8 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
         # coordinate  file list.
         starmatcher = lambda coo: np.sqrt(
                 np.square(kcoords - coo).sum(1)).argmin()
-        for starid, (coo, ix) in groupmore(starmatcher, coords,
-                                           range(len(bigdata))):
+        for starid, (coo, ix) in group_more(starmatcher, coords,
+                                            range(len(bigdata))):
             ix = np.array(ix)
             stardata = bigdata[ix]
 
@@ -1079,24 +1122,23 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
 
         return t
 
-    def add_phase_info(self, emphem):
+    def add_phase_info(self, ephem):
         import numpy.lib.recfunctions as rfn
 
         # Get the phases
-        ph = emphem.phase(self.t['bjd'])
+        ph = ephem.phase(self.t['bjd'])
 
         # add to time array
         if 'phase' in self.t.dtype.names:
             # overwrite
             self.t['phase'] = ph
-            self.t['phase'] = ph % 1
+            self.t['phaseMod1'] = ph % 1
         else:
             # append
             t = rfn.append_fields(
-                self.t, ('phase', 'phaseMod1'), (ph, ph % 1))
+                    self.t, ('phase', 'phaseMod1'), (ph, ph % 1))
             # make it a recarray
             self.t = t.view(np.recarray)
-
 
     def compute_dl(self, mode='flux', **kws):
 
@@ -1140,51 +1182,44 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
 
     # MultiAperture plot gui
 
-    def plot_lc(self, tkw='utsec', ixap=None, **kw):
-
-        if self.naps == 1:
-            ixap = 0
-        elif ixap is None:
-            # fixme: elliminate the need for this shitty hack!!
-            ixap = self.recommend_ap()
-            self.logger.info('Choosing aperture %i (highest SNR)', ixap)
+    def plot_lc(self, tkw='utsec', **kws):
 
         # Reshape for plotting
-        y = self.data[:, self.reorder, ixap].T
-        e = self.std[:, self.reorder, ixap].T
-        labels = np.array(self.labels)[self.reorder]
+        y = self.data[self.reorder]
+        e = self.std[self.reorder]
+        kws.setdefault('labels', np.array(self.labels)[self.reorder])
+
         # If target specified, re-order the array so we get a consistent
         # colour sequence
 
         # self.logger.info('Plotting light curves for %s', self)
-        mode = kw.pop('mode', 'flux')
+        mode = kws.pop('mode', 'flux')
 
         t = self.t[tkw]
-        title = self._title_fmt.format(s=self)
-        xlabel = tkw.upper()
-        ylabel = mode.title()  # 'Instr. ' +
-        axlabels = xlabel, ylabel
+        kws.setdefault('title', self._title_fmt.format(s=self))
+
+        # xlabel = tkw.upper()
+        # ylabel = mode.title()  # 'Instr. ' +
+        axes_labels = (tkw.upper(), mode.title())
 
         # if kw.get('twinx'):
         timescales = {'utsec': 's',
                       'utc': 'h',
                       }  # TODO etc...
 
-        fig, plots, *rest = tsplt(t, y, e,
-                                  title=title,
-                                  labels=labels,
-                                  # colours=colours,
-                                  axlabels=axlabels,
-                                  timescale=timescales.get(tkw),
-                                  start=self.date,
-                                  **kw)
+        tsp = ts.plot(t, y, e,
+                      # colours=colours,
+                      axes_labels=axes_labels,
+                      timescale=timescales.get(tkw),
+                      start=self.date,
+                      **kws)
 
         # This will plot the target *over* the other light curves
         if self.target:
-            plots.lines[self.target].set_zorder(10)
+            tsp.art.lines[self.target].set_zorder(10)
 
         # TODO: interactively switch to mag scale with key
-        ax = fig.axes[0]
+        ax = tsp.ax  # fig.axes[0]
         if mode.lower() == 'mag':
             ax.invert_yaxis()
 
@@ -1193,7 +1228,62 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
                     'DATE: ' + self.date,
                     transform=ax.xaxis.label.get_transform())
 
-        return fig, plots
+        return tsp
+
+    # def plot_lc(self, tkw='utsec', ixap=None, **kw):
+    #
+    #     if self.naps == 1:
+    #         ixap = 0
+    #     elif ixap is None:
+    #         # fixme: elliminate the need for this shitty hack!!
+    #         ixap = self.recommend_ap()
+    #         logger.info('Choosing aperture %i (highest SNR)', ixap)
+    #
+    #     # Reshape for plotting
+    #     y = self.data[:, self.reorder, ixap].T
+    #     e = self.std[:, self.reorder, ixap].T
+    #     labels = np.array(self.labels)[self.reorder]
+    #     # If target specified, re-order the array so we get a consistent
+    #     # colour sequence
+    #
+    #     # self.logger.info('Plotting light curves for %s', self)
+    #     mode = kw.pop('mode', 'flux')
+    #
+    #     t = self.t[tkw]
+    #     title = self._title_fmt.format(s=self)
+    #     xlabel = tkw.upper()
+    #     ylabel = mode.title()  # 'Instr. ' +
+    #     axes_labels = xlabel, ylabel
+    #
+    #     # if kw.get('twinx'):
+    #     timescales = {'utsec': 's',
+    #                   'utc': 'h',
+    #                   }  # TODO etc...
+    #
+    #     tsp = ts.plot(t, y, e,
+    #                   title=title,
+    #                   labels=labels,
+    #                   # colours=colours,
+    #                   axes_labels=axes_labels,
+    #                   timescale=timescales.get(tkw),
+    #                   start=self.date,
+    #                   **kw)
+    #
+    #     # This will plot the target *over* the other light curves
+    #     if self.target:
+    #         tsp.art.lines[self.target].set_zorder(10)
+    #
+    #     # TODO: interactively switch to mag scale with key
+    #     ax = fig.axes[0]
+    #     if mode.lower() == 'mag':
+    #         ax.invert_yaxis()
+    #
+    #     if self.date:
+    #         ax.text(0, ax.xaxis.labelpad,
+    #                 'DATE: ' + self.date,
+    #                 transform=ax.xaxis.label.get_transform())
+    #
+    #     return tsp
 
     def save_npz(self, filename):
         filename = str(filename)
@@ -1277,7 +1367,7 @@ class PhotResult(AutoFileToPath):  # FixMe eliminate AutoFileToPath
             sdata = get_spread(star, 1e4)
             naps = sdata.shape[0]
             labels = ['ap %d' % i for i in range(naps)]
-            tsplt(t, sdata, ax=ax, labels=labels)
+            ts.plot(t, sdata, ax=ax, labels=labels)
 
 
 def get_spread(star, sfactor):
@@ -1681,4 +1771,3 @@ if __name__ == '__main__':
     # ax2.grid()
     ##ax2.plot( specR.frq,  )
     # ax1.legend( framealpha=0.25 )
-

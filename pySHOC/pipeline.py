@@ -20,7 +20,7 @@
 
 # TODO: time / profile sections
 
-from motley.profiler.timers import Chrono, timer, timer_extra
+from motley.profiling.timers import Chrono, timer, timer_extra
 
 chrono = Chrono()
 # NOTE do this first so we can profile import times

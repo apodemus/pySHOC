@@ -1,0 +1,23 @@
+The files named 'SHOC1.txt' and 'SHOC2.txt' provide the manufacturer measurements of
+ the readnoise, base level (bias) and sensitivity for each available camera
+ setting of readout speed, ADC bit-depth, pre-amplifier gain, and output
+ amplifier mode
+
+
+FreqMHz:
+    Clock frequency for readout
+BitDepth:
+    ADC bit-depth
+Mode:
+    Which output amplifier is being used: Electron Multiplying or CONvensional
+PreAmp:
+    gain (ADU / e)
+Sensitivity:
+
+ReadNoise:
+
+ReadTime:
+
+Saturation:
+
+BaseLevel:

@@ -15,7 +15,6 @@ from typing import Union, ClassVar
 
 from dataclasses import dataclass, field
 
-# note: THESE IMPORT ARE MEGA SLOW!! ~10s  (localize to mitigate?)
 import numpy as np
 # import matplotlib.pyplot as plt
 import astropy.io.fits as pyfits
@@ -28,21 +27,23 @@ from recipes.set import OrderedSet
 from recipes.list import sorter
 from recipes.logging import LoggingMixin
 from recipes.dict import AttrReadItem as AttrRepr
+from recipes import pprint
 from motley.table import Table as sTable
-from obstools.utils import fmt_hms
+from obstools.stats import mad, median_scaled_median
+from obstools.phot.utils import ImageSamplerHDUMixin
 
 # TODO: choose which to use for timing: spice or astropy
 # from .io import InputCallbackLoop
-from .utils import retrieve_coords, convert_skycooords
+from .utils import retrieve_coords, convert_skycoords
 from .timing import timingFactory, Time, get_updated_iers_table
 from .header import shocHeader
 from .convert_keywords import KEYWORDS as kw_old_to_new
 from .filenaming import NamingConvention
 
-
 # debugging
 from IPython import embed
-from motley.profiler.timers import timer  # , profiler
+
+# from motley.profiling.timers import timer  # , profiler
 
 # def warn(message, category=None, stacklevel=1):
 # return warnings.warn('\n'+message, category=None, stacklevel=1)
@@ -61,14 +62,29 @@ from motley.profiler.timers import timer  # , profiler
 #
 
 # Regex to match end of FITS header
-MATCH_END = re.compile(b'END {77}\s*')
+MATCH_END = re.compile(rb'END {77}\s*')
 # Regex to identify type of observation bias / dark / flats / science
-kindRegex = b"""
+kindRegex = rb"""
 (?:OBSTYPE)     # keywords (non-capture group if `capture_keywords` False)
 \s*?=\s+        # (optional) whitespace surrounding value indicator '='
 '?([^'\s/]*)'?  # value associated with any of the keys (un-quoted)
 """
 kindMatcher = re.compile(kindRegex, re.VERBOSE)
+
+SERIAL_IDS = [5982, 6448]
+
+# Field of view of telescopes in arcmin
+FOV74 = (1.29, 1.29)
+FOV74r = (2.79, 2.79)  # with focal reducer
+FOV40 = (2.85, 2.85)
+# fov30 = (3.73, 3.73)
+
+FOV = {  # '30': fov30, '0.75': fov30,
+    '40': FOV40, '1.0': FOV40, '1': FOV40,
+    '74': FOV74, '1.9': FOV74
+}
+FOVr = {'74': FOV74r,
+        '1.9': FOV74r}
 
 
 def get_obstype(filename):
@@ -104,32 +120,7 @@ def get_obstype(filename):
 #     return fn
 
 
-def median_scaled_median(data, axis):  # TODO: move to utils
-    """"""
-    frame_med = np.median(data, (1, 2))[:, None, None]
-    scaled = data / frame_med
-    return np.median(scaled, axis)
-
-
-def mad(data, data_median=None, axis=None):      # TODO: move to utils
-    """
-    Median absolute deviation
-
-    Parameters
-    ----------
-    data
-    data_median
-
-    Returns
-    -------
-
-    """
-    if data_median is None:
-        data_median = np.median(data, axis)
-    return np.median(np.abs(data - data_median), axis)
-
-
-def apply_stack(func, *args, **kws):         # TODO: move to proc
+def apply_stack(func, *args, **kws):  # TODO: move to proc
     # TODO:  MULTIPROCESS HERE!
     return func(*args, **kws)
 
@@ -137,43 +128,6 @@ def apply_stack(func, *args, **kws):         # TODO: move to proc
 ################################################################################
 # class definitions
 ################################################################################
-# HDU Subclasses
-class shocHDU(PrimaryHDU):
-    def __init__(self, data=None, header=None, do_not_scale_image_data=False,
-                 ignore_blank=False, uint=True, scale_back=None):
-        PrimaryHDU.__init__(self,
-                            data=data, header=header,
-                            do_not_scale_image_data=do_not_scale_image_data,
-                            uint=uint,
-                            ignore_blank=ignore_blank,
-                            scale_back=scale_back)
-
-        # convert to shocHeader. Passing to the `PrimaryHDU` init does not
-        # create the right type of object
-        self.header = shocHeader(header)
-
-
-class shocNewHDU(shocHDU):
-    @classmethod
-    def match_header(cls, header):
-        old, new = zip(*kw_old_to_new)
-        return all([kw in header for kw in new])
-
-
-class shocOldHDU(shocHDU):
-    @classmethod
-    def match_header(cls, header):
-        old, new = zip(*kw_old_to_new)
-        return any((kw in header for kw in old))
-
-
-# # TODO:
-# Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at obstype
-# keywords
-#
-# register_hdu(shocNewHDU)
-# register_hdu(shocOldHDU)
-
 
 class Date(datetime.date):
     """
@@ -233,11 +187,13 @@ class Mode:
 
 class PPrintHelper(object):
     # handle default attributes for `pprint` and `get_instrumental_setup`
-    _default_attrs = [('shape',),
+    _default_attrs = [('target',),  # FIXME: this should be only for science??
+                      ('shape',),
                       ('binning',),
                       ('preAmpGain',),
                       ('outAmpMode',),
                       ('mode.emGain', 'emGain'),
+                      #
                       ('timing.trigger.mode', 'trigger.mode'),
                       ('timing.t0repr', 't0 (UTC)'),
                       # TODO: separate date and t0 for even more compact repr
@@ -276,6 +232,229 @@ class PPrintHelper(object):
 
 # class PhotHelper:
 #     """helper class for photometry interface"""
+
+
+# HDU Subclasses
+class shocHDU(PrimaryHDU, ImageSamplerHDUMixin, LoggingMixin):
+    def __init__(self, data=None, header=None, do_not_scale_image_data=False,
+                 ignore_blank=False, uint=True, scale_back=None):
+        PrimaryHDU.__init__(self,
+                            data=data, header=header,
+                            do_not_scale_image_data=do_not_scale_image_data,
+                            uint=uint,
+                            ignore_blank=ignore_blank,
+                            scale_back=scale_back)
+
+        # convert to shocHeader. Passing to the `PrimaryHDU` init does not
+        # create the right type of object
+        # print(type(self.header))
+
+        # try:
+        #     if not isinstance(self.header, shocHeader):
+        #         self.header = shocHeader(self.header)
+        #     else:
+        #         print('WEIRD??!!') # this maybe autoreload issue?
+        # except Exception as err:
+        #     from IPython import embed
+        #     import traceback
+        #     import textwrap
+        #     embed(header=textwrap.dedent(
+        #         """\
+        #         Caught the following %s:
+        #         ------ Traceback ------
+        #         %s
+        #         -----------------------
+        #         Exception will be re-raised upon exiting this embedded interpreter.
+        #         """) % (err.__class__.__name__, traceback.format_exc()))
+        #     raise
+
+        shocNr = SERIAL_IDS.index(header['SERNO']) + 1
+        self.instrument = 'SHOC %i' % shocNr
+        self.telescope = header.get('TELESCOP')
+
+        # date from header
+        date, time = header['DATE'].split('T')
+        self.date = Date(*map(int, date.split('-')))
+        # oldSHOC: file creation date
+        # starting date of the observing run: used for naming
+        h = int(time.split(':')[0])
+        nameDate = self.date - datetime.timedelta(int(h < 12))
+        self.nameDate = str(nameDate).replace('-', '')
+
+        # image binning
+        self.binning = Binning(header['%sBIN' % _] for _ in 'VH')
+
+        # image dimensions
+        # self.ndims = header['NAXIS']  # Number of image dimensions
+        # Pixel dimensions
+        # self.ishape = header['NAXIS1'], header['NAXIS2']
+        # self.nframes = header.get('NAXIS3', 1)
+        # self.shape = tuple(header['NAXIS%i' % i]
+        #                    for i in range(1, self.ndims + 1))
+
+        # sub-framing
+        self.subrect = np.array(header['SUBRECT'].split(','), int)
+        # subrect stores the sub-region of the full CCD array captured for this
+        #  observation
+        # xsub, ysub = (xb, xe), (yb, ye) = \
+        xsub, ysub = self.subrect.reshape(-1, 2) // self.binning
+        # for some reason the ysub order is reversed
+        self.sub = tuple(xsub), tuple(ysub[::-1])
+        self.subSlices = list(map(slice, *np.transpose(self.sub)))
+
+        # Readout stats
+        # set the correct values here as attributes of the instance. These
+        # though not values may be absent in the headers
+        # FIXME:
+        # self.ron, self.sensitive, self.saturate = header.get_readnoise()
+
+        # CCD mode
+        self.acqMode = header['ACQMODE']
+        self.preAmpGain = header['PREAMP']
+        outAmpModeLong = header['OUTPTAMP']
+        self.outAmpMode = 'CON' if outAmpModeLong.startswith('C') else 'EM'
+
+        # readout speed
+        readoutFrq = 1. / header['READTIME']
+        self.readoutFrq = int(round(readoutFrq / 1.e6))  # MHz
+
+        # gain   # should be printed as '--' when mode is CON
+        self._emGain = header.get('GAIN', None)
+        # Mode tuple
+        self.mode = Mode(self.readoutFrq, self.preAmpGain,
+                         self.outAmpMode, self._emGain)
+
+        # orientation
+        self.flip_state = yxTuple(header['FLIP%s' % _] for _ in 'YX')
+        # NOTE: row, column order
+        # WARNING: flip state wrong for old SHOC data : TODO confirm this
+
+        # filters
+        Filters = namedtuple('Filters', list('AB'))
+        self.filters = Filters(*(header.get('WHEEL%s' % _) for _ in 'AB'))
+
+        # Timing
+        # self.kct = self.timing.kct
+        # self.trigger_mode = self.timing.trigger.mode
+        # self.duration
+
+        # object name
+        self.target = header.get('OBJECT')  # objName
+
+        # coordinates
+        self.coords = self.get_coords()
+        # note: self.coords may be None
+
+    def get_coords(self):
+        header = self.header
+
+        ra, dec = header.get('objra'), header.get('objdec')
+        coords = convert_skycoords(ra, dec)
+        if coords:
+            return coords
+
+        if self.target:
+            # No / bad coordinates in header, but object name available - try
+            # resolve
+            coords = retrieve_coords(self.target)
+
+        if coords:
+            return coords
+
+        # No header coordinates / Name resolve failed / No object name available
+        # LAST resort use TELRA, TELDEC. This will only work for newer SHOC
+        # data for which these keywords are available in the header
+        # note: These will lead to slightly less accurate timing solutions,
+        #  so emit warning
+        ra, dec = header.get('telra'), header.get('teldec')
+        coords = convert_skycoords(ra, dec)
+
+        # TODO: optionally query for named sources in this location
+        if coords:
+            self.logger.warning('Using telescope pointing coordinates. This '
+                                'may lead to barycentric timing correction '
+                                'being less accurate.')
+
+        return coords
+
+    def get_sample_image(self, size, interval=None, func='median', channel=...):
+        return np.fliplr(
+                super().get_sample_image(size, interval, func, channel))
+
+    # NOTE: for the moment, the methods below are duplicated while migration
+    #  to this class in progress
+    def get_fov(self, telescope=None, unit='arcmin', with_focal_reducer=False):
+        """
+        Get image field of view
+
+        Parameters
+        ----------
+        telescope
+        with_focal_reducer
+        unit
+
+        Returns
+        -------
+
+        Examples
+        --------
+        cube = shocObs.load(filename)
+        cube.get_field_of_view(1)               # 1.0m telescope
+        cube.get_field_of_view(1.9)             # 1.9m telescope
+        cube.get_field_of_view(74)              # 1.9m
+        cube.get_field_of_view('74in')          # 1.9m
+
+        """
+
+        # PS. welcome to the new millennium, we use the metric system now
+        if telescope is None:
+            telescope = self.header.get('telescop')
+
+        telescope = str(telescope)
+        telescope = telescope.rstrip('inm')  # strip "units" in name
+        fov = (FOVr if with_focal_reducer else FOV).get(telescope)
+        if fov is None:
+            raise ValueError('Please specify telescope to get field of view.')
+
+        # at this point we have the FoV in arcmin
+        # resolve units
+        if unit in ('arcmin', "'"):
+            factor = 1
+        elif unit in ('arcsec', '"'):
+            factor = 60
+        elif unit.startswith('deg'):
+            factor = 1 / 60
+        else:
+            raise ValueError('Unknown unit %s' % unit)
+
+        return np.multiply(fov, factor)
+
+    def get_rotation(self):
+        return 0
+
+
+class shocNewHDU(shocHDU):
+    @classmethod
+    def match_header(cls, header):
+        old, new = zip(*kw_old_to_new)
+        return all([kw in header for kw in new])
+
+
+class shocOldHDU(shocHDU):
+    @classmethod
+    def match_header(cls, header):
+        old, new = zip(*kw_old_to_new)
+        return any((kw in header for kw in old))
+
+
+# # TODO:
+# Consider shocBiasHDU, shocFlatFieldHDU + match headers by looking at obstype
+# keywords
+#
+from astropy.io.fits.hdu import register_hdu
+
+register_hdu(shocNewHDU)
+register_hdu(shocOldHDU)
 
 
 class shocObs(HDUList, LoggingMixin):
@@ -336,6 +515,9 @@ class shocObs(HDUList, LoggingMixin):
         # FIXME:
         # either remove these lines from init or detect new file write. or ??
         # Load the important header information as attributes
+
+        self[0].header = shocHeader(self[0].header)  # HACK!!!!
+
         self.instrumental_setup()  # fixme: fails on self.writeto
 
         # Initialise timing class
@@ -369,7 +551,7 @@ class shocObs(HDUList, LoggingMixin):
         # self.trigger = None
 
     def __str__(self):
-        filename, dattrs, values = self.get_instrumental_setup()
+        filename, dattrs, _, values = self.get_instrumental_setup()
         attrRep = map('%s = %s'.__mod__, zip(dattrs, values))
         clsname = self.__class__.__name__
         sep = '; '
@@ -386,8 +568,7 @@ class shocObs(HDUList, LoggingMixin):
 
         # instrument
         serno = header['SERNO']
-        serialIds = [5982, 6448]
-        shocNr = serialIds.index(serno) + 1
+        shocNr = SERIAL_IDS.index(serno) + 1
         self.instrument = 'SHOC %i' % shocNr
         self.telescope = header.get('telescop')
 
@@ -466,7 +647,7 @@ class shocObs(HDUList, LoggingMixin):
     @property
     def header(self):
         """retrieve PrimaryHDU header"""
-        return self[0].header
+        return self[0].header  # with SHOC always only one item in HDUList
 
     def _get_data(self):
         """retrieve PrimaryHDU data. """
@@ -512,7 +693,7 @@ class shocObs(HDUList, LoggingMixin):
         header = self.header
 
         ra, dec = header.get('objra'), header.get('objdec')
-        coords = convert_skycooords(ra, dec)
+        coords = convert_skycoords(ra, dec)
         if coords:
             return coords
 
@@ -529,7 +710,7 @@ class shocObs(HDUList, LoggingMixin):
         # data for which these keywords are available in the header
         # note: These will lead to slightly less accurate timing solutions
         ra, dec = header.get('telra'), header.get('teldec')
-        coords = convert_skycooords(ra, dec)
+        coords = convert_skycoords(ra, dec)
 
         # TODO: optionally query for named sources in this location
         if coords:
@@ -560,9 +741,23 @@ class shocObs(HDUList, LoggingMixin):
         if headers is None:
             attrDisplayNames = self.pprinter.headers[:]
 
-        # check correct number of attrs / headers
-        assert len(attrNames) == len(attrDisplayNames)
-        attrVals = operator.attrgetter(*attrNames)(self)
+        try:
+            # check correct number of attrs / headers
+            assert len(attrNames) == len(attrDisplayNames)
+            attrVals = operator.attrgetter(*attrNames)(self)
+        except Exception as err:
+            from IPython import embed
+            import traceback
+            import textwrap
+            embed(header=textwrap.dedent(
+                    """\
+                    Caught the following %s:
+                    ------ Traceback ------
+                    %s
+                    -----------------------
+                    Exception will be re-raised upon exiting this embedded interpreter.
+                    """) % (err.__class__.__name__, traceback.format_exc()))
+            raise
 
         return filename, attrDisplayNames, attrNames, attrVals
 
@@ -590,9 +785,9 @@ class shocObs(HDUList, LoggingMixin):
 
         """
         # Field of view in arcmin
-        fov74 = (1.29, 1.29)
-        fov74r = (2.79, 2.79)  # with focal reducer
-        fov40 = (2.85, 2.85)
+        FOV74 = (1.29, 1.29)
+        FOV74r = (2.79, 2.79)  # with focal reducer
+        FOV40 = (2.85, 2.85)
         # fov30 = (3.73, 3.73)
 
         # PS. welcome to the new millennium, we use the metric system now
@@ -602,12 +797,12 @@ class shocObs(HDUList, LoggingMixin):
         telescope = str(telescope)
         telescope = telescope.rstrip('inm')  # strip "units" in name
         if with_focal_reducer:
-            fov = {'74': fov74r,
-                   '1.9': fov74r}.get(telescope)
+            fov = {'74': FOV74r,
+                   '1.9': FOV74r}.get(telescope)
         else:
             fov = {  # '30': fov30, '0.75': fov30,
-                '40': fov40, '1.0': fov40, '1': fov40,
-                '74': fov74, '1.9': fov74
+                '40': FOV40, '1.0': FOV40, '1': FOV40,
+                '74': FOV74, '1.9': FOV74
             }.get(telescope)
 
         if fov is None:
@@ -626,7 +821,8 @@ class shocObs(HDUList, LoggingMixin):
 
         return np.multiply(fov, factor)
 
-    get_FoV = get_field_of_view
+    #  alias
+    get_fov = get_FoV = get_field_of_view
 
     def get_pixel_scale(self, telescope=None, unit='arcmin',
                         with_focal_reducer=False):
@@ -745,8 +941,8 @@ class shocObs(HDUList, LoggingMixin):
 
         hdu = shocHDU(data, header)
         fileobj = pyfits.file._File(name, mode='ostream', overwrite=True)
-        stack = self.__class__(hdu,
-                               fileobj)  # initialise the Cube with target file
+        stack = self.__class__(hdu, fileobj)
+        # initialise the Cube with target file
         stack.instrumental_setup()
 
         return stack
@@ -758,7 +954,7 @@ class shocObs(HDUList, LoggingMixin):
 
         Parameters
         ----------
-        outpath : The directory where the imags will be unpacked
+        outpath : The directory where the images will be unpacked
         count : A running file count
         padw : The number of place holders for the number suffix in filename
         dryrun: Whether to actually unpack the stack
@@ -891,7 +1087,8 @@ class shocRun(LoggingMixin):
     Class containing methods to operate with sets of SHOC observations (shocObs
     instances.)
     Group, filter and compare across cubes based on keywords.
-    Calibrate, calculate time stamps (including barycentrization)
+    Calibrate your data (bias correction, flat fielding, ...)
+    Calculate time stamps (including barycentrization)
     Merge, stack or combine the cubes, or unpack the individual frames.
     Write output fits and / or timing files.
     Pretty printed table representations of your SHOC runs
@@ -1146,7 +1343,7 @@ class shocRun(LoggingMixin):
                        row_headers=['filename'] + list(filenames),
                        number_rows=True,
                        precision=5, minimalist=True, compact=True,
-                       formatters={'duration': fmt_hms},
+                       formatters={'duration': pprint.hms},
                        #  FIXME: uniform precision hms
                        total=total,
                        **kws)
@@ -1187,7 +1384,7 @@ class shocRun(LoggingMixin):
                 coords = stack.coords
             stack.timing.set(t0, iers_a, coords)
             # update the header with the timing info
-            stack.timing.stamp(0, t0, coords, verbose=True)
+            stack.timing.stamp(0, t0, coords)
             stack.flush(output_verify='warn', verbose=True)
 
     def export_times(self, with_slices=False):
@@ -1363,7 +1560,7 @@ class shocRun(LoggingMixin):
 
     def group_by(self, *keys, **kws):
         """
-                Separate a run according to the attribute given in keys.
+        Separate a run according to the attribute given in keys.
         keys can be a tuple of attributes (str), in which case it will
         separate into runs with a unique combination of these attributes.
 
@@ -1884,7 +2081,7 @@ class shocRun(LoggingMixin):
         # TODO: eliminate flip arg - this means figure out why the flip state
         # is being recorded erroneously. OR inferring the flip state
         # bork if no overlap ?
-        from pySHOC.wcs import MatchImages
+        from pySHOC.wcs import ImageRegistrationDSS
 
         npar = 3
         n = len(self)
@@ -1915,7 +2112,7 @@ class shocRun(LoggingMixin):
 
         self.logger.info('Aligning run of %i images on %r', len(self),
                          self[a].get_filename())
-        matcher = MatchImages(I[a], FoV[a], **findkws)
+        matcher = ImageRegistrationDSS(I[a], FoV[a], **findkws)
         for i in others:
             # print(i)
             p = matcher.match_image(I[i], FoV[i])
@@ -2142,7 +2339,7 @@ class GroupedRun(OrderedDict, LoggingMixin):
         return len(attrValSet) > 1
 
     # @profiler.histogram()
-    @timer
+    # @timer
     def combined(self, func=None, path=None):  # , write=True
         """
 
@@ -2391,7 +2588,7 @@ class GroupedRun(OrderedDict, LoggingMixin):
         return newcals
 
     # TODO: combine into calibration method
-    @timer
+    # @timer
     def debias(self, master_bias_groups):  # FIXME: RENAME Dark
         """
         Do the bias reductions on science / flat field data
@@ -2438,7 +2635,7 @@ class GroupedRun(OrderedDict, LoggingMixin):
         self.label = self.name + ' (bias subtracted)'
         return self
 
-    @timer
+    # @timer
     def flatfield(self, mflat_dict):
         """
         Do the flat field reductions

@@ -209,7 +209,7 @@ def einstein_delay(jd_tt):
     """
     red_jd_tt = jd_tt - 2451545.0
     g = np.radians(357.53 + 0.98560028 * red_jd_tt)  # mean anomaly of Earth
-    # Difference in mean ecliptic longitudea of the Sun and Jupiter
+    # Difference in mean ecliptic longitude of the Sun and Jupiter
     L_Lj = np.radians(246.11 + 0.90251792 * red_jd_tt)
     delay = 0.001657 * np.sin(g) + 0.000022 * np.sin(L_Lj)
 
@@ -307,7 +307,7 @@ class HMSrepr(object):
 
     @property
     def hms(self):
-        return fmt_hms(self)
+        return pprint.hms(self)
 
 
 class TimeDelta(TimeDelta):
@@ -315,7 +315,7 @@ class TimeDelta(TimeDelta):
     def hms(self):
         v = self.value
         precision = 1 if v > 10 else 3
-        return fmt_hms(v, precision)
+        return pprint.hms(v, precision)
 
 
 # ******************************************************************************
@@ -679,11 +679,13 @@ class shocTimingBase(object):
         """
         # new / fixed data!  Rejoice!
         header = self.header
-        tStart = header['DATE-OBS']
-        # NOTE: This keyword is confusing (UTC-OBS would be better), but since
+        t_start = header['FRAME']  # DATE-OBS
+        # sanity checks
+
+        # FIXME: This keyword is confusing (UTC-OBS would be better), but since
         # it is now in common  use, we (reluctantly) do the same.
         # time for start of first frame
-        t0 = Time(tStart, format='isot', scale='utc', precision=9,
+        t0 = Time(t_start, format='isot', scale='utc', precision=9,
                   location=self.location)
         # note: TimeDelta has higher precision than Quantity
         td_kct = TimeDelta(self.kct, format='sec')
@@ -725,12 +727,10 @@ class shocTimingBase(object):
         timeData.utsec = uth.to('s').value
 
         # split UTDATE and UTC time
-        utdata = t.isosplit()
-        timeData.utdate = utdata['utdate']
-        timeData.utstr = utdata['utc']
+        timeData.utdate, timeData.utstr = t.isosplit()
 
         # LMST for each frame
-        lmst = t.sidereal_time('mean', longitude=self.location.longitude)
+        lmst = t.sidereal_time('mean', longitude=self.location.lon)
         timeData.lmst = lmst
         # timeData.last          = t.sidereal_time('apparent', longitude=lon)
 
@@ -751,7 +751,7 @@ class shocTimingBase(object):
             timeData.altitude = altitude(coords.ra.radian,
                                          coords.dec.radian,
                                          lmst.radian,
-                                         self.location.latitude.radian)
+                                         self.location.lat.radian)
             timeData.airmass = Young94(np.pi / 2 - timeData.altitude)
 
         return timeData
@@ -820,9 +820,9 @@ class shocTimingBase(object):
         header = self.header
         timeData = self.data
 
-        from IPython import embed
-        logging.debug('timing.stamp' * 50)
-        embed()
+        # from IPython import embed
+        # logging.debug('timing.stamp' * 50)
+        # embed()
 
         # update timestamp in header
         header['utc-obs'] = (timeData.uth[j], 'Start of frame exposure in UTC')
