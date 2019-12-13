@@ -1,5 +1,7 @@
 """
-Helper functions to infer the WCS given a target name or coordinates of a object in the field
+Helper functions to infer World Coordinate System given a target name or
+coordinates of a object in the field. This is done by matching the image
+with the DSS image for the same field via point cloud drift image registration.
 """
 
 import functools
@@ -12,7 +14,7 @@ from scipy.spatial.distance import cdist
 from scipy.optimize import minimize
 from astropy.coordinates import SkyCoord
 
-from recipes.containers.dict import AttrDict
+from recipes.containers.dict_ import AttrDict
 from obstools.phot.segmentation import SegmentationHelper
 # from obstools.phot.segmentation import sourceFinder
 # from motley.profiling.timers import timer
@@ -228,14 +230,15 @@ def plot_transformed_image(ax, image, fov, p=(0, 0, 0), frame=False, **kws):
 
     if bool(frame):
         from matplotlib.patches import Rectangle
+
         frame_kws = dict(fc='none', lw=1.5, ec='0.5')
         if isinstance(frame, dict):
             frame_kws.update(frame)
 
         # - 0.5 * pixel_size
-        r = Rectangle(xy, *fov[::-1], np.degrees(theta),
-                      **frame_kws)
-        ax.add_patch(r)
+        ax.add_patch(
+                Rectangle(xy, *fov[::-1], np.degrees(theta), **frame_kws)
+        )
 
     return pl
 
@@ -265,11 +268,11 @@ class ImageRegistration(LoggingMixin):
             the same as that of the image
         find_kws
         """
+        # defaults
         self._find_kws = dict(snr=3.,
                               npixels=7,
                               edge_cutoff=3,
-                              deblend=False,
-                              )  # defaults
+                              deblend=False)
         self._find_kws.update(find_kws)
 
         # data array
@@ -605,6 +608,25 @@ class MosaicPlotter(object):
 
         self.update_lims(p, fov)
 
+    def mosaic(self, images, fovs, ps, **kws):
+        # mosaic plot
+
+        show_dss = kws.pop('show_dss', True)
+        cmap_dss = kws.pop('cmap_dss', 'Greys')
+        cmap = kws.pop('cmap', None)
+        alpha_magic = min(1. / (len(images) + show_dss), 0.5)
+        alpha = kws.setdefault('alpha', alpha_magic)
+
+        if show_dss:
+            self.plot_image(**kws, cmap=cmap_dss, alpha=1)
+
+        for image, fov, p in zip(images, fovs, ps):
+            self.plot_image(image, fov, p, cmap=cmap, **kws)
+
+        n = len(self.plots)
+        self.states = np.vstack([np.eye(n), np.ones(n) * alpha])
+        self.fig.canvas.mpl_connect('scroll_event', self._scroll)
+
     def get_corners(self, p, fov):
         """Get corners relative to DSS coordinates. yx coords"""
         c = np.array([[0, 0], fov])  # lower left, upper right yx
@@ -628,25 +650,6 @@ class MosaicPlotter(object):
         # ylim, xlim = np.c_[mins, maxs]
         # return xlim , ylim
 
-    def mosaic(self, images, fovs, ps, **kws):
-        # mosaic plot
-
-        show_dss = kws.pop('show_dss', True)
-        cmap_dss = kws.pop('cmap_dss', 'Greys')
-        cmap = kws.pop('cmap', None)
-        alpha_magic = min(1. / (len(images) + show_dss), 0.5)
-        alpha = kws.pop('alpha', alpha_magic)
-
-        if show_dss:
-            self.plot_image(**kws, cmap=cmap_dss, alpha=1)
-
-        for image, fov, p in zip(images, fovs, ps):
-            self.plot_image(image, fov, p, cmap=cmap, **kws)
-
-        n = len(self.plots)
-        self.states = np.vstack([np.eye(n), np.ones(n) * alpha])
-        self.fig.canvas.mpl_connect('scroll_event', self._scroll)
-
     def _scroll(self, event):
         try:
             # print(vars(event))
@@ -665,47 +668,3 @@ class MosaicPlotter(object):
             print('Scroll failed:', str(err))
 
 
-# def mosaic_aplpy(dss, images, fovs, ps, **kws):
-#     import aplpy as apl
-#
-#     f = apl.FITSFigure(dss.hdu)
-#     if kws.pop('show_dss', True):
-#         f.show_grayscale(invert=True)
-#
-#     # coordinate grid
-#     f.add_grid()
-#     f.grid.set_color('0.5')
-#
-#     ax = f._ax1
-#
-#     for image, fov, p in zip(images, fovs, ps):
-#         # get the size of the image in DSS pixels
-#         scale_ratio = (fov / dss.fov)
-#         dsspix = scale_ratio * dss.data.shape
-#         y, x = p[:2] / dss.pixel_size + 0.5
-#         # plot image
-#         pl = plot_image(ax, image, dsspix, (y, x, p[-1]), **kws)
-#
-#     return f
-
-
-# infer offset and rotation of grids
-
-
-# gridr = ndgrid.like(imr)
-# rotm = rotation_matrix_2d(np.radians(p[-1]))
-# gridn = gridr.swapaxes(0, -1) @ rotm + p[:2]
-
-if __name__ == '__main__':
-    fitsfile = '/media/Oceanus/UCT/Observing/data/Feb_2017/J0614-2725/SHA_20170209.0006.bff.fits'
-
-    w = wcs.WCS(naxis=2)
-
-    # see: https://www.aanda.org/articles/aa/full/2002/45/aah3859/aah3859.html for definitions
-    w.wcs.crpix = [-234.75,
-                   8.3393]  # array location of the reference point in pixels
-    w.wcs.cdelt = [-0.066667,
-                   0.066667]  # coordinate increment at reference point
-    w.wcs.crval = [0, -90]  # coordinate value at reference point
-    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]  # axis type
-    w.wcs.set_pv([(2, 1, 45.0)])  # rotation from stated coordinate type.
