@@ -974,7 +974,7 @@ class shocTimingBase(object):
 
         # FIXME: repeat print not necessary
         logging.info('Updating the starting times for %s ...',
-                     self._hdu.file_path.name)
+                     self._hdu.filepath.name)
 
         header = self.header
         times = self.data
@@ -1079,11 +1079,11 @@ class shocTimingOld(shocTimingBase):
             else:
                 raise NoGPSTime(
                         'No GPS triggers available for %r. Please set '
-                        'self.trigger.start' % self._hdu.file_path.name)
+                        'self.trigger.start' % self._hdu.filepath.name)
 
         # stack_hdu.flush(output_verify='warn', verbose=1)
         logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',
-                      self._hdu.file_path.name, self.trigger.mode.upper(),
+                      self._hdu.filepath.name, self.trigger.mode.upper(),
                       t0mid, self.t_cycle)
 
         return t0mid, td_kct
