@@ -19,12 +19,12 @@ from tsa import fold
 from tsa.smoothing import smoother
 from tsa.spectral import Spectral
 from graphical import ts
-from graphical.multitab import MplMultiTab
+from graphing.multitab import MplMultiTab
 from obstools.fastfits import quickheader
 # from recipes.containers.list import flatten
 from recipes.iter import interleave, group_more, first_true_idx
 
-# from graphical.interactive import PointSelector
+# from graphing.interactive import PointSelector
 # from tsa.tfr import TimeFrequencyRepresentation as TFR
 # from tsa.outliers import WindowOutlierDetection, generalizedESD
 
@@ -1517,7 +1517,7 @@ if __name__ == '__main__':
 
     starplots.connect()
 
-    # ps = PointSelector(starplots.draggables)
+    # ps = PointSelector(starplots.draggable)
     # ps.connect()
 
     raise SystemExit
