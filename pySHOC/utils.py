@@ -22,7 +22,7 @@ moduleDir = Path(here).parent
 cooCacheName = '.cache/coords'
 cooCachePath = moduleDir / cooCacheName
 
-dssCacheName = '.cache//dss'
+dssCacheName = '.cache/dss'
 dssCachePath = moduleDir / dssCacheName
 
 
@@ -32,15 +32,9 @@ def resolver(name):
     # try extract J coordinates from name.  We do this first, since it is
     # faster than a sesame query
 
-    # FIXME: this now accepted as a PR:
-    #  https://github.com/astropy/astropy/pull/7830
-
-    if jparser.search(name):
-        return jparser.to_skycoord(name)
-
     # Attempts a SIMBAD Sesame query with the given object name
     logging.info('Querying SIMBAD database for %r.', name)
-    return SkyCoord.from_name(name)
+    return SkyCoord.from_name(name, parse=True)
 
 
 def convert_skycoords(ra, dec, verbose=False):
@@ -175,6 +169,8 @@ def get_dss(imserver, ra, dec, size=(10, 10), epoch=2000):
     fitsData.write(data)
     fitsData.seek(0)
     return pyfits.open(fitsData, ignore_missing_end=True)
+
+
 
 
 import numpy as np
