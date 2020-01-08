@@ -10,10 +10,11 @@ import logging
 import numpy as np
 from astropy.io.fits import Header
 
-from .convert_keywords import KEYWORDS as kw_old_to_new
+from .convert_keywords import KEYWORDS as KWS_OLD_NEW
 from .io import (ValidityTests as validity,
                  Conversion as convert,
-                 InputCallbackLoop)
+                 InputCallbackLoop
+                 )
 from recipes.introspection.utils import get_module_name
 
 # from recipes.io import warn
@@ -59,6 +60,88 @@ HEADER_KEYS_MISSING_OLD = \
         # 'CALBWVNM',
 
     ]
+
+KWS_REMAP = {}
+for old, new in KWS_OLD_NEW:
+    KWS_REMAP[old.replace('HIERARCH ', '')] = new
+
+
+def get_new_key(old):
+    return KWS_REMAP.get(old, old)
+
+
+def headers_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
+    agg = defaultdict(list)
+    if keys is None:
+        keys = set(itt.chain(*run.calls('header.keys')))
+
+    for key in keys:
+        if key in ignore:
+            continue
+        for header in run.attrs('header'):
+            agg[key].append(header.get(key, '--'))
+
+    return agg
+    # return Table(agg, order='r', minimalist=True,
+    # width=[5] * 35, too_wide=False)
+
+
+def headers_intersect(obs, merge_histories=False):
+    """
+    For the headers of the observation set, keep only the keywords that have
+    the same value across all headers.
+
+    Parameters
+    ----------
+    obs
+
+    Returns
+    -------
+
+    """
+
+    assert len(obs)
+
+    from recipes.containers.set_ import OrderedSet
+    from astropy.io.fits.verify import VerifyWarning
+    from astropy.io.fits.header import Header
+    import warnings
+
+    headers = h0, *hrest = obs.attrs('header')
+    all_keys = OrderedSet(h0.keys())
+    for h in hrest:
+        all_keys &= OrderedSet(h.keys())
+
+    all_keys -= {'COMMENT', 'HISTORY', ''}
+    out = Header()
+    for key in all_keys:
+        vals = set(h[key] for h in headers)
+        if len(vals) == 1:
+            # all values for this key are identical -- keep
+            with warnings.catch_warnings():
+                # filter stupid HIERARCH warnings of which there seem to be
+                # millions
+                warnings.filterwarnings('ignore', category=VerifyWarning)
+                out[get_new_key(key)] = vals.pop()
+
+    # merge comments / histories
+    merge_keys = ('COMMENT', )
+    if merge_histories:
+        merge_keys += ('HISTORY', )
+
+    for key in merge_keys:
+        # each of these are list-like and thus not hashable.  Wrap in
+        # tuple to make them hashable then merge.
+        agg = OrderedSet()
+        for h in headers:
+            if key in h:
+                agg |= OrderedSet(tuple(h[key]))
+
+        for x in agg:
+            getattr(out, f'add_{key.lower()}')(x)
+        continue
+
+    return out
 
 
 def match_term(kw, header_keys):
@@ -203,63 +286,67 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
 class shocHeader(Header):
     """Extend the pyfits.Header class for interactive user input"""
 
+    def __init__(self, cards=[], copy=False):
+        # Convert to new style keywords
+
+        super().__init__(cards, copy)
+
     def has_old_keys(self):
-        old, new = zip(*kw_old_to_new)
+        old, new = zip(*KWS_OLD_NEW)
         return any((kw in self for kw in old))
 
-    def convert_old_new(self, forward=True, verbose=False):
-        """Convert old heirarch keywords to new short equivalents"""
+    def convert_old_new(self, forward=True):
+        """Convert old HIERARCH keywords to new short equivalents"""
         success = True
-        if self.has_old_keys() and verbose:
-            # TODO logger
-            print('The following header keywords will be renamed:')
-            print('\n'.join(itt.starmap('{:35}--> {}'.format, kw_old_to_new)))
-            print()
+        if self.has_old_keys():
+            logger.info(('The following header keywords will be renamed:' +
+                         '\n'.join(itt.starmap('{:35}--> {}'.format,
+                                               KWS_OLD_NEW))))
 
-        for old, new in kw_old_to_new:
+        for old, new in KWS_OLD_NEW:
             try:
                 if forward:
                     self.rename_keyword(old, new)
                 else:
                     self.rename_keyword(new, old)
             except ValueError as e:
-                logger.warning( 'Could not rename keyword %s due to the '
-                                'following exception \n%s' % (old, e))
+                logger.warning('Could not rename keyword %s due to the '
+                               'following exception \n%s' % (old, e))
                 success = False
 
         return success
 
-    def get_readnoise(self):
-        """
-        Readout noise, sensitivity, saturation as taken from ReadNoiseTable
-        """
-        from pySHOC import readNoiseTable
-        return readNoiseTable.get_readnoise(self)
-
-    def get_readnoise_dict(self, with_comments=False):
-        """
-        Readout noise, sensitivity, saturation as taken from ReadNoiseTable
-        """
-        data = self.get_readnoise()
-        keywords = 'RON', 'SENSITIV', 'SATURATE'
-        if with_comments:
-            comments = ('CCD Readout Noise', 'CCD Sensitivity',
-                        'CCD saturation counts')
-            data = zip(data, comments)
-        return dict(zip(keywords, data))
-
-    def set_readnoise(self):
-        """set Readout noise, sensitivity, observation date in header."""
-        # Readout noise and Sensitivity as taken from ReadNoiseTable
-        ron, sensitivity, saturation = self.readNoiseTable.get_readnoise(self)
-
-        self['RON'] = (ron, 'CCD Readout Noise')
-        self['SENSITIV'] = sensitivity, 'CCD Sensitivity'
-        # self['OBS-DATE'] = header['DATE'].split('T')[0], 'Observation date'
-        # self['SATURATION']??
-        # Images taken at SAAO observatory
-
-        return ron, sensitivity, saturation
+    # def get_readnoise(self):
+    #     """
+    #     Readout noise, sensitivity, saturation as taken from ReadNoiseTable
+    #     """
+    #     from pySHOC import readNoiseTable
+    #     return readNoiseTable.get_readnoise(self)
+    #
+    # def get_readnoise_dict(self, with_comments=False):
+    #     """
+    #     Readout noise, sensitivity, saturation as taken from ReadNoiseTable
+    #     """
+    #     data = self.get_readnoise()
+    #     keywords = 'RON', 'SENSITIV', 'SATURATE'
+    #     if with_comments:
+    #         comments = ('CCD Readout Noise', 'CCD Sensitivity',
+    #                     'CCD saturation counts')
+    #         data = zip(data, comments)
+    #     return dict(zip(keywords, data))
+    #
+    # def set_readnoise(self):
+    #     """set Readout noise, sensitivity, observation date in header."""
+    #     # Readout noise and Sensitivity as taken from ReadNoiseTable
+    #     ron, sensitivity, saturation = self.readNoiseTable.get_readnoise(self)
+    #
+    #     self['RON'] = (ron, 'CCD Readout Noise')
+    #     self['SENSITIV'] = sensitivity, 'CCD Sensitivity'
+    #     # self['OBS-DATE'] = header['DATE'].split('T')[0], 'Observation date'
+    #     # self['SATURATION']??
+    #     # Images taken at SAAO observatory
+    #
+    #     return ron, sensitivity, saturation
 
     def needs_update(self, info, verbose=False):
         """check which keys actually need to be updated"""
