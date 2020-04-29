@@ -7,7 +7,7 @@ import os
 
 import more_itertools as mit
 
-from recipes.containers.set_ import OrderedSet
+from recipes.containers.sets import OrderedSet
 
 
 def adapt_path(base, path, extension, output_type):

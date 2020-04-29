@@ -3,9 +3,7 @@ pySHOC - Data analysis tools for the Sutherland High-Speed Optical Cameras
 """
 
 from astropy.io.fits.hdu.base import register_hdu
-# from recipes.iter import flatiter, itersubclasses
-
-from .core import *  # FIXME: THIS IS BAD!!!
+from .core import *
 
 
 # register HDU classes (order is important!)
@@ -16,6 +14,8 @@ register_hdu(shocOldHDU)
 
 
 # # Collect named cubes in a dict
+# from recipes.iter import flatiter, itersubclasses
+#
 # namedObsClasses = {cls.kind: cls
 #                    for cls in flatiter((itersubclasses(shocObs), shocObs))}
 # namedRunClasses = {cls.obsClass.kind: cls

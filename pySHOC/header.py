@@ -102,7 +102,7 @@ def headers_intersect(obs, merge_histories=False):
 
     assert len(obs)
 
-    from recipes.containers.set_ import OrderedSet
+    from recipes.containers.sets import OrderedSet
     from astropy.io.fits.verify import VerifyWarning
     from astropy.io.fits.header import Header
     import warnings
