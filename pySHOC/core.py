@@ -2,11 +2,9 @@
 
 
 # std libs
-import time
 import datetime
 import functools as ftl
 import itertools as itt
-from pathlib import Path
 from collections import defaultdict
 
 # third-party libs
@@ -19,19 +17,20 @@ from astropy.io.fits.hdu import PrimaryHDU
 # local libs
 from motley import codes
 from motley.utils import overlay
-from obstools.phot.utils import Resample
-from obstools.phot.campaign import PhotCampaign
+from obstools.phot.campaign import PhotCampaign, HDUExtra
 from obstools.stats import median_scaled_median
+from obstools.image.calibration import keep
 from recipes import pprint
-from recipes.logging import LoggingMixin
-from recipes.containers.dict_ import pformat
-from recipes.containers.set_ import OrderedSet
+from recipes.containers.sets import OrderedSet
 from recipes.containers import Grouped, AttrTable
 
-# relative libs
+# relative libsl
+from graphing.imagine import plot_image_grid
+
+# from pySHOC.image.sample import ResampleFlip
 from .readnoise import readNoiseTables
-from .utils import retrieve_coords, convert_skycoords
-from .timing import Time, shocTimingOld, shocTimingNew
+from .utils import get_coords_named, convert_skycoords
+from .timing import shocTimingOld, shocTimingNew
 from .convert_keywords import KEYWORDS as kw_old_to_new
 from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
@@ -42,12 +41,10 @@ from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
 # from recipes.io import warn
 
-# TODO: do really want pySHOC to depend on obstools ?????
 
 # TODO: choose which to use for timing: spice or astropy
 # from .io import InputCallbackLoop
 
-# TODO: maybe from .specs import readNoiseTables, SERIAL_NRS
 
 #            SHOC1, SHOC2
 SERIAL_NRS = [5982, 6448]
@@ -175,7 +172,8 @@ class ReadoutMode:
 
     def __post_init__(self):
         self.isEM = (self.outAmp.mode == 'EM')
-        self.mode = self  # cheat!!
+        self.isCON = not self.isEM
+        self.mode = self  # hack for verbose access `readout.mode.isEM`
         # Readout noise
         # set the correct values here as attributes of the instance. These
         # values are absent in the headers
@@ -248,136 +246,8 @@ def get_table(r, attrs=None, **kws):
     return r.pprinter.get_table(r, attrs, **kws)
 
 
-# TODO: add these keywords to old SHOC headers:
-
-
-# TODO: remove from headers
-#  ACT
-#  KCT
-
-
-class DataOrientBase(object):
-    def __init__(self, flip):
-        """
-        Ensure all shoc images have the same orientation relative to the sky
-        """
-        orient = [..., slice(None), slice(None)]
-        if 'y' in flip:
-            orient[-2] = slice(None, None, -1)
-        if 'x' in flip:
-            orient[-1] = slice(None, None, -1)
-        #
-        self.orient = tuple(orient)
-
-
-# class shocImageSampler(object):
-#     _sampler = None
-
-
-class ResampleFlip(Resample, DataOrientBase):
-    def __init__(self, data, sample_size=None, subset=None, axis=0, flip=''):
-        Resample.__init__(self, data, sample_size, subset, axis)
-        DataOrientBase.__init__(self, flip)
-
-    def draw(self, n=None, subset=None):
-        return Resample.draw(self, n, subset)[self.orient]
-
-
-class DataOrienter(DataOrientBase):
-    def __init__(self, hdu):
-        """
-        Class that ensures all shoc images have the same orientation relative to
-        each other to assist doing image arithmetic
-        """
-        self.hdu = hdu
-        flip = '' if hdu.readout.isEM else 'x'
-        super().__init__(flip)
-
-        if hdu.ndim == 3:
-            self.data = hdu.section
-        elif hdu.ndim == 2:
-            self.data = hdu.data
-
-    def __getitem__(self, item):
-        return self.data[item][self.orient]
-
-
-# TODO: move to calibration ..?
-class keep:
-    pass
-
-
-class CalibrationImage:
-    """Descriptor class for calibration images"""
-
-    def __init__(self, name):
-        self.name = f'_{name}'
-
-    def __get__(self, instance, owner):
-        if instance is None:
-            return self
-        return getattr(instance, self.name)
-
-    def __set__(self, instance, value):
-        if value is keep:
-            return
-        if value is not None:
-            value = DataOrienter(value)[:]
-        setattr(instance, self.name, value)
-
-    def __delete__(self, instance):
-        setattr(instance, self.name, None)
-
-
-class ImageCalibration(DataOrienter):
-    """
-    Do calibration arithmetic for CCD images upon item access
-    """
-    bias = CalibrationImage('bias')
-    flat = CalibrationImage('flat')
-
-    def __init__(self, hdu, bias=keep, flat=keep):
-        super().__init__(hdu)
-        self._bias = self._flat = None
-        self.bias = bias
-        self.flat = flat
-
-    def __str__(self):
-        return pformat(dict(bias=self.bias,
-                            flat=self.flat),
-                       self.__class__.__name__)
-
-    def __repr__(self):
-        return str(self)
-
-    def __call__(self, data):
-        """
-        Do calibration arithmetic on `data` ignoring orientation
-
-        Parameters
-        ----------
-        data
-
-        Returns
-        -------
-
-        """
-        # debias
-        if self.bias is not None:
-            data = data - self.bias
-
-        # flat field
-        if self.flat is not None:
-            data = data / self.flat
-
-        return data
-
-    def __getitem__(self, item):
-        return self(super().__getitem__(item))
-
-
 # HDU Subclasses
-class shocHDU(PrimaryHDU, LoggingMixin):
+class shocHDU(HDUExtra):
     def __init__(self, data=None, header=None, do_not_scale_image_data=False,
                  ignore_blank=False, uint=True, scale_back=None):
         PrimaryHDU.__init__(self,
@@ -404,6 +274,9 @@ class shocHDU(PrimaryHDU, LoggingMixin):
             h = int(time.split(':')[0])
             nameDate = self.date - datetime.timedelta(int(h < 12))
             self.nameDate = str(nameDate).replace('-', '')
+
+        # # field of view
+        # self.fov = self.get_fov()
 
         # image binning
         self.binning = Binning(header['%sBIN' % _] for _ in 'VH')
@@ -435,31 +308,29 @@ class shocHDU(PrimaryHDU, LoggingMixin):
         self.target = header.get('OBJECT')  # objName
         self.obstype = header.get('OBSTYPE')
 
-        # manage on-the-fly calibration for large files
-        self.calibrated = ImageCalibration(self)
+        # # manage on-the-fly image orientation
+        # self.oriented = ImageOrienter(self, x=self.readout.isEM)
 
-    @property
-    def sampler(self):
+        # # manage on-the-fly calibration for large files
+        # self.calibrated = ImageCalibration(self)
+
+    @lazyproperty
+    def oriented(self):
         """
-        An image sampler mixin for SHOC data that automatically corrects the
-        orientation of images so they are oriented North up, East left.
+        Use this to get images with the correct orientation:
+        North up, East left.
+
+        This is necessary since EM mode images have opposite x-axis
+        orientation since  pixels are read out in the opposite direction
+        through the readout register.
 
         Images taken in CON mode are flipped left-right.
         Images taken in EM  mode are left unmodified
+
         """
-        # use `section` for performance
-        flip = '' if self.readout.isEM else 'x'
-        # make sure we pass 3d data to sampler. This is a hack so we can use
-        # the sampler to get thumbnails from data that is a 2d image,
-        # eg. master flats.  The 'sample' will just be the image itself.
-        if self.ndim == 3:
-            data = self.section
-        elif self.ndim == 2:
-            data = self.data[None]  # insert axis in front
-        else:
-            raise ValueError(f'Cannot create image sampler for data with '
-                             f'{self.ndim} dimensions.')
-        return ResampleFlip(data, flip=flip)
+        from obstools.image.orient import ImageOrienter
+        # will flip EM images x axis (2nd axis)
+        return ImageOrienter(self, x=self.readout.isCON)
 
     @lazyproperty
     def timing(self):
@@ -478,30 +349,21 @@ class shocHDU(PrimaryHDU, LoggingMixin):
     # def kct(self):
     #     return self.timing.kct
 
-    @property
-    def filepath(self):
-        """file name as a Path object"""
-        return Path(self._file.name)
+    # @property
+    # def filepath(self):
+    #     """file name as a Path object"""
+    #     return Path(self._file.name)
 
-    @property
-    def filename(self):
-        if self._file is not None:
-            return self.filepath.stem
-        return 'None'
-
+    # @property
+    # def filename(self):
+    #     if self._file is not None:
+    #         return self.filepath.stem
+    #     return 'None'
+    #
     @property
     def nframes(self):
         """Total number of images in observation"""
         return self.shape[0]  #
-
-    @property
-    def ishape(self):
-        """Image frame shape"""
-        return self.shape[-2:]
-
-    @property
-    def ndim(self):
-        return len(self.shape)
 
     @lazyproperty
     def coords(self):
@@ -515,7 +377,7 @@ class shocHDU(PrimaryHDU, LoggingMixin):
 
         Returns
         -------
-        astoropy.coordinates.SkyCoord
+        astropy.coordinates.SkyCoord
 
         """
         # target coordinates
@@ -529,7 +391,7 @@ class shocHDU(PrimaryHDU, LoggingMixin):
         if self.target:
             # No / bad coordinates in header, but object name available - try
             # resolve
-            coords = retrieve_coords(self.target)
+            coords = get_coords_named(self.target)
 
         if coords:
             return coords
@@ -601,10 +463,10 @@ class shocHDU(PrimaryHDU, LoggingMixin):
 
     def get_rotation(self):
         """
-        Get the instrument rotation wrt the sky in radians.  This value seems
-        to be constant for most SHOC data from various telescopes that I've
-        tested.
-        You can measure this yourself by using the
+        Get the instrument rotation (position angle) wrt the sky in radians.
+        This value seems to be constant for most SHOC data from various
+        telescopes that I've tested. You can measure this yourself by using the
+
         `obstools.phot.campaign.PhotCampaign.coalign_dss` method.
         """
         return -0.04527
@@ -724,177 +586,6 @@ class shocHDU(PrimaryHDU, LoggingMixin):
         # )
         return self
 
-    def set_calibrators(self, bias=keep, flat=keep):
-        """
-        Set calibration images for this observation. Default it to keep
-        previously set image if none are provided here.  To remove a
-        previously set calibration image pass a value of `None` to this
-        function, or simply delete the attribute `self.calibrated.bias` or
-        `self.calibrated.flat`
-
-        Parameters
-        ----------
-        bias
-        flat
-
-        Returns
-        -------
-
-        """
-        self.calibrated.bias = bias
-        self.calibrated.flat = flat
-
-    # plotting
-    def display(self, **kws):
-        """Display the data"""
-        if self.ndim == 2:
-            from graphing.imagine import ImageDisplay
-            im = ImageDisplay(self.data, **kws)
-
-        elif self.ndim == 3:
-            from graphing.imagine import VideoDisplay
-            # FIXME: this will load entire data array which might be a tarpit
-            #  trap
-            im = VideoDisplay(self.data, **kws)
-
-        else:
-            raise TypeError('Not an image!! WTF?')
-
-        im.figure.canvas.set_window_title(self.filepath.name)
-        return im
-
-
-def plot_image_grid(images, titles=()):
-    """
-
-    Parameters
-    ----------
-    images
-    titles
-
-    Returns
-    -------
-
-    """
-    n = len(images)
-    assert n, 'No images to plot!'
-
-    import matplotlib.pyplot as plt
-    from matplotlib.gridspec import GridSpec
-    from graphing.imagine import ImageDisplay
-
-    # get grid layout
-    n_rows, n_cols = auto_grid(n)
-    cbar_size = 3
-
-    # create figure
-    fig = plt.figure(figsize=(10.5, 9))
-    # todo: guess fig size
-    # Use gridspec rather than ImageGrid since the latter tends to resize
-    # the axes
-    gs = GridSpec(n_rows, n_cols * (100 + cbar_size),
-                  hspace=0.005,
-                  wspace=0.005,
-                  left=0.03,
-                  right=0.97,
-                  bottom=0.03,
-                  top=0.98
-                  )  # todo: maybe better with tight layout.
-
-    art = []
-    indices = np.ndindex(n_rows, n_cols)
-    axes = np.empty((n_rows, n_cols), 'O')
-    for i, (j, k) in enumerate(indices):
-        if i >= n:
-            break
-
-        axes[j, k] = ax = fig.add_subplot(gs[j:j + 1,
-                                          (100 * k):(100 * (k + 1))])
-        imd = ImageDisplay(images[i], ax=ax,
-                           cbar=False, hist=False, sliders=False,
-                           origin='lower left')
-        art.append(imd.imagePlot)
-
-        top = (j == 0)
-        bot = (j == n_rows - 1)
-        # right = (j == n_cols - 1)
-        if k != 0:  # not leftmost
-            ax.set_yticklabels([])
-        if not (bot or top):
-            ax.set_xticklabels([])
-        # if right:
-        #     ax.yaxis.tick_right()
-        if top:
-            ax.xaxis.tick_top()
-
-    # labels (names
-    for i, (ax, title) in enumerate(
-            itt.zip_longest(axes.ravel(), titles, fillvalue='')):
-        if ax is None:
-            continue
-        # add title text
-        title = title.replace("\n", "\n     ")
-        ax.text(0.025, 0.95, f'{i: <2}: {title}',
-                color='w', va='top', fontweight='bold', transform=ax.transAxes)
-
-    # colorbar
-    cax = fig.add_subplot(gs[:, -cbar_size * n_cols:])
-    # noinspection PyUnboundLocalVariable
-    fig.colorbar(imd.imagePlot, cax)
-
-    # https://matplotlib.org/3.1.1/gallery/images_contours_and_fields/multi_image.html
-    # Make images respond to changes in the norm of other images (e.g. via
-    # the "edit axis, curves and images parameters" GUI on Qt), but be
-    # careful not to recurse infinitely!
-    def update(changed_image):
-        for im in art:
-            if (changed_image.get_cmap() != im.get_cmap()
-                    or changed_image.get_clim() != im.get_clim()):
-                im.set_cmap(changed_image.get_cmap())
-                im.set_clim(changed_image.get_clim())
-
-    for im in art:
-        im.callbacksSM.connect('changed', update)
-
-    return fig, axes
-
-
-def plot_stats(run, stats, labels, titles):
-    from matplotlib import pyplot as plt
-
-    stats = np.array(stats)
-    idx = defaultdict(list)
-    for i, lbl in enumerate(labels):
-        idx[lbl].append(i)
-
-    n = stats.shape[1]
-    fig, axes = plt.subplots(1, n, figsize=(12.5, 8), sharey=True)
-    for j, ax in enumerate(axes):
-        ax.set_title(titles[j])
-        m = 0
-        for lbl, i in idx.items():
-            ax.plot(stats[i, j], range(m, m + len(i)), 'o', label=lbl)
-            m += len(i)
-        ax.grid()
-
-    ax.invert_yaxis()
-    ax.legend()
-
-    # filenames as ticks
-    z = []
-    list(map(z.extend, idx.values()))
-    names = run.attrs('name')
-    ax = axes[0]
-    ax.set_yticklabels(np.take(names, z))
-    ax.set_yticks(np.arange(len(run) + 1) - 0.5)
-    for tick in ax.yaxis.get_ticklabels():
-        tick.set_va('top')
-    # plt.yticks(np.arange(len(self) + 1) - 0.5,
-    #            np.take(names, z),
-    #            va='top')
-
-    fig.tight_layout()
-
 
 # _BaseHDU creates a _BasicHeader, which does not contain hierarch keywords,
 # so for SHOC we cannot tell if it's the old format header by checking those
@@ -971,11 +662,14 @@ class PPrintHelper(AttrTable):
         # Add '*' flag to times that are gps triggered
         flags = {}
         index_of = list(self.headers.keys()).index
+        postscript = []
         for key, fun in [('timing._t0_repr', 'timing.trigger.is_gps'),
                          ('timing.t_expose', 'timing.trigger.is_gps_loop')]:
             # type needed below so empty arrays work with `np.choose`
             _flags = np.array(run.calls(fun), bool)
             flags[index_of(key)] = np.choose(_flags, [' ' * any(_flags), '*'])
+            if _flags.any():
+                postscript.append(f'* {self.headers[key]}: {fun}')
 
         units = kws.pop('units', self.kws['units'])
         if units and kws.get('col_headers'):
@@ -986,7 +680,8 @@ class PPrintHelper(AttrTable):
 
         # compacted `filter` displays 'A = ∅' which is not very clear. Go more
         # verbose again for clarity
-        table = super().get_table(run, attrs, flags=flags, units=units, **kws)
+        table = super().get_table(run, attrs, flags=flags, units=units,
+                                  footnotes=postscript, **kws)
 
         replace = {'A': 'filter.A',
                    'B': 'filter.B'}
@@ -1027,7 +722,7 @@ class shocCampaign(PhotCampaign):
                    'tExp': 's',
                    't0': 'UTC'},
 
-            compact=1,
+            compact=True,
             title_props=dict(txt=('underline', 'bold'), bg='g'),
             too_wide=False,
             totals=['n', 'duration'])
@@ -1040,7 +735,7 @@ class shocCampaign(PhotCampaign):
     #     shocHDU.data.get
 
     def thumbnails(self, statistic='mean', depth=10, subset=(0, 10),
-                   title='filename', calibrated=False):
+                   title='filename', calibrated=False, figsize=None, **kws):
         """
         Display a sample image from each of the observations laid out in a grid.
         Image thumbnails are all the same size, even if they are shaped
@@ -1058,6 +753,8 @@ class shocCampaign(PhotCampaign):
             key to attribute of item that will be used as title
         calibrated: bool
             calibrate the image if bias / flat field available
+        figsize:  tuple
+               size of the figure in inches
         Returns
         -------
 
@@ -1079,7 +776,8 @@ class shocCampaign(PhotCampaign):
             titles.append('\n'.join(map(str, ats)))
 
         #
-        return plot_image_grid(sample_images, titles)
+        return plot_image_grid(sample_images, titles=titles, figsize=figsize,
+                               **kws)
 
     def guess_obstype(self, plot=False):
         """
@@ -1098,7 +796,7 @@ class shocCampaign(PhotCampaign):
         obstypes, stats = zip(*self.calls('guess_obstype', return_stats=True))
 
         if plot:
-            plot_stats(self, stats, obstypes, ['mean', 'std', 'ptp'])
+            self.plot_image_stats(stats, obstypes, ['mean', 'std', 'ptp'])
 
         return obstypes
 
@@ -1322,6 +1020,62 @@ class shocCampaign(PhotCampaign):
 
     # def set_calibrators(self, bias, flat):
 
+    def plot_image_stats(self, stats, labels, titles, figsize=None):
+        """
+        Compare image statistics across observations in the run.  This serves as
+        a diagnostic for guessing image obstypes
+
+
+        Parameters
+        ----------
+        stats
+        labels
+        titles
+        figsize
+
+        Returns
+        -------
+
+        """
+        from matplotlib import pyplot as plt
+
+        stats = np.array(stats)
+        assert stats.size
+
+        idx = defaultdict(list)
+        for i, lbl in enumerate(labels):
+            idx[lbl].append(i)
+
+        n = stats.shape[1]
+        fig, axes = plt.subplots(1, n, figsize=figsize, sharey=True)
+        for j, ax in enumerate(axes):
+            ax.set_title(titles[j])
+            m = 0
+            for lbl, i in idx.items():
+                ax.plot(stats[i, j], range(m, m + len(i)), 'o', label=lbl)
+                m += len(i)
+            ax.grid()
+
+        # noinspection PyUnboundLocalVariable
+        ax.invert_yaxis()
+        ax.legend()
+
+        # filenames as ticks
+        z = []
+        list(map(z.extend, idx.values()))
+        names = self.attrs('name')
+        ax = axes[0]
+        ax.set_yticklabels(np.take(names, z))
+        ax.set_yticks(np.arange(len(self) + 1) - 0.5)
+        for tick in ax.yaxis.get_ticklabels():
+            tick.set_va('top')
+        # plt.yticks(np.arange(len(self) + 1) - 0.5,
+        #            np.take(names, z),
+        #            va='top')
+
+        fig.tight_layout()
+        return fig, axes
+
 
 class Filler(object):
     s = 'NO MATCH'
@@ -1357,7 +1111,7 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
                  group_header_style='bold', no_match_style='r', g1_style='c',
                  ):
     from collections import defaultdict
-    from recipes.containers.set_ import OrderedSet
+    from recipes.containers.sets import OrderedSet
 
     # create tmp shocCampaign so we can use the builtin pprint machinery
     tmp = shocCampaign()
@@ -1449,9 +1203,9 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         import operator as op
         import itertools as itt
 
-        from motley.table import Table, hstack
+        from motley.table import Table
         from motley import codes
-        from motley.utils import overlay, ConditionalFormatter
+        from motley.utils import hstack, overlay, ConditionalFormatter
 
         headers = list(map('Δ({})'.format, tmp.pprinter.get_headers(closest)))
         formatters = []
@@ -1473,12 +1227,6 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         print(tbl)
         print()
         return tbl
-
-
-def auto_grid(n):
-    x = int(np.floor(np.sqrt(n)))
-    y = int(np.ceil(n / x))
-    return x, y
 
 
 class shocObsGroups(Grouped):
@@ -1557,20 +1305,27 @@ class shocObsGroups(Grouped):
 
         tables = {}
         empty = []
+        footnotes = OrderedSet()
         for i, (gid, run) in enumerate(self.items()):
             if run is None:
                 empty.append(gid)
                 continue
 
             # get table
-            tables[gid] = run.pprinter.get_table(run, attrs,
-                                                 totals=totals,
-                                                 units=units,
-                                                 # compact=False,
-                                                 **kws)
+            tables[gid] = tbl = run.pprinter.get_table(run, attrs,
+                                                       totals=totals,
+                                                       units=units,
+                                                       # compact=False,
+                                                       **kws)
             sample = run
             # only first table gets header
             kws['title'] = kws['col_headers'] = kws['col_groups'] = None
+
+            # only last table gets footnote
+            footnotes |= set(tbl.footnotes)
+            tbl.footnotes = []
+        #
+        tbl.footnotes = list(footnotes)
 
         # deal with null matches
         first = next(iter(tables.values()))
@@ -1598,7 +1353,7 @@ class shocObsGroups(Grouped):
 
         # ΤΟDO: could accomplish the same effect by colour coding...
 
-        from motley.table import vstack, hstack
+        from motley.utils import vstack, hstack
 
         tables = self.get_tables(**kws)
         braces = ''
@@ -1609,7 +1364,7 @@ class shocObsGroups(Grouped):
 
         # # vertical offset
         stack = list(tables.values())
-        offset = stack[0].n_head_nl
+        offset = stack[0].n_head_lines
         print(hstack([vstack(stack), braces], spacing=1, offset=offset))
         return tables, braces
 
