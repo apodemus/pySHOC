@@ -24,7 +24,7 @@ from recipes import pprint
 from recipes.containers.sets import OrderedSet
 from recipes.containers import Grouped, AttrTable
 
-# relative libsl
+# relative libs
 from graphing.imagine import plot_image_grid
 
 # from pySHOC.image.sample import ResampleFlip
@@ -35,30 +35,24 @@ from .convert_keywords import KEYWORDS as kw_old_to_new
 from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
 # import logging
-
-
 # import matplotlib.pyplot as plt
-
 # from recipes.io import warn
-
-
-# TODO: choose which to use for timing: spice or astropy
 # from .io import InputCallbackLoop
-
-
-#            SHOC1, SHOC2
-SERIAL_NRS = [5982, 6448]
-
-EMPTY_FILTER_STR = '∅'
-
 # noinspection PyPep8Naming
 
+# TODO: choose which to use for timing: spice or astropy
 
 # TODO
 # __all__ = ['']
 
 # TODO: can you pickle these classes
 #
+
+
+#            SHOC1, SHOC2
+SERIAL_NRS = [5982, 6448]
+
+EMPTY_FILTER_STR = '∅'
 
 
 # Field of view of telescopes in arcmin
@@ -475,7 +469,6 @@ class shocHDU(HDUExtra):
                       return_stats=False):
         # FIXME: sample_size misleading name since it is really number of
         #  frames used to get median image
-
         """
         Guess the observation type based on statistics of a sample image.
         Very basic decision tree classifier based on 3 features:
@@ -693,39 +686,39 @@ class PPrintHelper(AttrTable):
 
 class shocCampaign(PhotCampaign):
     pprinter = PPrintHelper(
-            ['filename',
-             'telescope', 'instrument',
-             'target', 'obstype',
-             'filters.A', 'filters.B',
-             'nframes', 'ishape', 'binning',
-             'readout.preAmpGain',
-             'readout.mode',
+        ['filename',
+         'telescope', 'instrument',
+         'target', 'obstype',
+         'filters.A', 'filters.B',
+         'nframes', 'ishape', 'binning',
+         'readout.preAmpGain',
+         'readout.mode',
 
-             'timing._t0_repr',
-             'timing.t_expose',
-             'timing.duration',
-             ],
-            column_headers={
-                'telescope': 'tel',
-                'instrument': 'camera',
-                'nframes': 'n',
-                'binning': 'bin',
-                'readout.preAmpGain': 'γₚᵣₑ',
-                'timing.t_expose': 'tExp',
-                'timing._t0_repr': 't0',
-            },
-            formatters={
-                'timing.duration': ftl.partial(pprint.hms, unicode=True,
-                                               precision=1)
-            },
-            units={'γₚᵣₑ': 'e⁻/ADU',
-                   'tExp': 's',
-                   't0': 'UTC'},
+         'timing._t0_repr',
+         'timing.t_expose',
+         'timing.duration',
+         ],
+        column_headers={
+            'telescope': 'tel',
+            'instrument': 'camera',
+            'nframes': 'n',
+            'binning': 'bin',
+            'readout.preAmpGain': 'γₚᵣₑ',
+            'timing.t_expose': 'tExp',
+            'timing._t0_repr': 't0',
+        },
+        formatters={
+            'timing.duration': ftl.partial(pprint.hms, unicode=True,
+                                           precision=1)
+        },
+        units={'γₚᵣₑ': 'e⁻/ADU',
+               'tExp': 's',
+               't0': 'UTC'},
 
-            compact=True,
-            title_props=dict(txt=('underline', 'bold'), bg='g'),
-            too_wide=False,
-            totals=['n', 'duration'])
+        compact=True,
+        title_props=dict(txt=('underline', 'bold'), bg='g'),
+        too_wide=False,
+        totals=['n', 'duration'])
 
     def new_groups(self, *keys, **kws):
         return shocObsGroups(self.__class__, *keys, **kws)
@@ -1002,7 +995,7 @@ class shocCampaign(PhotCampaign):
 
         names = ", ".join(map("{!r}".format, self.files.names))
         hdu.header.add_history(
-                f'Combined {len(self)} files with {func.__name__}: {names} '
+            f'Combined {len(self)} files with {func.__name__}: {names} '
         )
         return hdu
 
@@ -1117,7 +1110,7 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
     tmp = shocCampaign()
     size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
     depth = np.product(
-            np.array(list(map(np.shape, deltas.values()))).max(0)[[0, -1]])
+        np.array(list(map(np.shape, deltas.values()))).max(0)[[0, -1]])
     dtmp = np.ma.empty((size, depth), 'O')  # len(closest)
     dtmp[:] = np.ma.masked
 
@@ -1268,6 +1261,8 @@ class shocObsGroups(Grouped):
 
         """
         from motley.table import Table
+        # TODO: consider merging this functionality into  motley.table
+        #       Table.group_rows(), or hstack or some somesuch
 
         #
         kws['compact'] = False
@@ -1285,7 +1280,7 @@ class shocObsGroups(Grouped):
             attrs = OrderedSet(pp.attrs) - set(attrs_grouped_by)
 
         # check compactable
-        attrs_varies = set([key for key in attrs if self.varies_by(key)])
+        attrs_varies = set(key for key in attrs if self.varies_by(key))
         compactable = attrs - attrs_varies
         attrs -= compactable
         headers = pp.get_headers(attrs)
@@ -1340,7 +1335,7 @@ class shocObsGroups(Grouped):
         first.compact = 1
         first.compacted = (list(compactable),
                            np.atleast_1d(sample.attrs(*compactable)[0]))
-
+        first._compact_table = first._get_compact_table()
         # put empty tables at the end
         # tables.update(empty)
 
@@ -1348,7 +1343,7 @@ class shocObsGroups(Grouped):
 
     def pprint(self, **kws):
         """
-        Run pprint on each
+        Run pprint on each group
         """
 
         # ΤΟDO: could accomplish the same effect by colour coding...
