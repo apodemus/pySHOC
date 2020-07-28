@@ -1,33 +1,27 @@
 
-*.idea
+
 *.kate-swp
 *~
 *.bak
 __pycache__
 *.swp
-
-#notebooks
+/.pytest_cache
+/.vscode
+/.idea
+/.pylintrc
 /.ipynb_checkpoints/
 
-#caches
-.cache
-.coordcache
 
+# old code
 dev
-.todo
-caltest.py
-mp_test.py
-ideas.py
+iraf_hacks.py
+lightcurve.py
+pipeline.py
+uncertainty.py
+fast.py
+filenaming.py
 
-examples
-
-EMvsCON
-smatchtest.py
-fitshead.sh
-lc.py
-
-dssmatchtest.py
-fitshead.sh
-lc.py
-test_pre.py
+# needs integrating
+tests/test_pre.py
+tests/mp_test.py
 foo.py
