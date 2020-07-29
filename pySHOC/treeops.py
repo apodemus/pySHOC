@@ -1,33 +1,51 @@
+"""
+Operations on SHOC files residing in a nested directory structure (file system 
+tree)
+"""
 
-import logging
 from collections import defaultdict
-from pathlib import Path
 
-import matplotlib.pyplot as plt
-import numpy as np
-from obstools.fastfits import fast_header, FitsCube
+from astropy.io.fits.header import Header
+
 from recipes.array import unique_rows
+from obstools import io
 
-from .core import shocRun
-
-
-def with_ext_gen(root, extension):
-    """return all files in tree with given extension as list of Paths"""
-    path = Path(root)
-    if not path.exists():
-        raise ValueError('Not a valid system path: %s' % str(path))
-
-    ext = extension.strip('.')
-    return path.rglob('*.%s' % ext)
+from .core import shocCampaign
 
 
-def with_ext(root, extension):
-    return list(with_ext_gen(root, extension))
+def iter_ext(files, extensions):
+    """
+    Yield all the files that exist with the same root and stem but different
+    extension(s). 
+
+    Parameters
+    ----------
+    files : Container or Iterable
+        The files to consider
+    extensions : str or Container of str
+        All file extentions to consider
+
+    Yields
+    -------
+    Path
+        [description]
+    """
+    if isinstance(extensions, str):
+        extensions = (extensions, )
+
+    for file in files:
+        yield file
+
+        for ext in extensions:
+            new = (file.parent / file.stem).with_suffix(f'.{ext.lstrip(".")}')
+            if new.exists:
+                yield new
 
 
 def get_tree(root, extension=''):
     """
-    Get
+    Get the file tree as a dictionary keyed on folder names containing file
+    names with each folder
 
     Parameters
     ----------
@@ -38,168 +56,29 @@ def get_tree(root, extension=''):
     -------
 
     """
-    if extension:
-        extension = '.' + extension.strip('.')
-
     tree = defaultdict(list)
-    for file in Path(root).glob('*/*%s' % extension):
+    for file in io.iter_files(root, extension, True):
         tree[file.parent.name].append(file)
     return tree
 
 
-def get_fits(root, ignore=None):
-    """
-    Generator that yields all fits files in tree as Path object. Optionally
-    files can be filtered based on the content of their headers.
-
-    Parameters
-    ----------
-    root: str or `pathlib.Path`
-        path to the root directory. All files and sub-directories will be
-        traversed recursively returning fits files
-    ignore: dict, optional
-        A dict keyed on header keywords containing a sequence of values to
-        ignore. Any file that has header values equaling items in the ignore
-        list for that keyword will be filtered.
-
-    Yields
-    ------
-    fitsfile: `pathlib.Path`
-
-    """
-    if ignore is None:
-        ignore = {}
-
-    for fitsfile in with_ext_gen(root, '.fits'):
-        header = fast_header(fitsfile)
-        skip = False
-        for key, ign in ignore.items():
-            if header.get(key, '') in ign:
-                skip = True
-                break
-        if not skip:
-            yield fitsfile
-
-
 def unique_modes(root):
     """
-    Return an array with rows containing the unique set of SHOC observational modes that comprise the
-    fits files in the root directory and all its sub-directories.
-     """
-    fitsfiles = get_fits(root)
-    run = shocRun(filenames=fitsfiles)
-    names, dattrs, vals = zip(*(stack.get_instrumental_setup(('binning', 'mode', 'emGain'))
-                                for stack in run))
+    Return an array with rows containing the unique set of SHOC observational
+    modes that comprise the fits files in the root directory and all its
+    sub-directories.
+    """
+
+    run = shocCampaign.load(root, recurse=True)
+    modes = run.attrs('binning', 'readout.mode')
 
     # Convert to strings so we can compare
-    vals = np.array([list(map(str, v)) for v in vals])
-
-    return unique_rows(vals)  # unique_rows(np.array(vals, dtype='U50'))
-
-
-def get_data(root, ignore=None, subset=1):
-    """
-    Get a subset of data from each fits file.  For example, get the first frame
-    from each data cube.
-
-    Parameters
-    ----------
-    root: str or `pathlib.Path`
-        path to the root directory. All files and sub-directories will be
-    ignore: dict, optional
-        A dict keyed on header keywords containing a sequence of values to
-        ignore. Any file that has header values equaling items in the ignore
-        list for that keyword will be filtered.
-    subset: int or slice or array-like of size 2 or 3, optional
-        The range of frames to retrieve. The `subset` argument will be mapped to
-        a slice, and that slice will be retrieved from each cube. This means
-        that if the slice maps to indices that are beyond the size of the cube
-        an zero-sized array may be returned. The default is 1. i.e. retrieve
-        the first frame from each cube.
-
-    Returns
-    -------
-    data: dict
-        dict keyed on filenames containing data as numpy arrays.
-
-    """
-    if 1 < np.size(subset) <= 3:
-        subset = slice(*subset)
-    else:
-        raise ValueError('Invalid subset')
-
-    data = {}
-    for fits in get_fits(root, ignore):
-        ff = FitsCube(fits)
-        data[fits] = ff[subset]
-    return data
+    vals = [list(map(str, v)) for v in modes]
+    return unique_rows(vals)
 
 
-def get_images(root, ignore=None, subset=1, clobber=False, fliplr=True,
-               cmap='gist_earth', plims=(2.25, 99.75), show_filenames=True,
-               ext='.png'):
-    """
-    Pull the subset of frames from all the fits files in root and its
-    sub-directories.
-
-    Parameters
-    ----------
-    root
-    ignore
-    subset
-    clobber
-    fliplr
-    cmap
-    plims
-    show_filenames
-    ext
-
-    Returns
-    -------
-
-    """
-    if ignore is None:
-        ignore = dict(obstype=('bias', 'flat'))
-
-    ext = ext.strip('.')
-    for i, (fpath, data) in enumerate(get_data(root, ignore, subset).items()):
-        # create figure
-        fig = plt.figure(figsize=(8, 8), frameon=False)
-        if i == 0:
-            # check if extension is supported
-            supported = fig.canvas.get_supported_filetypes().keys()
-            if ext not in supported:
-                plt.close()
-                raise ValueError('Image extension %r not supported. Try one'
-                                 'of these instead: %s' %(ext, supported))
-        # add axes (full frame)
-        ax = fig.add_axes([0, 0, 1, 1], frameon=False)
-
-        # flip image if required
-        if fliplr:
-            data = np.fliplr(data)
-
-        # set color limits as percentile
-        vmin, vmax = np.percentile(data, plims)
-
-        # show image
-        ax.imshow(data, origin='llc',
-                  cmap=cmap, vmin=vmin, vmax=vmax)
-
-        if show_filenames:
-            # add filename to image
-            fig.text(0.01, 0.99, fpath.name,
-                     color='w', va='top', size=12, fontweight='bold')
-
-        image_path = fpath.with_suffix('.%s' % ext)
-        if not image_path.exists() or clobber:
-            logging.info('saving %s', image_path)
-            fig.savefig(str(image_path))
-        else:
-            logging.info('not saving %s', image_path)
-
-
-def partition_by_source(root, fits_only=False, remove_empty=True, dry_run=False):
+def partition_by_source(root, extensions=('fits',), remove_empty=True,
+                        dry_run=False):
     """
     Partition the files in the root directory into folders based on the OBSTYPE
     and OBJECT keyword values in their headers. Only the directories named by
@@ -210,8 +89,8 @@ def partition_by_source(root, fits_only=False, remove_empty=True, dry_run=False)
     ----------
     root: str
         Name of the root folder to partition
-    fits_only: bool
-        if False also move files with the same stem but different extensions.
+    extensions: tuple
+        if given also move files with the same stem but different extensions.
     remove_empty: bool
         Remove empty folders after partitioning is done
     dry_run: bool
@@ -286,65 +165,44 @@ def partition_by_source(root, fits_only=False, remove_empty=True, dry_run=False)
     4 directories, 22 files
 
     """
-    root = Path(root)
-    dateFolderPattern = '[0-9]' * 4
-    fitsfiles = root.rglob(dateFolderPattern + '/*.fits')
 
-    # partFunc = lambda f: fastheader(f).get('obstype', None)
-    partDict = defaultdict(list)
-    for path in fitsfiles:
-        id_ = fast_header(path).get('obstype', None)
-        # if id_ is not None: we don't know the obstype
-        partDict[id_].append(path)
+    # if 'fits' not in extensions
+    fitsfiles = list(io.iter_files(root, 'fits'))
+    assert len(fitsfiles) > 0
+    root = fitsfiles[0].parent
 
-    # pop files with 'object' obstype
-    objFiles = partDict.pop('object')
+    partition = defaultdict(list)
+    for file in fitsfiles:
+        header = Header.fromfile(file)
+        key = header.get('obstype', None)
+        obj = header.get('object', None)
+        if (key == 'object') and obj:
+            key = obj.replace(' ', '_')
+        # if kind is None: we don't know the obstype
+        partition[key].append(file)
 
-    # partition the objects into directories
-    for filename in objFiles:
-        name = fast_header(filename).get('object', None)
-        name = name.replace(' ', '_')
-        partDict[name].append(filename)
-
-    # Remove files that could not be id'd
-    unknown = partDict.pop(None, None)
+    # Remove files that could not be id'd by source name
+    partition.pop(None, None)  # unknown
 
     # create bias/flat/source directories and move collected files into them
     tree = defaultdict(list)
-    for name, files in partDict.items():
+    for name, files in partition.items():
         folder = root / name
         if not (folder.exists() or dry_run):
             folder.mkdir()
-        for file in stem_gen(files, fits_only):
+
+        for file in iter_ext(files, extensions):
             tree[name].append(file)
             if not dry_run:
                 file.rename(folder / file.name)
 
     # finally remove the empty directories
     if remove_empty:
-        for folder in root.glob(dateFolderPattern):
-            if not len(list(folder.iterdir())):
+        for folder in root.iterdir():
+            if folder.is_file():
+                continue
+
+            if len(list(folder.iterdir())) == 0:
                 folder.rmdir()
 
     return tree
-
-
-def stem_gen(files, fits_only):
-    for file in files:
-        yield file
-        if not fits_only:
-            yield from (file.parent / file.stem).glob('*')
-
-
-# def _move_files(files, folder, fits_only):
-#     if not folder.exists():
-#         folder.mkdir()
-#     # move files into folder
-#     for filename in files:
-#         filename.rename(folder / filename.name)
-#         #
-#         if not fits_only:
-#             for other in (filename.parent / filename.stem).glob('*'):
-#                 other.rename(folder / other.name)
-
-# def flagger
