@@ -20,7 +20,7 @@ Sutherland High Speed Optical Cameras (SHOC).
 ## How-to use this code
 * We are working on official documentation. 
 * For the moment the best place to see what pySHOC can do for you is the 
-[example notebook](https://github.com/astromancer/pySHOC/blob/master/pySHOC/example/pySHOC.demo.ipynb)
+[example notebook](https://nbviewer.jupyter.org/github/astromancer/pySHOC/blob/master/pySHOC/example/pySHOC.demo.ipynb)
 
 ## Contributing
  Pull requests are welcome!
