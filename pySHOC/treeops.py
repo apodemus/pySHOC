@@ -3,43 +3,23 @@ Operations on SHOC files residing in a nested directory structure (file system
 tree)
 """
 
+from recipes.decor import raises
+from astropy.coordinates.jparser import shorten
 from collections import defaultdict
+import shutil
+import warnings
+from pathlib import Path
+import os
+import more_itertools as mit
 
 from astropy.io.fits.header import Header
 
-from recipes.array import unique_rows
-from obstools import io
+from recipes import io
+from recipes import pprint as ppr
 
 from .core import shocCampaign
+import itertools as itt
 
-
-def iter_ext(files, extensions):
-    """
-    Yield all the files that exist with the same root and stem but different
-    extension(s). 
-
-    Parameters
-    ----------
-    files : Container or Iterable
-        The files to consider
-    extensions : str or Container of str
-        All file extentions to consider
-
-    Yields
-    -------
-    Path
-        [description]
-    """
-    if isinstance(extensions, str):
-        extensions = (extensions, )
-
-    for file in files:
-        yield file
-
-        for ext in extensions:
-            new = (file.parent / file.stem).with_suffix(f'.{ext.lstrip(".")}')
-            if new.exists:
-                yield new
 
 
 def get_tree(root, extension=''):
@@ -61,24 +41,61 @@ def get_tree(root, extension=''):
         tree[file.parent.name].append(file)
     return tree
 
+def get_common_parent(paths):
+    root = Path()
+    for folders in itt.zip_longest(*(p.parts for p in paths)):
+        folders = set(folders) 
+        if len(folders) != 1:
+            break
+        root /= folders.pop()
+    return root
 
-def unique_modes(root):
-    """
-    Return an array with rows containing the unique set of SHOC observational
-    modes that comprise the fits files in the root directory and all its
-    sub-directories.
-    """
-
-    run = shocCampaign.load(root, recurse=True)
-    modes = run.attrs('binning', 'readout.mode')
-
-    # Convert to strings so we can compare
-    vals = [list(map(str, v)) for v in modes]
-    return unique_rows(vals)
+def _rename(name):
+    return shorten(name).replace(' ', '_')
 
 
-def partition_by_source(root, extensions=('fits',), remove_empty=True,
-                        dry_run=False):
+def get_object_name(obstype, objname):
+    if obstype == 'object':
+        if objname in ('', None):
+            # Ignore files that could not be id'd by source name
+            return
+        # get folder name
+        return _rename(objname)
+    else:
+        # calibration data
+        return obstype
+
+
+def make_tree(src, dest, grouping, naming, extensions='*'):
+
+    # load data
+    if isinstance(src, (str, Path)):
+        src = shocCampaign.load(src, recurse=True)
+    elif not isinstance(src, shocCampaign):
+        raise TypeError('Invalid source')
+    
+    # make grouping
+    partition = src.group_by(*grouping)
+
+    # compute requested folder tree (don't create any folders just yet)
+    dest = Path(dest)
+    tree = defaultdict(list)
+    for gid, sub in partition.items():
+        name = naming(*gid)
+        if not name:
+            warnings.warn(f'Could not get a valid filename for key {gid} with '
+                          f'files: {sub.files.names}')
+            continue
+
+        folder = dest / name
+        for file in io.iter_ext(sub.files.paths, extensions):
+            tree[folder].append(file)
+
+    return tree
+
+
+def partition_by_source(src, dest=None, extensions='*', move=True,
+                        overwrite=False, dry_run=False, clean_up=True):
     """
     Partition the files in the root directory into folders based on the OBSTYPE
     and OBJECT keyword values in their headers. Only the directories named by
@@ -166,38 +183,62 @@ def partition_by_source(root, extensions=('fits',), remove_empty=True,
 
     """
 
-    # if 'fits' not in extensions
-    fitsfiles = list(io.iter_files(root, 'fits'))
-    assert len(fitsfiles) > 0
-    root = fitsfiles[0].parent
+    # load data
+    if isinstance(src, (str, Path)):
+        root = Path(src)
+        src = shocCampaign.load(src, recurse=True)
+    elif isinstance(src, shocCampaign):
+        # get common parent folder
+        root = get_common_parent(src.files.paths)
+    else:
+        raise TypeError('Invalid source')
+    
+    # default destination same as source
+    if dest is None:
+        dest = root
 
-    partition = defaultdict(list)
-    for file in fitsfiles:
-        header = Header.fromfile(file)
-        key = header.get('obstype', None)
-        obj = header.get('object', None)
-        if (key == 'object') and obj:
-            key = obj.replace(' ', '_')
-        # if kind is None: we don't know the obstype
-        partition[key].append(file)
+    # now get the desired folder structure
+    tree = make_tree(src, dest, ('obstype', 'target'), get_object_name,
+                     extensions)
 
-    # Remove files that could not be id'd by source name
-    partition.pop(None, None)  # unknown
+    # choose message severity
+    emit = warnings.warn if dry_run else raises(OSError)
 
-    # create bias/flat/source directories and move collected files into them
-    tree = defaultdict(list)
-    for name, files in partition.items():
-        folder = root / name
-        if not (folder.exists() or dry_run):
-            folder.mkdir()
+    # check available space at destination
+    if not move:
+        check = dest
+        while not check.exists():
+            check = check.parent
 
-        for file in iter_ext(files, extensions):
-            tree[name].append(file)
-            if not dry_run:
-                file.rename(folder / file.name)
+        free_bytes = shutil.disk_usage(check).free
+        req_bytes = sum(p.stat().st_size for p in mit.collapse(tree.values()))
+        if free_bytes < req_bytes:
+            kws = dict(unit='b', significant=1)
+            emit(f'Not enough space on disc. New file tree requires '
+                 f'{ppr.eng(req_bytes, **kws)}, you only have '
+                 f'{ppr.eng(free_bytes, **kws)} available at location '
+                 f'{str(check)!r}')
+
+    # if this is a dry run, we are done
+    if dry_run:
+        return tree
+
+    # Now move / copy the files
+    action = os.rename if move else shutil.copy2
+    for folder, files in tree.items():
+        # create folder
+        folder.mkdir(parents=True, exist_ok=True)
+        for file in files:
+
+            new = folder / file.name
+            if new.exists() and not overwrite:
+                emit(f'File {str(new)!r} will be overwritten.')
+
+            # do it!
+            action(file, new)
 
     # finally remove the empty directories
-    if remove_empty:
+    if clean_up:
         for folder in root.iterdir():
             if folder.is_file():
                 continue
