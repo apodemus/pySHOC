@@ -11,10 +11,10 @@ import numpy as np
 from astropy.io.fits import Header
 
 from .convert_keywords import KEYWORDS as KWS_OLD_NEW
-from .io import (ValidityTests as validity,
-                 Conversion as convert,
-                 InputCallbackLoop
-                 )
+# from .io import (ValidityTests as validity,
+#                  Conversion as convert,
+#                  InputCallbackLoop
+#                  )
 from recipes.introspection.utils import get_module_name
 
 # from recipes.io import warn

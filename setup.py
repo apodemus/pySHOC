@@ -32,7 +32,7 @@ def link_install_cheat():
     dest = str(Path(get_site()) / pkg_name)
 
     print('linking', src, dest)
-    ok = subprocess.call(['ln', '-sf', src, dest])
+    ok = subprocess.call(['ln', '-sfn', src, dest])
     # ln -s path/to/repo/eeg `python3 -m site --user-site`/eeg
     if ok == 0:
     	print('Installed', pkg_name, 'at', dest, 'via cheat')
