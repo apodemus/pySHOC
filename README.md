@@ -6,7 +6,10 @@ pySHOC
 Sutherland High Speed Optical Cameras (SHOC).  
 
 ## Installation
-* TODO
+* download the install [script](https://github.com/astromancer/pySHOC/raw/dev/install.sh)
+* optionally change the download location line: `ROOT=~/where/ever/`
+* grant execute permissions: `chmod u+x install.sh`
+* run the script: `./install.sh`
 
 <!-- ### Third party libraries
 * see [LIBRARIES](https://github.com/username/sw-name/blob/master/LIBRARIES.md) files -->
@@ -19,7 +22,7 @@ Sutherland High Speed Optical Cameras (SHOC).
 
 ## How-to use this code
 * We are working on official documentation. 
-* For the moment the best place to see what pySHOC can do for you is the 
+* For the moment the best place to see how to use pySHOC is the 
 [example notebook](https://nbviewer.jupyter.org/github/astromancer/pySHOC/blob/master/pySHOC/example/pySHOC.demo.ipynb)
 
 ## Contributing
