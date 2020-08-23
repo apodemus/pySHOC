@@ -783,9 +783,10 @@ class PPrintHelper(AttrTable):
 
         replace = {'A': 'filter.A',
                    'B': 'filter.B'}
-        if len(table.compacted):
-            table.compacted[0] = [replace.get(name, name)
-                                  for name in table.compacted[0]]
+        if table.compact_items:
+            table.compact_items = {replace.get(name, name): item
+                                   for name, item in table.compact_items.items()
+                                   }
         return table
 
 
@@ -1235,7 +1236,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
                 set(g['flat'].attrs(*MATCH_DARKS[0])))
 
     def missing_calibration(self, report=False):
-        missing = {cal: sorted(getattr(self, f'missing_{cal}s')())
+        missing = {cal: sorted(getattr(self, f'missing_{cal}s')(), key=str)
                    for cal in ('flat', 'dark')}
 
         if report:
@@ -1265,7 +1266,7 @@ class shocObsGroups(Grouped):
         # set default default factory ;)
         super().__init__(factory, *args, **kws)
 
-    def get_tables(self, titles=False, headers=False, **kws):
+    def get_tables(self, titled=False, headers=False, **kws):
         """
 
         Parameters
@@ -1280,25 +1281,30 @@ class shocObsGroups(Grouped):
         # TODO: consider merging this functionality into  motley.table
         #       Table.group_rows(), or hstack or some somesuch
 
-        #
+        title = kws.pop('title', self.__class__.__name__)
+        ncc = kws.pop('compact', False)
         kws['compact'] = False
-        kws['title'] = self.__class__.__name__
 
         pp = shocCampaign.pprinter
         attrs = OrderedSet(pp.attrs)
         attrs_grouped_by = ()
-        if self.group_id is not None:
-            keys, _ = self.group_id
-            key_types = dict()
-            for gid, grp in itt.groupby(keys, type):
-                key_types[gid] = list(grp)
-            attrs_grouped_by = key_types.get(str, ())
-            attrs -= set(attrs_grouped_by)
+        compactable = set()
+        multiple = (len(self) > 1)
+        if multiple:
+            if self.group_id is not None:
+                keys, _ = self.group_id
+                key_types = dict()
+                for gid, grp in itt.groupby(keys, type):
+                    key_types[gid] = list(grp)
+                attrs_grouped_by = key_types.get(str, ())
+                attrs -= set(attrs_grouped_by)
 
-        # check which columns are compactable
-        attrs_varies = set(key for key in attrs if self.varies_by(key))
-        compactable = attrs - attrs_varies
-        attrs -= compactable
+            # check which columns are compactable
+            attrs_varies = set(key for key in attrs if self.varies_by(key))
+            compactable = attrs - attrs_varies
+            attrs -= compactable
+
+        #
         headers = pp.get_headers(attrs)
 
         # handle column totals
@@ -1326,17 +1332,19 @@ class shocObsGroups(Grouped):
                 continue
 
             # get table
+            if titled:
+                title = (f'{title}\n' if i==0 else ''
+                         f'group {i}: {"; ".join(map(str, gid))}')
+
             tables[gid] = tbl = get_table(run, attrs,
+                                          title=title,
                                           totals=totals,
                                           units=units,
                                           # compact=False,
                                           **kws)
-            sample = run
 
             # only first table gets title / headers
-            if titles:
-                'make title!'  # TODO
-            else:
+            if not titled:
                 kws['title'] = None
             if not headers:
                 kws['col_headers'] = kws['col_groups'] = None
@@ -1357,22 +1365,21 @@ class shocObsGroups(Grouped):
                 tables[gid] = filler
 
         # HACK compact repr
-        first.compact = True
-        r = sample[:1]
-
-        first.compacted = (
-            list(compactable),
-            get_table(r, compactable,
-                      chead=None, cgroups=None,
-                      row_nrs=False, **kws).pre_table[0]
-        )
-        first._compact_table = first._get_compact_table()
+        if first.compactable():
+            first.compact = ncc
+            first.compact_items = dict(zip(
+                list(compactable),
+                get_table(run[:1], compactable,
+                          chead=None, cgroups=None,
+                          row_nrs=False, **kws).pre_table[0]
+            ))
+            first._compact_table = first._get_compact_table()
 
         # put empty tables at the end
         # tables.update(empty)
         return tables
 
-    def pprint(self, titles=False, headers=False, braces=True, **kws):
+    def pprint(self, titled=True, headers=False, braces=False, **kws):
         """
         Run pprint on each group
         """
@@ -1381,7 +1388,7 @@ class shocObsGroups(Grouped):
 
         from motley.utils import vstack, hstack
 
-        tables = self.get_tables(titles, headers, **kws)
+        tables = self.get_tables(titled, headers, **kws)
         ordered_keys = list(tables.keys())  # key=sort
         stack = [tables[key] for key in ordered_keys]
 
@@ -1406,7 +1413,7 @@ class shocObsGroups(Grouped):
     def map(self, func, *args, **kws):
         # runs an arbitrary function on each shocCampaign
         out = self.__class__()
-        
+
         for key, obj in self.items():
             if obj is None:
                 out[key] = None
@@ -1540,7 +1547,7 @@ class Filler(object):
         cls.table = table.empty_like(1, frame=False)
 
 
-class GroupHeaderLine(object):
+class GroupTitle(object):
     width = None
 
     def __init__(self, i, keys, props):
@@ -1594,7 +1601,7 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         # info = dict(zip(headers, display_keys))
 
         # insert group headers
-        group_header = GroupHeaderLine(i, display_keys, group_header_style)
+        group_header = GroupTitle(i, display_keys, group_header_style)
         insert[n].append((group_header, '<', 'underline'))
 
         # populate delta table
@@ -1604,7 +1611,6 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
 
         #
         for j, (run, c) in enumerate(zip([other, obs], [no_match_style, ''])):
-
             if run is None:
                 insert[n].append(Filler(c))
             else:
@@ -1632,7 +1638,7 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
 
     # filler lines
     Filler.make(tbl)
-    GroupHeaderLine.width = tbl.get_width() - 1
+    GroupTitle.width = tbl.get_width() - 1
 
     # fix for final run null match
     if run is None:
@@ -1643,7 +1649,8 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
     tbl.highlight = highlight
 
     # hack compact repr
-    tbl.compacted = np.take(group_id, unvarying), np.take(key, unvarying)
+    tbl.compact_items = dict(zip(np.take(group_id, unvarying),
+                                 np.take(key, unvarying)))
 
     # create delta table
     if False:
