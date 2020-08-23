@@ -302,7 +302,7 @@ class shocTimingBase(object):
 
         # Timing trigger mode
         self.trigger = Trigger(header)
-        self.delta = None  # δt
+        # self.delta = None  #
         # self.sigma = 0.001 # # timestamp uncertainty
 
         # Date
@@ -397,7 +397,7 @@ class shocTimingBase(object):
 
     @lazyproperty
     def delta(self):
-        """Kinetic Cycle Time as a astropy.time.TimeDelta object"""
+        """Kinetic Cycle Time (δt) as a astropy.time.TimeDelta object"""
         self.t0, delta = self.get_t0_kct()
         return delta
 
@@ -467,6 +467,11 @@ class shocTimingBase(object):
     def lmst(self):
         """LMST for at frame mid exposure times"""
         return self.t.sidereal_time('mean', longitude=self.location.lon)
+    
+    @lazyproperty
+    def hour(self):
+        """UTC in units of hours"""
+        return (self.t - self.ut_date).to('hour').value
 
     def _check_coords_loc(self):
         if self._hdu.coords is None:
@@ -509,17 +514,17 @@ class shocTimingBase(object):
         Check if the entire observation takes place during twilight. This is
         helpful in determining if an observation is for flat fields.
         """
-        from obstools.plan.visibilities import Sun, nearest_midnight_date
+        from obstools.plan import Sun
 
         t0, t1 = self.t[[0, -1]]
         # pass a string 'sutherland' below instead of the module variable
         # SUTHERLAND since EarthLocation is not hashable and will therefore not
         # cache the result of the call below
-        sun = Sun.on_date(nearest_midnight_date(self._hdu.date), 'SAAO')
+        sun = Sun('SAAO', str(self._hdu.date))
         return (  # entire observation occurs during evening twilight
-            np.all((sun.set < t0) & (t0 < sun.dusk.astronomical))
+            np.all((sun.set < t0) & (t1 < sun.dusk.astronomical))
             or  # entire observation occurs during morning twilight
-            np.all((sun.rise > t1) & (t1 > sun.dawn.astronomical))
+            np.all((sun.rise > t1) & (t0 > sun.dawn.astronomical))
         )
 
     def export(self, filename,  delimiter=' '):
