@@ -10,9 +10,9 @@ for name in recipes graphing motley obstools pySHOC; do
     else
         git clone ${URL}/${name}
         cd ${ROOT}/${name}
-	    git checkout dev
-        python3 setup.py
+        git checkout dev
     fi
+    python3 setup.py
     echo
     cd ${ROOT}
     done
