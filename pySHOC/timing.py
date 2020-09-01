@@ -19,7 +19,7 @@ from astropy.utils import lazyproperty
 # import spiceypy as spice
 
 from obstools.airmass import Young94, altitude
-from recipes import pprint, memoize
+import recipes.pprint as ppr
 
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
@@ -105,7 +105,7 @@ class HMSrepr(object):
 
     @property
     def hms(self):
-        return pprint.hms(self)
+        return ppr.hms(self)
 
 
 class Duration(float, HMSrepr):
@@ -469,8 +469,12 @@ class shocTimingBase(object):
         return self.t.sidereal_time('mean', longitude=self.location.lon)
     
     @lazyproperty
+    def ha(self):
+        return self.lmst - self._hdu.coords.ra
+
+    @lazyproperty
     def hour(self):
-        """UTC in units of hours"""
+        """UTC in units of hours since midnight"""
         return (self.t - self.ut_date).to('hour').value
 
     def _check_coords_loc(self):
@@ -703,7 +707,7 @@ class TimeDelta(time.TimeDelta):
     def hms(self):
         v = self.value
         precision = 1 if v > 10 else 3
-        return pprint.hms(v, precision)
+        return ppr.hms(v, precision)
 
 
 class Time(time.Time):
