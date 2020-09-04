@@ -11,7 +11,7 @@ import logging
 import numpy as np
 from astropy import time
 from astropy.table import Table as aTable
-from astropy.coordinates import EarthLocation
+from astropy.coordinates import EarthLocation, AltAz
 import astropy.units as u
 from astropy.coordinates.angles import Angle
 from astropy.utils import lazyproperty
@@ -28,19 +28,8 @@ import recipes.pprint as ppr
 # SHOC Exposure dead time in frame transfer mode
 DEAD_TIME = 0.00676  # seconds           header['vshift'] * 1024 ????
 
-# set location
-# self.location = EarthLocation.of_site('SAAO')
-SUTHERLAND = EarthLocation(lat=-32.376006, lon=20.810678, height=1771)
-TIMEZONE = +2 * u.hour  # SAST is UTC + 2
-# SUTH_OBS = Observer(SUTHERLAND)
 
-# TODO: locations are slightly different for each telescope.  Exact GPS
-#  locations listed in Shocnhelp
-# Telescope    Latitude          Longitude         Altidude (m)
-# 74inch       32 o 27.73’ S     20 o 48.70’ E     1822
-# 40inch       32 o 22.78’ S     20 o 48.60’ E     1810
-# Lesedi       32 o 22.78’ S     20 o 48.63’ E     1811
-# SALT ????
+TIMEZONE = +2 * u.hour  # SAST is UTC + 2
 
 
 def iso_split(t, dtype=[('date', 'U10'), ('utc', 'U18')]):
@@ -103,7 +92,7 @@ class HMSrepr(object):
     representation
     """
 
-    @property
+    @ property
     def hms(self):
         return ppr.hms(self)
 
@@ -128,7 +117,7 @@ class Trigger(object):
     def set(self, t0=None, sast=True):
         """
         Set GPS trigger start time for the observation. For most cases, this
-        function can be called without arguments. You will only need to explicitly 
+        function can be called without arguments. You will only need to explicitly
         provide the GPS trigger times for older SHOC data where these were not
         recorded in the fits headers.  In this case input values are assumed to
         be in SAST. If you are providing UTC times use the `sast=False` flag.
@@ -137,7 +126,7 @@ class Trigger(object):
         ----------
         t0 : str, optional
             A string representing the time: eg: '04:20:00'. If not given, the
-            GPS starting time recorded in the fits header will be used. 
+            GPS starting time recorded in the fits header will be used.
         sast : bool, optional
             Flag indicating that the times are given in local SAST time, by
             default True
@@ -194,7 +183,7 @@ class Trigger(object):
         """
         return self.is_gps() and not self.is_gps_start()
 
-    @property
+    @ property
     def symbol(self):
         # add symbolic rep for trigger
         if self.is_internal():
@@ -203,6 +192,51 @@ class Trigger(object):
             return '⟲'
         if self.is_external_start():
             return '↓'
+
+
+class TimeDelta(time.TimeDelta):
+    @ property
+    def hms(self):
+        v = self.value
+        precision = 1 if v > 10 else 3
+        return ppr.hms(v, precision)
+
+
+class Time(time.Time):
+    """
+    Extends the `astropy.time.core.Time` class to include a few more convenience
+    methods
+    """
+
+    def lmst(self, longitude):
+        """LMST for at frame mid exposure times"""
+        return self.t.sidereal_time('mean', longitude=longitude)
+
+    def zd(self, coords, location):
+        # zenith distance
+        altaz = AltAz(alt=90 * u.deg, az=0 * u.deg,
+                      obstime=self, location=location)
+        return altaz.separation(coords)
+
+    def bjd(self, coords, location=None):
+        """BJD(TDB)"""
+        return self.tdb + self.light_travel_time(coords, 'barycentric',
+                                                 location)
+
+    def hjd(self, coords, location=None):
+        """HJD(TCB)"""
+        return self.tcb + self.light_travel_time(coords, 'heliocentric',
+                                                 location)
+
+    # @property
+    # def tjd(self):
+    #     return np.floor(times.jd)
+    # TODO: rjd,
+
+    @ property
+    def gjd(self):
+        # geocentric julian date
+        return self.tcg.jd
 
 
 # ******************************************************************************
@@ -269,7 +303,7 @@ class shocTimingBase(object):
     """
 
     # TODO: get example set of all mode + old / new combo + print table
-    # TODO Then print with pySHOC.core.print_timing_table(run)
+    # TODO Then print with pyshoc.core.print_timing_table(run)
 
     # TODO:  specify required timing accuracy --> decide which algorithms to
     #  use based on this!
@@ -282,23 +316,23 @@ class shocTimingBase(object):
     #     else:
     #         return super(shocTimingBase, cls).__new__(shocTimingNew)
 
-    def __init__(self, hdu, location=SUTHERLAND):
+    def __init__(self, hdu, location=None):
         """
         Create the timing interface for a shocHDU
 
         Parameters
         ----------
-        hdu : pySHOC.core.shocHDU
+        hdu : pyshoc.core.shocHDU
 
         location : astropy.coordinates.EarthLocation, optional
-            Location of the observation (used for barycentric corrections), 
-            by default SUTHERLAND
+            Location of the observation (used for barycentric corrections),
+
         """
 
         self._hdu = hdu
         self.header = header = hdu.header
         self.data = None  # calculated in `set` method
-        self.location = location
+        self.location = location or hdu.location
 
         # Timing trigger mode
         self.trigger = Trigger(header)
@@ -315,7 +349,10 @@ class shocTimingBase(object):
     def __array__(self):
         return self.t
 
-    @lazyproperty
+    def __getitem__(self, key):
+        return self.t[key]
+
+    @ lazyproperty
     def expose(self):
         """
         Exposure time (integration time) for a single image
@@ -326,7 +363,7 @@ class shocTimingBase(object):
 
         return self.header['EXPOSURE']
 
-    @lazyproperty
+    @ lazyproperty
     def kct(self):
         """
         Kinetic cycle time = Exposure time + Dead time
@@ -367,7 +404,7 @@ class shocTimingBase(object):
         if self.trigger.is_gps_loop():
             return int(self.header['GPS-INT']) / 1000
 
-    @lazyproperty
+    @ lazyproperty
     def t(self):
         """
         Create time stamps for all images in the stack. This returns the
@@ -389,26 +426,26 @@ class shocTimingBase(object):
     # are not available upon initialization (they are missing in the header).
     # If missing they will be calculated upon accessing the attribute.
 
-    @property
+    @ property
     def duration(self):
         """Duration of the observation"""
         if self.kct:
             return Duration(self._hdu.nframes * self.kct)
 
-    @lazyproperty
+    @ lazyproperty
     def delta(self):
         """Kinetic Cycle Time (δt) as a astropy.time.TimeDelta object"""
         self.t0, delta = self.get_t0_kct()
         return delta
 
-    @lazyproperty
+    @ lazyproperty
     def t0(self):
         """time stamp for the 0th frame start"""
         # noinspection PyAttributeOutsideInit
         t0, self.delta = self.get_t0_kct()
         return t0
 
-    @property
+    @ property
     def _t0_repr(self):
         """
         Representative str for `t0` the start time of an observation. For old
@@ -463,16 +500,21 @@ class shocTimingBase(object):
         delta = TimeDelta(self.kct, format='sec')
         return t0, delta
 
-    @lazyproperty
+    @ lazyproperty
     def lmst(self):
         """LMST for at frame mid exposure times"""
-        return self.t.sidereal_time('mean', longitude=self.location.lon)
-    
-    @lazyproperty
+        return self.t.lmst(self.location.lon)
+
+    @ lazyproperty
     def ha(self):
         return self.lmst - self._hdu.coords.ra
 
-    @lazyproperty
+    @ lazyproperty
+    def zd(self):
+        # zenith distance
+        return self.t.zd(self._hdu.coords, self.location)
+
+    @ lazyproperty
     def hour(self):
         """UTC in units of hours since midnight"""
         return (self.t - self.ut_date).to('hour').value
@@ -484,7 +526,7 @@ class shocTimingBase(object):
         if self.location is None:
             raise UnknownLocation
 
-    @lazyproperty
+    @ lazyproperty
     def bjd(self):
         """
         Barycentric julian date [BJD(TDB)] at frame mid exposure times
@@ -492,7 +534,7 @@ class shocTimingBase(object):
         """
         return self.t.bjd(self._hdu.coords).jd
 
-    @lazyproperty
+    @ lazyproperty
     def hjd(self):
         """
         Heliocentric julian date [HJD(TCG)] at frame mid exposure times
@@ -518,7 +560,7 @@ class shocTimingBase(object):
         Check if the entire observation takes place during twilight. This is
         helpful in determining if an observation is for flat fields.
         """
-        from obstools.plan import Sun
+        from obstools.plan.skytracks import Sun
 
         t0, t1 = self.t[[0, -1]]
         # pass a string 'sutherland' below instead of the module variable
@@ -598,7 +640,7 @@ class shocTimingBase(object):
             # TODO: set model name dynamically
 
         # Add info to header HISTORY
-        header.add_history(f'pySHOC: added time stamps at {Time.now()}',
+        header.add_history(f'pyshoc: added time stamps at {Time.now()}',
                            before='HEAD')
 
 
@@ -607,11 +649,11 @@ class shocTimingNew(shocTimingBase):
 
 
 class shocTimingOld(shocTimingBase):
-    @lazyproperty
+    @ lazyproperty
     def kct(self):
         return self.header.get('KCT', self.dead + self.exp)
 
-    @lazyproperty
+    @ lazyproperty
     def expose(self):
         return self.header.get('EXPOSURE', UnknownTime)
 
@@ -700,43 +742,3 @@ class shocTimingOld(shocTimingBase):
                 header['GPSSTART'] = (
                     str(t0), 'GPS start time (UTC; external)')
                 # TODO: OR set empty?
-
-
-class TimeDelta(time.TimeDelta):
-    @property
-    def hms(self):
-        v = self.value
-        precision = 1 if v > 10 else 3
-        return ppr.hms(v, precision)
-
-
-class Time(time.Time):
-    """
-    Extends the `astropy.time.core.Time` class to include a few more convenience
-    methods
-    """
-
-    # TODO: HJD:
-
-    def bjd(self, coords, location=None):
-        """BJD(TDB)"""
-        return self.tdb + self.light_travel_time(coords, 'barycentric',
-                                                 location)
-
-    def hjd(self, coords, location=None):
-        """HJD(TCB)"""
-        return self.tcb + self.light_travel_time(coords, 'heliocentric',
-                                                 location)
-
-    # @property
-    # def tjd(self):
-
-    #     return np.floor(times.jd)
-
-    # TODO: rjd,
-
-    @property
-    def gjd(self):
-        # geocentric julian date
-        return self.tcg.jd
-

@@ -1,5 +1,5 @@
 """
-pySHOC - Data analysis tools for the Sutherland High-Speed Optical Cameras
+pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras
 """
 
 from astropy.io.fits.hdu.base import register_hdu

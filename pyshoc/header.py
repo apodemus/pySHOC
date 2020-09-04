@@ -6,6 +6,7 @@
 import re
 import itertools as itt
 import logging
+from collections import defaultdict
 
 import numpy as np
 from astropy.io.fits import Header
@@ -320,7 +321,7 @@ class shocHeader(Header):
     #     """
     #     Readout noise, sensitivity, saturation as taken from ReadNoiseTable
     #     """
-    #     from pySHOC import readNoiseTable
+    #     from pyshoc import readNoiseTable
     #     return readNoiseTable.get_readnoise(self)
     #
     # def get_readnoise_dict(self, with_comments=False):

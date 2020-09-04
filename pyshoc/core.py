@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.time import Time
 
 from scipy import stats
 
@@ -34,7 +35,7 @@ from recipes.containers import Grouped, OfType, PrettyPrinter
 # relative libs
 from graphing.imagine import plot_image_grid
 
-# from pySHOC.image.sample import ResampleFlip
+# from pyshoc.image.sample import ResampleFlip
 from .readnoise import readNoiseTables
 from .timing import shocTimingOld, shocTimingNew
 from .convert_keywords import KEYWORDS as kw_old_to_new
@@ -669,17 +670,13 @@ class shocHDU(HDUExtra):
         kws.setdefault('axis', 0)
         hdu = self.__class__(func(self.data, *args, **kws), self.header)
 
+        # update header
         hdu.header['MASTER'] = True
-        hdu.header['NCOMBINE'] = self.frames
+        hdu.header['NCOMBINE'] = self.nframes
         hdu.header.add_history(f'pyshoc.combine {Time.now()}: '
                                f'{func.__name__} of {self.nframes} images '
                                f'from {self.file.name}')
 
-        # update history
-        # hdu.header.add_history(
-        # print(
-        #         f'{Time.now()}: Combined {len(self.data)} images '
-        #         f'from file {get_id(self)} with {func.__name__}')
         return hdu
 
     def subtract(self, bias):

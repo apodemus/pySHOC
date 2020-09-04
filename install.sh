@@ -2,7 +2,7 @@
 
 ROOT=~/Downloads
 URL=https://github.com/astromancer
-for name in recipes graphing motley obstools pySHOC; do
+for name in recipes graphing motley obstools pyshoc; do
     git ls-remote ${name} -q > /dev/null 2>&1
     if [[ $? -eq 0 ]]; then
         cd ${ROOT}/${name}
