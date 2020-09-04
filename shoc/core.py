@@ -36,8 +36,8 @@ from recipes.containers import Grouped, OfType, PrettyPrinter
 from graphing.imagine import plot_image_grid
 
 # from shoc.image.sample import ResampleFlip
+from .timing import shocTiming
 from .readnoise import readNoiseTables
-from .timing import shocTimingOld, shocTimingNew
 from .convert_keywords import KEYWORDS as kw_old_to_new
 from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
@@ -418,11 +418,7 @@ class shocHDU(HDUExtra):
         # initially be created with a _`BasicHeader` only, in which case we
         # will not yet have all the correct keywords available yet to identify
         # old vs new.
-        # return shocTimingBase(self)
-        # 'shocOld' in self.__class__.__name__:
-        if isinstance(self, shocOldHDU):
-            return shocTimingOld(self)
-        return shocTimingNew(self)
+        return shocTiming(self)
 
     # alias
     t = timing

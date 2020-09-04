@@ -54,7 +54,7 @@ def time_from_local_midnight(t, unit='s'):
     return (t.utc - Time(date0)).to(unit)
 
 
-class _UnknownTime(object):
+class _UnknownTime:
     # singleton
     def __str__(self):
         return '??'
@@ -86,7 +86,7 @@ class UnknownPointing(Exception):
     pass
 
 
-class HMSrepr(object):
+class HMSrepr:
     """
     Mixin class that provided numerical objects with `hms` property for pretty
     representation
@@ -101,7 +101,7 @@ class Duration(float, HMSrepr):
     pass
 
 
-class Trigger(object):
+class Trigger:
     def __init__(self, header):
         self.mode = header['trigger']
         self.start = header.get('gpsstart', None) or UnknownTime
@@ -240,7 +240,7 @@ class Time(time.Time):
 
 
 # ******************************************************************************
-class shocTimingBase(object):
+class shocTiming:
     """
     Time stamps and corrections for SHOC data.
 
@@ -310,13 +310,15 @@ class shocTimingBase(object):
 
     # TODO: option to do flux weighted time stamps!!
 
-    # def __new__(cls, hdu):
-    #     if 'shocOld' in hdu.__class__.__name__:
-    #         return super(shocTimingBase, cls).__new__(shocTimingOld)
-    #     else:
-    #         return super(shocTimingBase, cls).__new__(shocTimingNew)
+    def __new__(cls, hdu):
+        # if isinstance(hdu, shocOldHDU)
+        kls = shocTimingNew
+        if 'shocOld' in hdu.__class__.__name__:
+            kls = shocTimingOld
+            
+        return super().__new__(kls)
 
-    def __init__(self, hdu, location=None):
+    def __init__(self, hdu):
         """
         Create the timing interface for a shocHDU
 
@@ -332,7 +334,7 @@ class shocTimingBase(object):
         self._hdu = hdu
         self.header = header = hdu.header
         self.data = None  # calculated in `set` method
-        self.location = location or hdu.location
+        self.location = hdu.location
 
         # Timing trigger mode
         self.trigger = Trigger(header)
@@ -352,7 +354,7 @@ class shocTimingBase(object):
     def __getitem__(self, key):
         return self.t[key]
 
-    @ lazyproperty
+    @lazyproperty
     def expose(self):
         """
         Exposure time (integration time) for a single image
@@ -363,7 +365,7 @@ class shocTimingBase(object):
 
         return self.header['EXPOSURE']
 
-    @ lazyproperty
+    @lazyproperty
     def kct(self):
         """
         Kinetic cycle time = Exposure time + Dead time
@@ -404,7 +406,7 @@ class shocTimingBase(object):
         if self.trigger.is_gps_loop():
             return int(self.header['GPS-INT']) / 1000
 
-    @ lazyproperty
+    @lazyproperty
     def t(self):
         """
         Create time stamps for all images in the stack. This returns the
@@ -426,26 +428,26 @@ class shocTimingBase(object):
     # are not available upon initialization (they are missing in the header).
     # If missing they will be calculated upon accessing the attribute.
 
-    @ property
+    @property
     def duration(self):
         """Duration of the observation"""
         if self.kct:
             return Duration(self._hdu.nframes * self.kct)
 
-    @ lazyproperty
+    @lazyproperty
     def delta(self):
         """Kinetic Cycle Time (δt) as a astropy.time.TimeDelta object"""
         self.t0, delta = self.get_t0_kct()
         return delta
 
-    @ lazyproperty
+    @lazyproperty
     def t0(self):
         """time stamp for the 0th frame start"""
         # noinspection PyAttributeOutsideInit
         t0, self.delta = self.get_t0_kct()
         return t0
 
-    @ property
+    @property
     def _t0_repr(self):
         """
         Representative str for `t0` the start time of an observation. For old
@@ -500,21 +502,21 @@ class shocTimingBase(object):
         delta = TimeDelta(self.kct, format='sec')
         return t0, delta
 
-    @ lazyproperty
+    @lazyproperty
     def lmst(self):
         """LMST for at frame mid exposure times"""
         return self.t.lmst(self.location.lon)
 
-    @ lazyproperty
+    @lazyproperty
     def ha(self):
         return self.lmst - self._hdu.coords.ra
 
-    @ lazyproperty
+    @lazyproperty
     def zd(self):
         # zenith distance
         return self.t.zd(self._hdu.coords, self.location)
 
-    @ lazyproperty
+    @lazyproperty
     def hour(self):
         """UTC in units of hours since midnight"""
         return (self.t - self.ut_date).to('hour').value
@@ -526,7 +528,7 @@ class shocTimingBase(object):
         if self.location is None:
             raise UnknownLocation
 
-    @ lazyproperty
+    @lazyproperty
     def bjd(self):
         """
         Barycentric julian date [BJD(TDB)] at frame mid exposure times
@@ -534,7 +536,7 @@ class shocTimingBase(object):
         """
         return self.t.bjd(self._hdu.coords).jd
 
-    @ lazyproperty
+    @lazyproperty
     def hjd(self):
         """
         Heliocentric julian date [HJD(TCG)] at frame mid exposure times
@@ -644,16 +646,16 @@ class shocTimingBase(object):
                            before='HEAD')
 
 
-class shocTimingNew(shocTimingBase):
+class shocTimingNew(shocTiming):
     pass
 
 
-class shocTimingOld(shocTimingBase):
-    @ lazyproperty
+class shocTimingOld(shocTiming):
+    @lazyproperty
     def kct(self):
         return self.header.get('KCT', self.dead + self.exp)
 
-    @ lazyproperty
+    @lazyproperty
     def expose(self):
         return self.header.get('EXPOSURE', UnknownTime)
 
@@ -727,7 +729,7 @@ class shocTimingOld(shocTimingBase):
 
     def stamp(self, j, t0=None, coords=None):
         #
-        shocTimingBase.stamp(self, j)
+        shocTiming.stamp(self, j)
 
         # set KCT / EXPOSURE in header
         header = self.header
