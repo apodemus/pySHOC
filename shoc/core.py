@@ -35,7 +35,7 @@ from recipes.containers import Grouped, OfType, PrettyPrinter
 # relative libs
 from graphing.imagine import plot_image_grid
 
-# from pyshoc.image.sample import ResampleFlip
+# from shoc.image.sample import ResampleFlip
 from .readnoise import readNoiseTables
 from .timing import shocTimingOld, shocTimingNew
 from .convert_keywords import KEYWORDS as kw_old_to_new
