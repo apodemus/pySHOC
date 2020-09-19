@@ -3,11 +3,12 @@ Functions for time-stamping SHOC data and writing time stamps to FITS headers
 """
 
 
+from recipes.oo import Null
 import logging
 # from pathlib import Path
 # from warnings import warn
 # from urllib.error import URLError
-
+import datetime
 import numpy as np
 from astropy import time
 from astropy.table import Table as aTable
@@ -20,7 +21,8 @@ from astropy.utils import lazyproperty
 
 from obstools.airmass import Young94, altitude
 import recipes.pprint as ppr
-
+from .header import HEADER_KEYS_MISSING_OLD
+import motley
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
 # TODO: Q: are gps times in UTC / UT1 ??
@@ -30,6 +32,8 @@ DEAD_TIME = 0.00676  # seconds           header['vshift'] * 1024 ????
 
 
 TIMEZONE = +2 * u.hour  # SAST is UTC + 2
+
+# ----------------------------- Helper Functions ----------------------------- #
 
 
 def iso_split(t, dtype=[('date', 'U10'), ('utc', 'U18')]):
@@ -54,27 +58,24 @@ def time_from_local_midnight(t, unit='s'):
     return (t.utc - Time(date0)).to(unit)
 
 
-class _UnknownTime:
-    # singleton
-    def __str__(self):
-        return '??'
+def timing_info_table(run):
+    """prints the various timing keys in the headers"""
+    from motley.table import Table
 
-    def __add__(self, other):
-        return UnknownTime
+    keys = ['TRIGGER', 'DATE', 'DATE-OBS', 'FRAME',
+            'GPSSTART', 'GPS-INT', 'KCT', 'EXPOSURE']
+    tbl = []
+    for obs in run:
+        tbl.append([type(obs).__name__] + [obs.header.get(key, '--')
+                                           for key in keys])
 
-    def __bool__(self):
-        return False
-
-# class UnknownStartTime(_UnknownTime):
-#     def __add__(self, other):
-#         return UnknownTime
+    return Table(tbl, chead=['TYPE'] + keys)
 
 
-# singleton
-UnknownTime = _UnknownTime()
+# -------------------------------- Exceptions -------------------------------- #
 
 
-class NoGPSTime(Exception):
+class UnknownTimeException(Exception):
     pass
 
 
@@ -85,6 +86,29 @@ class UnknownLocation(Exception):
 class UnknownPointing(Exception):
     pass
 
+# ------------------------------ Helper Classes ------------------------------ #
+
+
+class _UnknownTime(Null):
+    def __str__(self):
+        return motley.red('??')
+
+    def __add__(self, _):
+        return self
+
+    def __radd__(self, _):
+        return self
+
+    def __sub__(self, _):
+        return self
+
+    def __truediv__(self, _):
+        return self
+
+
+# singleton
+UnknownTime = _UnknownTime()
+
 
 class HMSrepr:
     """
@@ -92,9 +116,9 @@ class HMSrepr:
     representation
     """
 
-    @ property
+    @property
     def hms(self):
-        return ppr.hms(self)
+        return ppr.hms(self, unicode=True, precision=1)
 
 
 class Duration(float, HMSrepr):
@@ -104,15 +128,13 @@ class Duration(float, HMSrepr):
 class Trigger:
     def __init__(self, header):
         self.mode = header['trigger']
-        self.start = header.get('gpsstart', None) or UnknownTime
-        # self.start is either ISO format str, or `UnknownTime` (old SHOC data)
-        # FIXME: it's confusing keeping the start time here AND in timing.t0
 
     def __str__(self):
         return self.mode[:2] + '.'
 
     def __repr__(self):
-        return f'{self.__class__}:{self.mode}'
+        # {self.__class__.__name__}:
+        return f'{self.mode}: t0={self.start}'
 
     def set(self, t0=None, sast=True):
         """
@@ -183,19 +205,19 @@ class Trigger:
         """
         return self.is_gps() and not self.is_gps_start()
 
-    @ property
+    @property
     def symbol(self):
         # add symbolic rep for trigger
         if self.is_internal():
             return ''
-        if self.is_external():
+        if self.is_gps_loop():
             return '⟲'
-        if self.is_external_start():
+        if self.is_gps_start():
             return '↓'
 
 
 class TimeDelta(time.TimeDelta):
-    @ property
+    @property
     def hms(self):
         v = self.value
         precision = 1 if v > 10 else 3
@@ -210,13 +232,12 @@ class Time(time.Time):
 
     def lmst(self, longitude):
         """LMST for at frame mid exposure times"""
-        return self.t.sidereal_time('mean', longitude=longitude)
+        return self.sidereal_time('mean', longitude=longitude)
 
     def zd(self, coords, location):
         # zenith distance
-        altaz = AltAz(alt=90 * u.deg, az=0 * u.deg,
-                      obstime=self, location=location)
-        return altaz.separation(coords)
+        frames = AltAz(obstime=self, location=location)
+        return coords.transform_to(frames).altaz.zen
 
     def bjd(self, coords, location=None):
         """BJD(TDB)"""
@@ -233,13 +254,30 @@ class Time(time.Time):
     #     return np.floor(times.jd)
     # TODO: rjd,
 
-    @ property
+    @property
     def gjd(self):
         # geocentric julian date
         return self.tcg.jd
 
 
+class Date(time.Time):
+    """
+    We need this so the Time instances print in date format instead
+    of the class representation format, when print is called on, for eg. a tuple
+    containing a date_time object.
+    """
+
+    def __repr__(self):
+        return self.strftime('%Y%m%d')
+
+    def __format__(self, spec):
+        if self.shape == () and ('d' in spec):
+            return repr(self)
+        return super().__format__(spec)
+
 # ******************************************************************************
+
+
 class shocTiming:
     """
     Time stamps and corrections for SHOC data.
@@ -249,76 +287,84 @@ class shocTiming:
 
     Recent SHOC data (post software upgrade)
     ----------------------------------------
-      Mode: 'Internal':
+      TRIGGER: 'Internal':
         * DATE-OBS
             - The time the user pushed start button (UTC)
         * FRAME
             - Time at the **end** of the first exposure
         * KCT
             - Kinetic Cycle Time   (exposure time + dead time)
-            - **Not recorded** for single frame exposures: ACQMODE == 'Single Shot'
+            - **Not recorded** for single frame exposures:
+                ACQMODE == 'Single Shot'
+        * EXPOSURE
+            - exposure time (sec)
 
-      Mode: 'External Start':
+      TRIGGER: 'External Start':
         * DATE-OBS
             - **NB** This is not the time stamp for the first image frame if the
               observations are GPS triggered
         * FRAME
             - as above
-        * GPSSTART
-            - GPS start time (UTC)
         * KCT
             - **not recorded**
+        * EXPOSURE
+            - exposure time (sec)
+        * GPSSTART
+            - GPS start time (UTC)
 
-      Mode: 'External':
+
+      TRIGGER: 'External':
         * GPSSTART, KCT, DATE-OBS, FRAME
             - as above
-        * GPS-INT   - GPS trigger interval (milliseconds)
-
+        * GPS-INT
+            - GPS trigger interval (milliseconds)
+        * EXPOSURE
+            - exposure time (sec)
 
     Older SHOC data (pre 2015)
     --------------------------
-      Mode: 'Internal':
-        * KCT
-            - Kinetic Cycle Time   (exposure time + dead time)
+      TRIGGER: 'Internal':
         * DATE-OBS
             - **not recorded**
         * FRAME, DATE
            - Time at the **end** of the first exposure (file creation timestamp)
            - The time here is rounded to the nearest second of computer clock
              ==> uncertainty of +- 0.5 sec (for absolute timing)
-
-      Mode: 'External Start':
+        * KCT
+            - Kinetic Cycle Time   (exposure time + dead time)
         * EXPOSURE
             - exposure time (sec)
-        * KCT, DATE-OBS
-            - **not recorded**
-        * FRAME, DATE-OBS
-            - **not recorded**
 
-      Mode: 'External':
-        * KCT, DATE-OBS
+      TRIGGER: 'External Start':
+        * FRAME, DATE-OBS, KCT, GPSSTART, GPS-INT
+            - **not recorded**
+        * EXPOSURE
+            - exposure time (sec)
+
+      TRIGGER: 'External':
+        * KCT, DATE-OBS, GPSSTART, GPS-INT
             **not recorded**
         * EXPOSURE
             **wrong**  erroneously stores total accumulated exposure time
     """
 
     # TODO: get example set of all mode + old / new combo + print table
-    # TODO Then print with pyshoc.core.print_timing_table(run)
+    # TODO Then print with  `timing_info_table(run)`
 
     # TODO:  specify required timing accuracy --> decide which algorithms to
     #  use based on this!
 
     # TODO: option to do flux weighted time stamps!!
 
-    def __new__(cls, hdu):
-        # if isinstance(hdu, shocOldHDU)
-        kls = shocTimingNew
-        if 'shocOld' in hdu.__class__.__name__:
-            kls = shocTimingOld
-            
-        return super().__new__(kls)
+    # def __new__(cls, hdu):
 
-    def __init__(self, hdu):
+    #     kls = shocTimingNew
+    #     if hdu.__class__.__name__ == 'shocOldHDU':
+    #         kls = shocTimingOld
+
+    #     return super().__new__(kls)
+
+    def __init__(self, hdu, **kws):
         """
         Create the timing interface for a shocHDU
 
@@ -343,53 +389,94 @@ class shocTiming:
 
         # Date
         # use FRAME here since always available in header
-        date_str = header['FRAME'].split('T')[0]
-        self.ut_date = Time(date_str)
-        # FIXME: need this ?  self._hdu.date..
+        date, time = header['FRAME'].split('T')
+        self.date = Date(date)
         # this should at least be the correct date!
 
-    def __array__(self):
-        return self.t
+        self.options = {**dict(format='isot',
+                               scale='utc',
+                               location=self.location,
+                               precision=1),
+                        **kws}
+        # NOTE `precision` here this is the decimal significant figures for
+        # formatting and does not represent absolute precision
+
+        # date from header
+
+        # if 'DATE' in header:
+        #     date, time = header['FRAME'].split('T')
+        #     self.date = Date.fromisoformat(date)
+
+        #     # oldSHOC: file creation date
+        #     # starting date of the observing run: used for naming
+        #     h = int(time.split(':')[0])
+        #     nameDate = self.date - datetime.timedelta(int(h < 12))
+        #     self.nameDate = str(nameDate).replace('-', '')
+
+    # def __array__(self):
+    #     return self.t
 
     def __getitem__(self, key):
         return self.t[key]
 
     @lazyproperty
+    def _t0(self):
+        """time stamp for the 0th frame start in UTC """
+
+        # new / fixed data!  Rejoice!
+        if self.trigger.is_gps():
+            # GPS triggered
+            return self.header['GPSSTART']
+
+        # internally triggered
+        return self.header['DATE-OBS']
+        # NOTE: For new shoc data, DATE-OBS key is always present, and
+        # a more accurate time stamp than FRAME, so we always prefer to use
+        # that
+
+    @lazyproperty
+    def t0(self):
+        """
+        Time stamp for the 0th frame start in UTC as a `astropy.time.TimeDelta`
+        """
+        return Time(self._t0, **self.options)
+
+    @lazyproperty
     def expose(self):
         """
         Exposure time (integration time) for a single image
-
         """
         if self.trigger.is_gps_loop():
-            return self.gps_cycle_time() - self.dead
+            # GPS triggered
+            return self.header.get('GPS-INT', UnknownTime) / 1000 - self.dead
 
-        return self.header['EXPOSURE']
+        # For TRIGGER 'Internal' or 'External Start' EXPOSURE stores the actual
+        # correct exposure time
+        return self.header.get('EXPOSURE', UnknownTime)
 
     @lazyproperty
-    def kct(self):
+    def interval(self):
         """
-        Kinetic cycle time = Exposure time + Dead time
+        Frame to frame interval in seconds = Exposure time + Dead time
         """
-        if self.trigger.is_internal():
-            if self.header['ACQMODE'] == 'Single Scan':
-                return self.header['EXPOSURE'] + self.dead
-            return self.header['KCT']
+        return self.expose + self.dead
 
-        if self.trigger.is_gps_loop():
-            return self.gps_cycle_time()
-
-        if self.trigger.is_gps_start():
-            return self.header['EXPOSURE'] + self.dead
-
-        # this should never happen!
-        raise ValueError('Unknown frame cycle time')
+    @lazyproperty
+    def delta(self):
+        """
+        Frame to frame interval (δt) in seconds as a `astropy.time.TimeDelta`
+        object
+        """
+        # TimeDelta has higher precision than Quantity
+        return TimeDelta(self.interval, format='sec')
 
     exp = expose
     """exposure time"""
-    cycle = kct
+
     """kinetic cycle time"""
     dead = DEAD_TIME
     """dead time (readout) between exposures in s"""
+
     # NOTE:
     # deadtime should always the same value unless the user has (foolishly)
     # changed the vertical clock speed.
@@ -397,14 +484,16 @@ class shocTiming:
     # EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME
     # TRANSFER MODE!
 
-    def gps_cycle_time(self):
-        """
-        For trigger mode 'External': Get repreat time (in seconds) for gps
-        triggers from fits header
-        For trigger mode 'Internal' or 'External Start' this will return None
-        """
-        if self.trigger.is_gps_loop():
-            return int(self.header['GPS-INT']) / 1000
+    def check_info(self):
+        # cofilter(.,  negate(bool))
+        mia = [name for name, i in {'EXPOSURE': self.expose,
+                                    'DATE-OBS': self._t0}.items()
+               if not i]
+        if mia:
+            raise UnknownTimeException(
+                f'No timestamps available for {self._hdu.filepath.name}.'
+                f'Please set {",".join(mia)} header keywords'
+            )
 
     @lazyproperty
     def t(self):
@@ -418,6 +507,9 @@ class shocTiming:
             Time object that derives from `astropy.time.Time` and holds all
             timestamps for the image stack
         """
+        # 
+        self.check_info()
+
         deltas = self.delta * np.arange(self._hdu.nframes, dtype=float)
         t0mid = self.t0 + 0.5 * self.delta
         return t0mid + deltas
@@ -426,81 +518,14 @@ class shocTiming:
     # the following attributes are accessed as properties to account for the
     # case of (old) GPS triggered data in which the frame start time and kct
     # are not available upon initialization (they are missing in the header).
-    # If missing they will be calculated upon accessing the attribute.
+    # If missing, UnknownTime object will be returned
 
     @property
     def duration(self):
         """Duration of the observation"""
-        if self.kct:
-            return Duration(self._hdu.nframes * self.kct)
-
-    @lazyproperty
-    def delta(self):
-        """Kinetic Cycle Time (δt) as a astropy.time.TimeDelta object"""
-        self.t0, delta = self.get_t0_kct()
-        return delta
-
-    @lazyproperty
-    def t0(self):
-        """time stamp for the 0th frame start"""
-        # noinspection PyAttributeOutsideInit
-        t0, self.delta = self.get_t0_kct()
-        return t0
-
-    @property
-    def _t0_repr(self):
-        """
-        Representative str for `t0` the start time of an observation. For old
-        SHOC data with External GPS triggering, this needs to be set by the
-        user since it is not recorded in the headers. However, we want to be
-        able to print info about printing run info before timestamp has been
-        set.
-
-        Examples
-        --------
-        Internal Trigger
-            '2015-02-24 18:15:36.5'
-        External Trigger
-            '2015-02-24 18:15:36.5*'
-        External Trigger (Old SHOC)
-            '??'
-        """
-        # FIXME: can you eliminate this function by making
-        #   t0 = UnknownTime()
-        if self.trigger.start is None:
-            import motley
-            return motley.red('??')
-        else:
-            return self.t0.iso
-
-    def get_t0_kct(self):  # TODO: rename
-        """
-        Return the start time of the first frame in UTC and the cycle time
-        (exposure + dead time) as TimeDelta object
-        """
-        # new / fixed data!  Rejoice!
-        header = self.header
-        if self.trigger.is_gps():
-            # GPS triggered
-            t_start = self.trigger.start
-        else:
-            # internal triggered
-            t_start = header['DATE-OBS']
-            # NOTE: For new shoc data, DATE-OBS key is always present, and
-            # a more accurate time stamp than FRAME, so we always prefer to use
-            # that
-
-        # DATE-OBS
-        # This keyword is confusing (UTC-OBS would be better), but since
-        #  it is now in common  use, we (reluctantly) do the same.
-
-        # time for start of first frame
-        t0 = Time(t_start, format='isot', scale='utc',
-                  # NOTE output format precision not numerical precision
-                  precision=1, location=self.location)
-        # TimeDelta has higher numberical precision than Quantity
-        delta = TimeDelta(self.kct, format='sec')
-        return t0, delta
+        if self.interval:
+            return Duration(self._hdu.nframes * self.interval)
+        return UnknownTime
 
     @lazyproperty
     def lmst(self):
@@ -519,7 +544,7 @@ class shocTiming:
     @lazyproperty
     def hour(self):
         """UTC in units of hours since midnight"""
-        return (self.t - self.ut_date).to('hour').value
+        return (self.t - self.date).to('hour').value
 
     def _check_coords_loc(self):
         if self._hdu.coords is None:
@@ -626,6 +651,10 @@ class shocTiming:
         header = self.header
         t = self.t[j]
 
+        # DATE-OBS
+        # This keyword is confusing (UTC-OBS would be better), but since
+        #  it is now in common  use, we (reluctantly) do the same.
+
         # update timestamp in header
         header['UTC-OBS'] = (t.utc.isot, 'Start of frame exposure in UTC')
         header['LMST'] = (self.lmst[j], 'Local Mean Sidereal Time')
@@ -646,86 +675,39 @@ class shocTiming:
                            before='HEAD')
 
 
-class shocTimingNew(shocTiming):
-    pass
-
-
 class shocTimingOld(shocTiming):
-    @lazyproperty
-    def kct(self):
-        return self.header.get('KCT', self.dead + self.exp)
 
     @lazyproperty
-    def expose(self):
-        return self.header.get('EXPOSURE', UnknownTime)
-
-        # if self.trigger.is_internal():
-        #     # kinetic cycle time between start of subsequent exposures in sec.
-        #     # i.e. exposure time + readout time
-        #     kct = header['KCT']
-        #     self.expose = header['EXPOSURE']
-        #     # In internal triggering mode EXPOSURE stores the actual correct
-        #     # exposure time. KCT stores the Kinetic cycle time
-        #     # (dead time + exposure time)
-        #
-        #
-        # # GPS Triggering (External or External Start)
-        # elif self.trigger.is_gps():
-        #     if self.trigger.is_external_start():  # External Start
-        #         # exposure time in sec as in header
-        #         self.expose = header['EXPOSURE']
-        #         kct = self.dead + self.expose  # Kinetic Cycle Time
-        #     else:
-        #         # trigger mode external - exposure and kct needs to be provided
-        #         # at terminal
-        #         t_exp, t_kct = None, None
-        #
-        # return t_exp, t_kct
-
-    def get_t0_kct(self):
+    def _t0(self):
         """
-        Extract ralavent time data from the FITS header.
-
-        Returns
-        ------
-        First frame mid time
-
+        First frame start
         """
 
-        # TimeDelta has higher precision than Quantity
-        delta = TimeDelta(self.kct, format='sec')
+        # `_t0` can be used as a representative str for the start time of an
+        # observation. For old SHOC data with External GPS triggering, this will
+        # be an `UnknowTime` object which (formats as '??') since this info is
+        # not recorded in the headers. This allows pprinting info about the
+        # run before timestamps have been set.
 
-        # NOTE `precision` here this is the decimal significant figures for
-        # formatting and does not represent absolute precision
-        options = dict(format='isot', scale='utc',
-                       location=self.location,
-                       precision=1)
+        # time for start of first frame
+        if self.trigger.is_gps():
+            # GPS triggered
+            return self.header.get('GPSSTART', UnknownTime)
 
-        if self.trigger.is_internal():
-            # Initial time set to middle of first frame exposure
-            # this hardly matters for sub-second t_exp, as the time
-            # recorded in header FRAME is rounded to the nearest second
-            # time for end of first frame
+        # internally triggered
+        # NOTE:
+        # FRAME, DATE is time at the **end** of the first exposure (file
+        # creation timestamp).
+        # Need to adjust to start of first frame.
+        # This relevant for exposure times greater than 0.5s only since the time
+        # recorded in header FRAME is rounded to the nearest second of
+        # file creation (approx end of first frame), timestamp uncertainty is
+        # 0.5s
+        return Time(self.header['DATE'], **self.options) - self.delta
 
-            # start time of first frame
-            t0 = Time(self.header['DATE'], **options) - delta
-            #               or FRAME (equivalent for OLD SHOC data)
-
-        else:  # self.trigger.is_gps():
-            if self.trigger.start:
-                t0 = self.ut_date + self.trigger.start
-                t0 = Time(t0.isot, **options)
-            else:
-                raise NoGPSTime(
-                    'No GPS triggers available for %r. Please set '
-                    'self.trigger.start' % self._hdu.filepath.name)
-
-        # stack_hdu.flush(output_verify='warn', verbose=1)
-        logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',
-                      self._hdu.filepath.name, self.trigger.mode.upper(),
-                      t0, self.kct)
-
-        return t0, delta
+        # logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',
+        #               self.hdu.file.name, self.trigger.mode.upper(),
+        #               t0, self.kct)
 
     def stamp(self, j, t0=None, coords=None):
         #
@@ -733,7 +715,7 @@ class shocTimingOld(shocTiming):
 
         # set KCT / EXPOSURE in header
         header = self.header
-        header['KCT'] = (self.kct, 'Kinetic Cycle Time')
+        header['KCT'] = (self.interval, 'Kinetic Cycle Time')
         header['EXPOSURE'] = (self.exp, 'Integration time')
 
         if t0:
