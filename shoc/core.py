@@ -34,7 +34,7 @@ from recipes.containers.sets import OrderedSet
 from recipes.containers import Grouped, OfType, PrettyPrinter
 from recipes.introspect import get_caller_name
 # relative libs
-from graphing.imagine import plot_image_grid
+from scrawl.imagine import plot_image_grid
 
 # from shoc.image.sample import ResampleFlip
 from .timing import shocTiming, shocTimingOld

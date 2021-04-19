@@ -108,7 +108,7 @@ def headers_intersect(run, merge_histories=False):
     if not hrest:
         return h0
 
-    from recipes.containers.sets import OrderedSet
+    from recipes.sets import OrderedSet
     from astropy.io.fits.verify import VerifyWarning
     from astropy.io.fits.header import Header
     import warnings
