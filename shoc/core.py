@@ -847,6 +847,11 @@ class shocMasterFlat(shocFlatHDU):
 # -------------------------- Pretty printing helpers ------------------------- #
 
 
+def hms(t):
+    """sexagesimal formatter"""
+    return pprint.hms(t.to('s').value, unicode=True, precision=1)
+
+
 def get_table(r, attrs=None, **kws):
     return r.table.get_table(r, attrs, **kws)
 
@@ -856,143 +861,45 @@ class TableHelper(AttrTable):
     def get_table(self, run, attrs=None, **kws):
         # Add '*' flag to times that are gps triggered
         flags = {}
-        attrs = attrs or self.attrs
-        # index_of = attrs.index
         postscript = []
-        for key, fun in [('timing.t0', 'timing.trigger.is_gps'),
-                         ('timing.exp', 'timing.trigger.is_gps_loop')]:
-            if key in attrs:
-                # type needed below so empty arrays work with `np.choose`
-                _flags = np.array(run.calls(fun), bool)
-                if _flags.any():
-                    head = self.aliases[key]
-                    flags[head] = np.choose(_flags, [' ' * any(_flags), '*'])
-                    postscript.append(f'* {head}: {fun}')
+        for key, attr in [('timing.t0', 'timing.trigger.flag', ),
+                          ('timing.exp', 'timing.trigger.loop_flag')]:
+            head = self.aliases[key]
+            flg = flags[head] = run.attrs(attr)
+            for flag in set(flg):
+                if flag:
+                    info = Trigger.FLAG_INFO[self.get_header(attr)]
+                    postscript.append(f'{key}{flag}: {info[flag]}')
 
-        # compacted `filter` displays 'A = ∅' which is not very clear. Go more
-        # verbose again for clarity
+        # get table
+        postscript = '\n'.join(postscript)
         table = super().get_table(run, attrs, flags=flags,
                                   footnotes=postscript, **kws)
 
-        replace = {'A': 'filter.A',
-                   'B': 'filter.B'}
+        # compacted `filter` displays 'A = ∅' which is not very clear. Go more
+        # verbose again for clarity
+        # HACK:
         if table.compact_items:
+            replace = {'A': 'filter.A',
+                       'B': 'filter.B'}
             table.compact_items = {replace.get(name, name): item
                                    for name, item in table.compact_items.items()
                                    }
+            table._compact_table = table._get_compact_table()
         return table
 
-
-class TerseFilenamePPrint(PrettyPrinter):
-    """
-    Make compact representation of files that follow a numerical sequence.  
-    Eg:  'SHA_20200822.00{25..26}.fits' representing
-         ['SHA_20200822.0025.fits', 'SHA_20200822.0026.fits']
-    """
-
-    def __call__(self, run):
-
-        if len(run) <= 1:
-            return super().__call__(run)
-
-        files = run.files.stems
-        names = defaultdict(list)
-        tails = defaultdict(list)
-        for name in files:
-            if not name:
-                # catch Null names - not yet saved!
-                return super().__call__(run)
-
-            base, nr, *tail = name.split('.')
-            names[base].append(nr)
-            tails[base].append(tail)
-
-        for base in list(names.keys()):
-            nrs = names[base]
-            if len(nrs) > 1:
-                u = set(nrs)
-                if len(u) == 1:
-                    new_key = '.'.join((base, u.pop()))
-                    stems, *tail = itt.zip_longest(
-                        *tails.pop(base), fillvalue='')
-
-                    names[new_key] = list(stems)
-                    names.pop(base)
-                    tails[new_key] = tail
-
-        condensed = [
-            ''.join((base, ['.', '']['' in stems], embrace(stems), '.fits'))
-            for base, stems in names.items()]
-
-        pre = self.pre(run)
-        return f'{pre}{self.wrapped(condensed, len(pre))}'
-
-    # @staticmethod
-    # def condense_sequences(names):
-
-    #     return condensed
-
-
-def common_start(items):
-    common = ''
-    for letters in zip(*items):
-        if len(set(letters)) > 1:
-            break
-        common += letters[0]
-    return common
-
-
-def embrace(items):
-    if len(items) == 1:
-        return items[0]
-
-    fenced = []
-    items = np.array(items)
-    try:
-        nrs = items.astype(int)
-    except ValueError as err:
-        fenced = items
-    else:
-        splidx = np.where(np.diff(nrs) != 1)[0] + 1
-        indices = np.split(np.arange(len(nrs)), splidx)
-        nrs = np.split(nrs, splidx)
-        for i, seq in enumerate(nrs):
-            if len(seq) == 1:
-                fenced.extend(items[indices[i]])
-            else:
-                fenced.append(brace_range(items[0], seq))
-
-    return brace_list(fenced)
-
-
-def brace_range(stem, seq):
-    zfill = len(str(seq[-1]))
-    pre = stem[:-zfill]
-    s = '..'.join(np.char.zfill(seq[[0, -1]].astype(str), zfill))
-    return f'{pre}{{{s}}}'
-
-
-def brace_list(items):
-    if len(items) == 1:
-        return items[0]
-
-    pre = common_start(items)
-    i0 = len(pre)
-    s = ','.join(sorted(item[i0:] for item in items))
-    return f'{pre}{{{s}}}'
 
 # ------------------------------------- ~ ------------------------------------ #
 
 
 class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
     #
-    pretty = TerseFilenamePPrint(brackets='', per_line=1)
+    pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
-    # pprinter controls which attributes will be printed
-    # TODO: table
+    # controls which attributes will be printed
     table = TableHelper(
         ['file.stem',
-         'telescope', 'instrument',
+         'telescope', 'camera',
          'target', 'obstype',
          'filters.A', 'filters.B',
          'nframes', 'ishape', 'binning',
@@ -1001,40 +908,39 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
          #  'readout.mode.frq',
          #  'readout.mode.outAmp',
 
-         'timing._t0',
+         'timing.t0',
          'timing.exp',
-         'timing.duration.hms',
+         'timing.duration',
          ],
         aliases={
             'file.stem': 'filename',
             'telescope': 'tel',
-            'instrument': 'camera',
+            # 'camera': 'camera',
             'nframes': 'n',
             'binning': 'bin',
             # 'readout.mode.frq': 'mode',
             'readout.preAmpGain': 'preAmp',  # 'γₚᵣₑ',
             'timing.exp': 'tExp',
-            'timing._t0': 't0',
-            'timing.duration.hms': 'duration'
+            # 'timing.t0': 't0',
+            # 'timing.duration': 'duration'
         },
-        # formatters={
-        #     'timing.duration': ftl.partial(pprint.hms,
-        #                                    unicode=True,
-        #                                    precision=1)
-        # },
+        formatters={
+            'duration': hms,
+            't0': lambda t: t.iso
+        },
         units={
             # 'readout.preAmpGain': 'e⁻/ADU',
             # 'readout.mode.frq': 'MHz',
             # 'readout.mode': ''
-            'timing.exp': 's',
-            'timing._t0': 'UTC',
+            'tExp': 's',
+            't0': 'UTC',
             'ishape': 'y, x',
         },
 
         compact=True,
         title_props=dict(txt=('underline', 'bold'), bg='g'),
         too_wide=False,
-        totals=['nframes', 'timing.duration.hms'])
+        totals=['n', 'duration'])
 
     def new_groups(self, *keys, **kws):
         return shocObsGroups(self.__class__, *keys, **kws)
@@ -1648,7 +1554,8 @@ class shocObsGroups(Grouped):
         # tables.update(empty)
         return tables
 
-    def pformat(self, titled=make_title, headers=False, braces=False, **kws):
+    def pformat(self, titled=make_title, headers=False, braces=False, vspace=0,
+                **kws):
         """
         Run pprint on each group
         """
@@ -1667,19 +1574,20 @@ class shocObsGroups(Grouped):
                 tbl = tables[gid]
                 braces += ('\n' * bool(i) +
                            hbrace(tbl.data.shape[0], gid) +
-                           '\n' * tbl.has_totals)
+                           '\n' * (tbl.has_totals + vspace))
 
-            # # vertical offset
-
+            # vertical offset
             offset = stack[0].n_head_lines
-            final = hstack([vstack(stack), braces], spacing=1, offset=offset)
+            final = hstack([vstack(stack, True, vspace), braces],
+                           spacing=1, offset=offset)
         else:
-            final = vstack(stack)
+            final = vstack(stack, not bool(titled), vspace)
 
         return final
 
-    def pprint(self, titled=make_title, headers=False, braces=False, **kws):
-        print(self.pformat(titled, headers, braces, **kws))
+    def pprint(self, titled=make_title, headers=False, braces=False, vspace=0,
+               **kws):
+        print(self.pformat(titled, headers, braces, vspace, **kws))
 
     def map(self, func, *args, **kws):
         # runs an arbitrary function on each shocCampaign
