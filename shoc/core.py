@@ -84,7 +84,7 @@ LOCATIONS = {
 
 # ----------------------------- module constants ----------------------------- #
 CALIBRATION_NAMES = ('bias', 'flat', 'dark')
-EMPTY_FILTER = '∅'
+OBSTYPE_EQUIVALENT = {'bias': 'dark'}
 
 # Attributes for matching calibration frames
 ATT_EQUAL_DARK = ('instrument', 'binning',  # subrect
@@ -343,34 +343,40 @@ class shocHDU(HDUExtra, Messeger):
     def match_header(cls, header):
         return ('SERNO' in header)
 
-    def __new__(cls, data, header, *args, **kws):
+    def __new__(cls, data, header, obstype=None, *args, **kws):
         # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
         # hierarch keywords, so for SHOC we cannot tell if it's the old format
         # header by checking those.
 
-        obstype = header.get('OBSTYPE', '').lower()
-        kind, style, suffix = '', '', 'HDU'
-        # check if all the new keywords are present
-        if any((kw not in header for kw in HEADER_KEYS_MISSING_OLD)):
-            style = 'Old'
+        obstype = (obstype or '').lower()
+        if not obstype:
+            obstype = header.get('OBSTYPE', '')
 
+        # check if all the new keywords are present
+        age, kind, suffix = '', '', 'HDU'
+        if any((kw not in header for kw in HEADER_KEYS_MISSING_OLD)):
+            age = 'Old'
+
+        # calibration stacks
+        obstype = OBSTYPE_EQUIVALENT.get(obstype, obstype)
         if obstype in CALIBRATION_NAMES:
             kind = obstype.title()
             if (header['NAXIS'] == 2 and header['MASTER']):
-                style = 'Master'
-                suffix = ''
+                suffix = 'Master'
+        elif obstype not in ('', 'object'):
+            cls.logger.warning('Unknown OBSTYPE: %r', obstype)
 
         #
-        class_name = f'shoc{style}{kind}{suffix}'.replace('Dark', 'Bias')
-        cls = cls.__shoc_hdu_types.get(class_name, cls)
+        class_name = f'shoc{age}{kind}{suffix}'
+        # cls = cls.__shoc_hdu_types.get(class_name, cls)
         # print(f'{class_name=:}; {cls=:}')
-        return super().__new__(cls)
+        return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
 
     def __init_subclass__(cls):
         cls.__shoc_hdu_types[cls.__name__] = cls
 
-    def __init__(self, data=None, header=None, *args, **kws):
+    def __init__(self, data=None, header=None, obstype=None, *args, **kws):
         # init PrimaryHDU
         super().__init__(data=data, header=header, *args, **kws)
 
