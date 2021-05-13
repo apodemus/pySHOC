@@ -30,10 +30,9 @@ from obstools.stats import median_scaled_median
 from obstools.image.calibration import keep
 from obstools.utils import get_coords_named, convert_skycoords
 from recipes import pprint
-from recipes.containers.sets import OrderedSet
-from recipes.containers import Grouped, OfType, PrettyPrinter
+from recipes.containers import Grouped, OfType
 from recipes.introspect import get_caller_name
-# relative libs
+from recipes import bash
 from scrawl.imagine import plot_image_grid
 
 # from shoc.image.sample import ResampleFlip
@@ -41,7 +40,11 @@ from .timing import shocTiming, shocTimingOld
 from .readnoise import readNoiseTables
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
 from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
-from recipes.decor import expose
+# from recipes.decor import expose
+from .pprint import BraceContract
+
+from motley.table import Table
+
 # only emit this warning once!!
 warnings.filterwarnings('once', 'Using telescope pointing coordinates')
 
@@ -85,19 +88,20 @@ LOCATIONS = {
 # ----------------------------- module constants ----------------------------- #
 CALIBRATION_NAMES = ('bias', 'flat', 'dark')
 OBSTYPE_EQUIVALENT = {'bias': 'dark'}
+EMPTY_FILTER_NAME = '∅'
 
 # Attributes for matching calibration frames
-ATT_EQUAL_DARK = ('instrument', 'binning',  # subrect
+ATT_EQUAL_DARK = ('camera', 'binning',  # subrect
                   'readout.preAmpGain', 'readout.outAmp.mode', 'readout.frq')  # <-- 'readout'
 ATT_CLOSE_DARK = ('readout.outAmp.emGain', 'timing.exp')
-MATCH_DARKS = ATT_EQUAL_DARK, ATT_CLOSE_DARK
 
-ATT_EQUAL_FLAT = ('telescope', 'instrument', 'binning', 'filters')
+ATT_EQUAL_FLAT = ('telescope', 'camera', 'binning', 'filters')
 ATT_CLOSE_FLAT = ('timing.date', )
 MATCH_FLATS = ATT_EQUAL_FLAT, ATT_CLOSE_FLAT
 
 
 # ------------------------------------- ~ ------------------------------------ #
+
 
 def str2tup(keys):
     if isinstance(keys, str):
@@ -292,10 +296,10 @@ class Filters:
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return EMPTY_FILTER
+            return EMPTY_FILTER_NAME
         if long:
             return long.split(' - ')[0]
-        return (long or EMPTY_FILTER)
+        return (long or EMPTY_FILTER_NAME)
 
     def __members(self):
         return self.A, self.B
@@ -304,10 +308,12 @@ class Filters:
         return f'{self.__class__.__name__}{self.__members()}'
 
     def __format__(self, spec):
-        return next((s for s in self if (s != EMPTY_FILTER)), '')
+        return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
+        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), '')
 
     def __str__(self):
-        return next((s for s in self if (s != EMPTY_FILTER)), EMPTY_FILTER)
+        return next(filter(EMPTY_FILTER_NAME.__ne__, self), EMPTY_FILTER_NAME)
+        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), EMPTY_FILTER_NAME)
 
     def __iter__(self):
         yield from self.__members()
@@ -381,7 +387,7 @@ class shocHDU(HDUExtra, Messeger):
         super().__init__(data=data, header=header, *args, **kws)
 
         serial = header['SERNO']
-        self.instrument = f'SHOC{SERIAL_NRS.index(serial) + 1}'
+        self.camera = f'SHOC{SERIAL_NRS.index(serial) + 1}'
         self.telescope = header.get('TELESCOP')
         self.location = LOCATIONS.get(self.telescope)
 
@@ -425,10 +431,12 @@ class shocHDU(HDUExtra, Messeger):
         # self.calibrated = ImageCalibration(self)
 
     def __str__(self):
-        attrs = ('t.t0.iso', 'binning', 'readout.mode', 'filters')
+        attrs = ('t.t0_flagged', 'binning', 'readout.mode', 'filters')
         info = ('', ) + op.attrgetter(*attrs)(self) + ('',)
         sep = ' | '
-        return f'{self.__class__.__name__}:' + sep.join(map(str, info))
+        return f'<{self.__class__.__name__}:{sep.join(map(str, info))}>'
+
+    # def __repr__(self):
 
     @property
     def nframes(self):
@@ -1427,6 +1435,7 @@ class shocObsGroups(Grouped):
 
     def get_tables(self, titled=make_title, headers=False, **kws):
         # TODO: move to motley.table
+        # FIXME: headers param not used
         """
         Get a dictionary of tables (`motley.table.Table` objects) for this
         grouping. This method assists pretty printing groups of observation
@@ -1440,7 +1449,7 @@ class shocObsGroups(Grouped):
         -------
 
         """
-        from motley.table import Table
+
         # TODO: consider merging this functionality into  motley.table
         #       Table.group_rows(), or hstack or some somesuch
 
@@ -1448,7 +1457,7 @@ class shocObsGroups(Grouped):
             titled = make_title
 
         title = kws.pop('title', self.__class__.__name__)
-        ncc = kws.pop('compact', False)
+        ncc = kws.pop('compact', False)  # number of columns in compact part
         kws['compact'] = False
 
         pp = shocCampaign.table
@@ -1470,33 +1479,20 @@ class shocObsGroups(Grouped):
             compactable = attrs - attrs_varies
             attrs -= compactable
 
-        #
+        # column headers
         headers = pp.get_headers(attrs)
 
         # handle column totals
         totals = kws.pop('totals', pp.kws['totals'])
-
         if totals:
             # don't print totals for columns used for grouping since they will
             # not be displayed
             totals = set(totals) - set(attrs_grouped_by) - compactable
             # convert totals to numeric since we remove column headers for
             # lower tables
-            try:
-                totals = list(map(headers.index, totals))
-            except Exception as err:
-                from IPython import embed
-                import textwrap
-                import traceback
-                embed(header=textwrap.dedent(
-                    f"""\
-                        Caught the following {type(err).__name__}:
-                        %s
-                        Exception will be re-raised upon exiting this embedded interpreter.
-                        """) % traceback.format_exc())
-                raise
+            totals = list(map(headers.index, pp.convert_aliases(list(totals))))
 
-        units = kws.pop('units', pp.kws['units'])
+        units = kws.pop('units', pp.units)
         if units:
             want_units = set(units.keys())
             nope = set(units.keys()) - set(headers)
@@ -1755,9 +1751,7 @@ class Filler:
 def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
                  group_header_style='bold', no_match_style='r', g1_style='c',
                  ):
-    from collections import defaultdict
-    from recipes.containers.sets import OrderedSet
-
+    
     # create tmp shocCampaign so we can use the builtin pprint machinery
     tmp = shocCampaign()
     size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
@@ -1848,7 +1842,6 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         import operator as op
         import itertools as itt
 
-        from motley.table import Table
         from motley import codes
         from motley.utils import hstack, overlay, ConditionalFormatter
 
