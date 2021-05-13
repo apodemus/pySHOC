@@ -99,7 +99,10 @@ ATT_CLOSE_DARK = ('readout.outAmp.emGain', 'timing.exp')
 
 ATT_EQUAL_FLAT = ('telescope', 'camera', 'binning', 'filters')
 ATT_CLOSE_FLAT = ('timing.date', )
-MATCH_FLATS = ATT_EQUAL_FLAT, ATT_CLOSE_FLAT
+
+MATCH = {}
+MATCH['flats'] = MATCH['flat'] = MATCH_FLATS = (ATT_EQUAL_FLAT, ATT_CLOSE_FLAT)
+MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 
 # ------------------------------------- ~ ------------------------------------ #
@@ -469,9 +472,9 @@ class shocHDU(HDUExtra, Messeger):
     def timing(self):
         # Initialise timing
         # this is delayed from init on the hdu above since this class may
-        # initially be created with a _`BasicHeader` only, in which case we
+        # initially be created with a `_BasicHeader` only, in which case we
         # will not yet have all the correct keywords available yet to identify
-        # old vs new.
+        # old vs new shoc data
         return shocTiming(self)
 
     # alias
@@ -538,6 +541,12 @@ class shocHDU(HDUExtra, Messeger):
         bool
             True if point to zenith, False otherwise
         """
+        if self.coords is None:
+            raise ValueError(
+                'No coordinates available for observation HDU. Please assign '
+                'the `target` attribute with the source name, or set the '
+                '`coord` directly.'
+            )
         return self.t[0].zd(self.coords, self.location).deg < tol
 
     # def pointing_park(obs, tol=1):
@@ -563,12 +572,12 @@ class shocHDU(HDUExtra, Messeger):
 
         Examples
         --------
-        cube = shocObs.load(filename)
-        cube.get_field_of_view(1)               # 1.0m telescope
-        cube.get_field_of_view(1.9)             # 1.9m telescope
-        cube.get_field_of_view(74)              # 1.9m
-        cube.get_field_of_view('74in')          # 1.9m
-        cube.get_field_of_view('40 in')         # 1.0m
+        >>> cube = shocObs.load(filename)
+        >>> cube.get_fov(1)               # 1.0m telescope
+        >>> cube.get_fov(1.9)             # 1.9m telescope
+        >>> cube.get_fov(74)              # 1.9m
+        >>> cube.get_fov('74in')          # 1.9m
+        >>> cube.get_fov('40 in')         # 1.0m
         """
 
         # PS. welcome to the new millennium, we use the metric system now
@@ -655,11 +664,11 @@ class shocHDU(HDUExtra, Messeger):
         m, v, s, k = np.divide(moments, self.readout.saturation)
 
         # s = 0 implies all constant pixel values.  These frames are sometimes
-        # created erroneously by SHOC
+        # created erroneously by the SHOC GUI
         if v == 0 or m >= 1.5:
             o = 'bad'
 
-        elif self.pointing_zenith():
+        if self.coords and self.pointing_zenith():
             # either bias or flat
             # Flat fields are usually about halfway to the saturation value
             if 0.15 <= m < 1.5:
@@ -685,9 +694,10 @@ class shocHDU(HDUExtra, Messeger):
         check for date-obs keyword to determine if header information needs
         updating
         """
-        return not ('date-obs' in self.header)
+        return ('date-obs' not in self.header)
         # TODO: is this good enough???
 
+    # ------------------------------------------------------------------------ #
     # image arithmetic
 
     def combine(self, func, *args, **kws):
@@ -767,7 +777,7 @@ class shocHDU(HDUExtra, Messeger):
         name_format = name_format or self.filename_format
 
         if self.file.path:
-            return self.file.name
+            return self.file.path
 
         if name_format:
             trans = str.maketrans({'-': '', ' ': '-', "'": ''})
@@ -791,6 +801,9 @@ class shocHDU(HDUExtra, Messeger):
             folder = Path(folder)
 
         if path.parent == Path():  # cwd
+            if folder is None:
+                raise ValueError('Please provide a folder location, or specify '
+                                 'a absolute path as `filename`.')
             path = folder / path
 
         if not path.parent.exists():
@@ -812,7 +825,8 @@ class shocOldHDU(shocHDU):
 
         # fix keywords
         for old, new in KWS_OLD_TO_NEW:
-            self.header.rename_keyword(old, new)
+            if old in header:
+                self.header.rename_keyword(old, new)
 
     @lazyproperty
     def timing(self):
@@ -829,10 +843,10 @@ class shocCalibrationHDU(shocHDU):
         return super().combine(func or self._combine_func, *args, **kws)
 
 
-class shocBiasHDU(shocCalibrationHDU):
+class shocDarkHDU(shocCalibrationHDU):
     # TODO: don't pprint filters since irrelevant
 
-    filename_format = ' {obstype} {instrument} {binning} {readout}'
+    filename_format = ' {obstype} {camera} {binning} {readout}'
     _combine_func = staticmethod(np.median)
 
     # "Median combining can completely remove cosmic ray hits and radioactive
@@ -851,17 +865,29 @@ class shocBiasHDU(shocCalibrationHDU):
 
 class shocFlatHDU(shocCalibrationHDU):
 
-    filename_format = '{obstype} {t.date:d} {telescope} {instrument} {binning} {filters}'
+    filename_format = '{obstype} {t.date:d} {telescope} {camera} {binning} {filters}'
     _combine_func = staticmethod(median_scaled_median)
     # default combine algorithm first median scales each image, then takes
     # median across images
 
 
-class shocMasterBias(shocBiasHDU):
+class shocOldDarkHDU(shocOldHDU, shocDarkHDU):
     pass
 
 
-class shocMasterFlat(shocFlatHDU):
+class shocOldFlatHDU(shocOldHDU, shocDarkHDU):
+    pass
+
+# class shocBiasHDU(shocDarkHDU):
+#     # alias
+#     pass
+
+
+class shocDarkMaster(shocDarkHDU):
+    pass
+
+
+class shocFlatMaster(shocFlatHDU):
     pass
 
 # -------------------------- Pretty printing helpers ------------------------- #
@@ -1000,6 +1026,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
             calibrate the image if bias / flat field available
         figsize:  tuple
                size of the figure in inches
+
         Returns
         -------
 
@@ -1119,7 +1146,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
         exact, closest = str2tup(exact), str2tup(closest)
         keys = OrderedSet(filter(None, mit.flatten([exact, closest])))
 
-        assert len(keys), ('Need at least one key (attribute name) by which '
+        assert len(keys), ('Need at least one `key` (attribute name) by which '
                            'to match')
         # assert len(other), 'Need at least one other observation to match'
         if threshold_warn is not None:
@@ -1258,9 +1285,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
             raise TypeError(f'Expected shocHDU, got {type(master_bias)}')
 
         if len(master_bias.shape) > 2:
-            raise TypeError('The input hdu contains multiple images instead '
-                            'of a single image. Do `combine` to compute the '
-                            'master bias.')
+            raise TypeError(
+                'The input hdu contains multiple images instead of a single '
+                'image. Do `combine` to compute the master bias.'
+            )
 
         return self.__class__([hdu.subtract(master_bias) for hdu in self])
 
@@ -1373,13 +1401,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
 
     def missing_flats(self):
         g = self.group_by('obstype')
-        return (set(g['object'].attrs(*MATCH_FLATS[0])) -
-                set(g['flat'].attrs(*MATCH_FLATS[0])))
+        attr = MATCH['flats'][0]
+        return (set(g['object'].attrs(*attr)) - set(g['flat'].attrs(*attr)))
 
     def missing_darks(self):
         g = self.group_by('obstype')
-        return (set(g['object'].join(g['flat']).attrs(*MATCH_DARKS[0])) -
-                set(g['flat'].attrs(*MATCH_DARKS[0])))
+        attr = MATCH['dark'][0]
+        return (set(g['object'].join(g['flat']).attrs(*attr)) -
+                set(g['flat'].attrs(*attr)))
 
     def missing_calibration(self, report=False):
         missing = {cal: sorted(getattr(self, f'missing_{cal}s')(), key=str)
@@ -1632,7 +1661,7 @@ class shocObsGroups(Grouped):
         print(self.pformat(titled, headers, braces, vspace, **kws))
 
     def map(self, func, *args, **kws):
-        # runs an arbitrary function on each shocCampaign
+        # runs an arbitrary function on each shocCampaign in the group
         out = self.__class__()
         out.group_id = self.group_id
 

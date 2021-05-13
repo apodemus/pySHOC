@@ -1,9 +1,10 @@
 import more_itertools as mit
 import functools as ftl
-from recipes.testing import Expect
+from recipes.testing import  expected, Expect, mock
 from astropy.io.fits.hdu.base import _BaseHDU
 from pathlib import Path
-from pySHOC import shocCampaign, shocHDU, shocNewHDU, shocBiasHDU, shocFlatHDU
+from shoc.core import (shocCampaign, shocHDU,  shocDarkHDU, shocFlatHDU,
+                       shocDarkMaster, shocOldDarkHDU)
 import pytest
 import numpy as np
 import os
@@ -43,9 +44,20 @@ def run():
     return shocCampaign.load(EX1)
 # run = shocCampaign.load(EX1)
 
+
 # ----------------------------------- Tests ---------------------------------- #
 
 
+test_hdu_type = Expect(_BaseHDU.readfrom)(
+    {
+        CAL/'SHA_20200822.0005.fits':                       shocDarkHDU,
+        CAL/'SHA_20200801.0001.fits':                       shocFlatHDU,
+        EX1/'SHA_20200731.0022.fits':                       shocHDU,
+        CAL/'bias-20200822-8x8-1MHz-2.4-CON.fits':          shocDarkMaster,
+        mock(CAL/'20121212.001.fits', obstype='dark'):      shocOldDarkHDU
+    },
+    left_transform=type
+)
 class TestCampaign:
     @pytest.mark.parametrize(
         'pointer',
@@ -106,29 +118,45 @@ class TestCampaign:
 
             # boolean array
             (np.random.randint(0, 2, 22).astype(bool),
-             ['SHA_20200731.0002.fits', 'SHA_20200731.0003.fits', 
+             ['SHA_20200731.0002.fits', 'SHA_20200731.0003.fits',
+              'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits',
              'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits', 
+              'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits',
+              'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits',
              'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits', 
+              'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits',
+              'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits',
              'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits', 
+              'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits',
+              'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits',
              'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits', 
-             'SHA_20200731.0018.fits', 'SHA_20200731.0019.fits']),
+              'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits',
+              'SHA_20200731.0018.fits', 'SHA_20200731.0019.fits']),
 
-            # by list of filenames
+            # list of filenames
             (('SHA_20200731.0007.fits', 'SHA_20200731.0008.fits'),
              ['SHA_20200731.0007.fits', 'SHA_20200731.0008.fits']),
 
-            # by globbing pattern
+            # list of filenames without extensions
+            (('SHA_20200731.0007', 'SHA_20200731.0008'),
+             ['SHA_20200731.0007.fits', 'SHA_20200731.0008.fits']),
+
+            # globbing pattern
             ('SHA*[78].fits',
              ['SHA_20200731.0007.fits', 'SHA_20200731.0008.fits',
               'SHA_20200731.0017.fits', 'SHA_20200731.0018.fits']),
 
-            # by brace expansion
+            # globbing pattern
+            ('SHA*0[7..8].fits',
+             ['SHA_20200731.0007.fits', 'SHA_20200731.0008.fits']),
+
+            # brace expansion
             ('SHA*{7,8}.fits',
              ['SHA_20200731.0007.fits', 'SHA_20200731.0008.fits',
               'SHA_20200731.0017.fits', 'SHA_20200731.0018.fits']),
 
-            # by filename sequence slice
-            ('*0731.00[10:22].*',
+            # brace expansion with range
+            ('*0731.00{10..21}.*',
              ['SHA_20200731.0010.fits', 'SHA_20200731.0011.fits',
               'SHA_20200731.0012.fits', 'SHA_20200731.0013.fits',
               'SHA_20200731.0014.fits', 'SHA_20200731.0015.fits',
@@ -140,16 +168,25 @@ class TestCampaign:
     def test_multi_index(self, run, index, expected):
         sub = run[index]
         assert isinstance(sub, shocCampaign)
-        assert sub.files.names == expected
+        assert set(sub.files.names) == set(expected)
 
+    @pytest.mark.parametrize(
+        'run',
+        [shocCampaign.load(x) for x in (EX1, EX2, EX3)]
+    )
     def test_pprint(self, run):
-        print(run, run.table(run), sep='\n\n')
+        print(run)
+        print(run.table(run))
+        print(run[:1])
+        # print()
+        # print()
+
 
 
 
 # @pytest.mark.parametrize(
 # 'filename,expected',
-#     [(CAL/'SHA_20200822.0005.fits', shocBiasHDU),
+#     [(CAL/'SHA_20200822.0005.fits', shocDarkHDU),
 #      (CAL/'SHA_20200801.0001.fits', shocFlatHDU),
 #      (EX1/'SHA_20200731.0022.fits', shocNewHDU)]
 #     )
@@ -157,22 +194,11 @@ class TestCampaign:
 #     obj = _BaseHDU.readfr
 
 # @expected(
-#     (CAL/'SHA_20200822.0005.fits', shocBiasHDU,
+#     (CAL/'SHA_20200822.0005.fits', shocDarkHDU,
 #      CAL/'SHA_20200801.0001.fits', shocFlatHDU,
 #      EX1/'SHA_20200731.0022.fits', shocNewHDU)
 # )
-def hdu_type(filename):
-    return _BaseHDU.readfrom(filename).__class__
-    # print('....', filename)
-    # print(obj)
-    # return obj
 
-
-Expect(hdu_type)(
-    {CAL/'SHA_20200822.0005.fits': shocBiasHDU,
-     CAL/'SHA_20200801.0001.fits': shocFlatHDU,
-     EX1/'SHA_20200731.0022.fits': shocNewHDU},
-    globals())
 
 # TODO: shocOldHDU, shocMasterBias, shocMasterFlat
 
