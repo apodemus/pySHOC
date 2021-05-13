@@ -30,13 +30,15 @@ from obstools.stats import median_scaled_median
 from obstools.image.calibration import keep
 from obstools.utils import get_coords_named, convert_skycoords
 from recipes import pprint
+from recipes.sets import OrderedSet
 from recipes.containers import Grouped, OfType
 from recipes.introspect import get_caller_name
 from recipes import bash
 from scrawl.imagine import plot_image_grid
 
+# relative libs
 # from shoc.image.sample import ResampleFlip
-from .timing import shocTiming, shocTimingOld
+from .timing import shocTiming, shocTimingOld, Trigger
 from .readnoise import readNoiseTables
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
 from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
@@ -1392,6 +1394,40 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
             print(s)
 
         return missing
+
+    def gps_start_(self):
+        gps_start_missing = np.array(self.attrs('t.trigger.flag'), bool)
+        return self[gps_start_missing]
+
+    def no_gps_interval(self):
+        return self[self.calls('t.has_gps_interval')]
+
+    # def set_t0_sast(self, times):
+    #     assert len(times) == len(self)
+    #     for obs, t0 in zip(self, times):
+    #         obs.t.t0 = obs.t.from_local(t0)
+
+    def provide_gps(self, filename):
+
+        # read file with gps triggers
+        names, sast = np.loadtxt(str(filename), str, unpack=True)
+
+        gps_provided = run[names]
+        need_gps = run.select_by(**{'t.trigger.flag': bool})
+        assert gps_provided == need_gps
+
+        # t0 = need_gps.attrs('t.t0')
+        # need_gps.set_t0_sast(sast)
+
+        # assert len(times) == len(self)
+        for obs, t0 in zip(need_gps, sast):
+            obs.t.t0 = obs.t.from_local(t0)
+            obs.trigger.flag = ''
+
+        # print('TIMEDELTA')
+        # print((Time(t0) - Time(need_gps.attrs('t.t0'))).to('s'))
+
+        # TODO: header keyword
 
     # def partition_by_source():
 
