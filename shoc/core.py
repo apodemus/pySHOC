@@ -748,12 +748,16 @@ class shocHDU(HDUExtra, Messeger):
 
     def auto_update_header(self, **kws):
         # FIXME: better to handle these as property and update header there ?
-        new_kws = dict(
-            object=self.target,
-            objra=self.coords.ra.to_string('hourangle', sep=':', precision=1),
-            objdec=self.coords.dec.to_string('deg', sep=':', precision=1),
-            obstype=self.obstype
-        )
+        new_kws = {'obstype': self.obstype}
+        if self.target:
+            new_kws['object'] = self.target
+
+        if 'coords' in self.__dict__ and self.coords:
+            ra, dec = self.coords.ra, self.coords.dec
+            new_kws.update(
+                objra=ra.to_string('hourangle', sep=':', precision=1),
+                objdec=dec.to_string('deg', sep=':', precision=1),
+            )
 
         self.header.update({**new_kws, **kws})
 
