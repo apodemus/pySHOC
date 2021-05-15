@@ -10,7 +10,7 @@ __pycache__
 /.idea
 /.pylintrc
 /.ipynb_checkpoints/
-
+*.code-workspace
 
 # old code
 dev
@@ -24,4 +24,11 @@ filenaming.py
 # needs integrating
 tests/test_pre.py
 tests/mp_test.py
+tests/data
+tests/_pprint.py
+tests/chariklo.py
+tests/ObsLog-Aug2020-2.py
 foo.py
+EMvsCON*
+tests/j1928.py
+tests/polars.py
