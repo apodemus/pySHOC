@@ -33,6 +33,7 @@ from recipes import pprint
 from recipes.sets import OrderedSet
 from recipes.containers import Grouped, OfType
 from recipes.introspect import get_caller_name
+from recipes.string import sub, remove_prefix
 from recipes import bash
 from scrawl.imagine import plot_image_grid
 
@@ -94,7 +95,7 @@ EMPTY_FILTER_NAME = '∅'
 
 # Attributes for matching calibration frames
 ATT_EQUAL_DARK = ('camera', 'binning',  # subrect
-                  'readout.preAmpGain', 'readout.outAmp.mode', 'readout.frq')  # <-- 'readout'
+                  'readout.frq', 'readout.preAmpGain', 'readout.outAmp.mode')  # <-- 'readout'
 ATT_CLOSE_DARK = ('readout.outAmp.emGain', 'timing.exp')
 
 ATT_EQUAL_FLAT = ('telescope', 'camera', 'binning', 'filters')
@@ -127,8 +128,8 @@ def hbrace(size, name=''):
                      ['⎭'])
 
 
-class Messeger:
-    def message(self, message):
+class Messenger:
+    def message(self, message, cls_name=True):
         """Make a message tagged with class and function name"""
         return (f'{self.__class__.__name__}.{get_caller_name(2)} {Time.now()}: '
                 f'{message}')
@@ -330,6 +331,11 @@ class Filters:
 
     def __hash__(self):
         return hash(self.__members())
+    
+    @property
+    def name(self):
+        """Name of the non-empty filter in either position A or B, else ∅"""
+        return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
 
 
 class shocFnHelp(FnHelp):
@@ -345,7 +351,7 @@ class shocFnHelp(FnHelp):
 # ------------------------------ HDU Subclasses ------------------------------ #
 
 
-class shocHDU(HDUExtra, Messeger):
+class shocHDU(HDUExtra, Messenger):
     _FnHelper = shocFnHelp
     __shoc_hdu_types = {}
     filename_format = None
@@ -725,7 +731,7 @@ class shocHDU(HDUExtra, Messeger):
         # log some info
         msg = f'{func.__name__} of {self.nframes} images from {self.file.name}'
         msg = self.message(msg)
-        self.logger.info(msg)
+        self.logger.info(remove_prefix(msg, self.__class__.__name__))
 
         # combine across images
         kws.setdefault('axis', 0)
@@ -774,15 +780,16 @@ class shocHDU(HDUExtra, Messeger):
         self.header.update({**new_kws, **kws})
 
     def get_save_name(self, name_format=None, ext='fits'):
+        # TODO: at filename helper?
         name_format = name_format or self.filename_format
 
         if self.file.path:
             return self.file.path
 
         if name_format:
-            trans = str.maketrans({'-': '', ' ': '-', "'": ''})
+            # get attribute values and replace unwnated characters for filename
             fmt = name_format.replace('{', '{0.')
-            name = fmt.format(self).translate(trans).strip('-')
+            name = sub(fmt.format(self), {' ': '-', "'": '', ': ': ''})
             return name + f'.{ext.lstrip(".")}'
 
     # @expose.args()
@@ -807,12 +814,15 @@ class shocHDU(HDUExtra, Messeger):
             path = folder / path
 
         if not path.parent.exists():
-            self.logger.info('creating directory: %r', str(path.parent))
+            self.logger.info('Creating directory: %r', str(path.parent))
             path.parent.mkdir()
 
-        self.logger.info('Saving to %r', str(path))
+        action = 'Saving to'
+        if path.exists():
+            action = 'Overwriting'
+            
+        self.logger.info('%s %r', action, str(path))
         self.writeto(path, overwrite=overwrite)
-        # self._file = File(path)
         return path
 
 
@@ -835,6 +845,8 @@ class shocOldHDU(shocHDU):
 
 class shocCalibrationHDU(shocHDU):
     _combine_func = None  # place-holder
+    
+    # TODO: set target=''
 
     def get_coords(self):
         return
@@ -846,7 +858,7 @@ class shocCalibrationHDU(shocHDU):
 class shocDarkHDU(shocCalibrationHDU):
     # TODO: don't pprint filters since irrelevant
 
-    filename_format = ' {obstype} {camera} {binning} {readout}'
+    filename_format = '{obstype}-{camera}-{binning}-{readout}'
     _combine_func = staticmethod(np.median)
 
     # "Median combining can completely remove cosmic ray hits and radioactive
@@ -865,7 +877,7 @@ class shocDarkHDU(shocCalibrationHDU):
 
 class shocFlatHDU(shocCalibrationHDU):
 
-    filename_format = '{obstype} {t.date:d} {telescope} {camera} {binning} {filters}'
+    filename_format = '{obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}'
     _combine_func = staticmethod(median_scaled_median)
     # default combine algorithm first median scales each image, then takes
     # median across images
@@ -938,7 +950,7 @@ class TableHelper(AttrTable):
 # ------------------------------------- ~ ------------------------------------ #
 
 
-class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
+class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
@@ -1185,7 +1197,19 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
                 # get delta matrix
                 v1 = vals1[idx1[key], lme:]
                 v0 = vals0[idx0[key], lme:]
-                delta_mtx = np.abs(v1[:, None] - v0)
+                try:
+                    delta_mtx = np.abs(v1[:, None] - v0)
+                except Exception as err:
+                    from IPython import embed
+                    import textwrap, traceback
+                    embed(header=textwrap.dedent(
+                            f"""\
+                            Caught the following {type(err).__name__}:
+                            %s
+                            Exception will be re-raised upon exiting this embedded interpreter.
+                            """) % traceback.format_exc())
+                    raise
+                    
                 # split sub groups for closest match
                 # if more than one attribute key provided for `closest`,
                 # we take 'closest' to mean overall closeness as measured
@@ -1398,21 +1422,25 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messeger):
                 sel.set_attrs(coords=obj_coords,
                               target=names[i],
                               obstype='object')
+    
 
-    def missing_flats(self):
+    def missing(self, kind):
+        kind = kind.lower()
+        assert kind in CALIBRATION_NAMES
+        kind = OBSTYPE_EQUIVALENT.get(kind, kind)
+        
         g = self.group_by('obstype')
-        attr = MATCH['flats'][0]
-        return (set(g['object'].attrs(*attr)) - set(g['flat'].attrs(*attr)))
-
-    def missing_darks(self):
-        g = self.group_by('obstype')
-        attr = MATCH['dark'][0]
-        return (set(g['object'].join(g['flat']).attrs(*attr)) -
-                set(g['flat'].attrs(*attr)))
-
+        attr = MATCH[kind][0]
+        
+        atrset = set(g['object'].attrs(*attr))
+        if kind == 'dark':
+            atrset += set(g['flat'].attrs(*attr))
+        
+        atrset -= set(g[kind].attrs(*attr))
+        return sorted(atrset, key=str)
+    
     def missing_calibration(self, report=False):
-        missing = {cal: sorted(getattr(self, f'missing_{cal}s')(), key=str)
-                   for cal in ('flat', 'dark')}
+        missing = {kind: self.missing(kind) for kind in ('flat', 'dark')}
 
         if report:
             s = ''
@@ -1820,7 +1848,7 @@ class Filler:
 def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
                  group_header_style='bold', no_match_style='r', g1_style='c',
                  ):
-    
+
     # create tmp shocCampaign so we can use the builtin pprint machinery
     tmp = shocCampaign()
     size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
