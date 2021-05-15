@@ -27,8 +27,8 @@ def link_install_cheat():
     here = Path(here)
     src = here.parent.resolve()
 
-    pkg_name = src.name
-    src = str(src / src.name)
+    pkg_name = 'shoc'
+    src = str(src / pkg_name)
     dest = str(Path(get_site()) / pkg_name)
 
     print('linking', src, dest)
