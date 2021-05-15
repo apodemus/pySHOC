@@ -1,5 +1,10 @@
+from shoc.timing import TimeDelta
+from astropy import time
+
 import more_itertools as mit
 import functools as ftl
+# from recipes.testing import Expect
+from recipes.containers import is_property
 from recipes.testing import  expected, Expect, mock
 from astropy.io.fits.hdu.base import _BaseHDU
 from pathlib import Path
@@ -9,6 +14,7 @@ import pytest
 import numpy as np
 import os
 import tempfile as tmp
+import inspect
 
 # TODO: old + new data all modes!!!
 # TODO: all combinations of science, bias, dark, flats (+ masters)
@@ -21,6 +27,10 @@ import tempfile as tmp
 DATA = Path(__file__).parent / 'data'
 EX1 = DATA / 'AT2020hat'
 CAL = DATA / 'calibration'
+
+ROOT = Path('/media/Oceanus/work/Observing/data/sources/')
+EX2 = ROOT / 'Chariklo/20140429.016{,._X2}.fits'
+EX3 = ROOT / 'CVs/polars/CTCV J1928-5001/SHOC/raw'
 
 #
 np.random.seed(12345)
@@ -48,6 +58,21 @@ def run():
 # ----------------------------------- Tests ---------------------------------- #
 
 
+class TestTiming:
+    @pytest.mark.parametrize(
+        't',
+        [
+            # TimeDelta(TimeDelta(1)),
+            TimeDelta(time.TimeDelta(1)),
+            #  TimeDelta(1) * 2,
+            #  2 * TimeDelta(1),
+            #  TimeDelta(1) / 2
+        ])
+    def test_type(self, t):
+        assert type(t) is TimeDelta
+        print(t)
+
+
 test_hdu_type = Expect(_BaseHDU.readfrom)(
     {
         CAL/'SHA_20200822.0005.fits':                       shocDarkHDU,
@@ -58,6 +83,35 @@ test_hdu_type = Expect(_BaseHDU.readfrom)(
     },
     left_transform=type
 )
+
+
+class TestHDU:
+    def test_str(self, run):
+        print(str(run[0]))
+
+    # def test_hdu_type(self, filename, expected):
+    #     assert _BaseHDU.readfrom(filename).__class__ == expected
+    # @expected([(CAL/'SHA_20200822.0005.fits', shocDarkHDU),
+    #            (CAL/'SHA_20200801.0001.fits', shocFlatHDU),
+    #            (EX1/'SHA_20200731.0022.fits', shocNewHDU)],
+    #            globals_=globals())
+    # def hdu_type(self, filename):
+    #     return _BaseHDU.readfrom(filename).__class__
+    # print('....', filename)
+    # print(obj)
+    # return obj
+    # @pytest.mark.parametrize('hdu', run()[:1])
+
+    def test_timing(self, run):
+        hdu = run[0]
+        t = hdu.t
+        for attr, p in inspect.getmembers(type(t), is_property):
+            getattr(t, attr)
+
+    # TODO:
+    # test_timing type(obs.t), shocTimingNew, shocTimingOld
+
+
 class TestCampaign:
     @pytest.mark.parametrize(
         'pointer',
@@ -120,16 +174,8 @@ class TestCampaign:
             (np.random.randint(0, 2, 22).astype(bool),
              ['SHA_20200731.0002.fits', 'SHA_20200731.0003.fits',
               'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits',
-             'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits', 
-              'SHA_20200731.0004.fits', 'SHA_20200731.0006.fits',
-              'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits',
-             'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits', 
               'SHA_20200731.0009.fits', 'SHA_20200731.0011.fits',
               'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits',
-             'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits', 
-              'SHA_20200731.0012.fits', 'SHA_20200731.0014.fits',
-              'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits',
-             'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits', 
               'SHA_20200731.0015.fits', 'SHA_20200731.0017.fits',
               'SHA_20200731.0018.fits', 'SHA_20200731.0019.fits']),
 
@@ -181,7 +227,33 @@ class TestCampaign:
         # print()
         # print()
 
+    # TODO: test_id, test_group, test_combine, test_save
+    # steps below
+    @pytest.mark.skip()
+    def test_masters(self, run):
+        from obstools.stats import median_scaled_median
+        from shoc import MATCH_FLATS, MATCH_DARKS
 
+        is_flat = np.array(run.calls('pointing_zenith'))
+        run[is_flat].set_attrs(obstype='flat')
+
+        grp = run.group_by('obstype')
+        gobj, gflats = grp['object'].match(grp['flat'], *MATCH_FLATS)
+        needs_debias = gobj.to_list().join(gflats)
+        gobs, gbias = needs_debias.match(grp['bias'], *MATCH_DARKS)
+
+        if gbias:
+            # all the "dark" stacks we need are here
+            mbias = gbias.merge_combine()
+            mbias.save(CAL)
+
+            #
+            if gflats:
+                gflats.group_by(mbias).subtract(mbias)
+
+        if gflats:
+            mflats = gflats.merge_combine()
+            mflats.save(CAL)
 
 
 # @pytest.mark.parametrize(
