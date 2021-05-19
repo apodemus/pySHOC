@@ -4,14 +4,17 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras
 
 from astropy.io.fits.hdu.base import register_hdu
 from .core import *
+from .caldb import CalDB
 
 
 # register HDU classes (order is important!)
-register_hdu(shocBiasHDU)
-register_hdu(shocFlatHDU)
-register_hdu(shocNewHDU)
-register_hdu(shocOldHDU)
+register_hdu(shocHDU)
 
+
+# initialize calibration database
+# CALDB = Path('/media/Oceanus/work/Observing/data/SHOC/calibration/')
+calDB = CalDB('/media/Oceanus/work/Observing/data/SHOC/calibration/')
+# calDB.autovivify(False)
 
 # # Collect named cubes in a dict
 # from recipes.iter import flatiter, itersubclasses

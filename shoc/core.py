@@ -106,8 +106,7 @@ MATCH['flats'] = MATCH['flat'] = MATCH_FLATS = (ATT_EQUAL_FLAT, ATT_CLOSE_FLAT)
 MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 
-# ------------------------------------- ~ ------------------------------------ #
-
+# ----------------------------- helper functions ----------------------------- #
 
 def str2tup(keys):
     if isinstance(keys, str):
@@ -128,12 +127,8 @@ def hbrace(size, name=''):
                      ['⎭'])
 
 
-class Messenger:
-    def message(self, message, cls_name=True):
-        """Make a message tagged with class and function name"""
-        return (f'{self.__class__.__name__}.{get_caller_name(2)} {Time.now()}: '
-                f'{message}')
-
+# def _thing(obs0, obs1, keys):
+    
 
 # def get_id(hdu):
 #     """
@@ -331,7 +326,7 @@ class Filters:
 
     def __hash__(self):
         return hash(self.__members())
-    
+
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
@@ -347,6 +342,12 @@ class shocFnHelp(FnHelp):
         """
         return self.path.suffixes[0].lstrip('.')
 
+
+class Messenger:
+    def message(self, message, cls_name=True):
+        """Make a message tagged with class and function name"""
+        return (f'{self.__class__.__name__}.{get_caller_name(2)} {Time.now()}: '
+                f'{message}')
 
 # ------------------------------ HDU Subclasses ------------------------------ #
 
@@ -820,7 +821,7 @@ class shocHDU(HDUExtra, Messenger):
         action = 'Saving to'
         if path.exists():
             action = 'Overwriting'
-            
+
         self.logger.info('%s %r', action, str(path))
         self.writeto(path, overwrite=overwrite)
         return path
@@ -845,7 +846,7 @@ class shocOldHDU(shocHDU):
 
 class shocCalibrationHDU(shocHDU):
     _combine_func = None  # place-holder
-    
+
     # TODO: set target=''
 
     def get_coords(self):
@@ -1185,7 +1186,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # iterate through all group keys. Their may be unmatched groups in both
         deltas = {}
         # all_keys = set(g1.keys()) | set(g0.keys())
-        tmp = other.new_groups()
+        # tmp = other.new_groups()
         for key in g0.keys():
             # array to tuple for hashing
             obs0 = g0.get(key)
@@ -1197,19 +1198,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 # get delta matrix
                 v1 = vals1[idx1[key], lme:]
                 v0 = vals0[idx0[key], lme:]
-                try:
-                    delta_mtx = np.abs(v1[:, None] - v0)
-                except Exception as err:
-                    from IPython import embed
-                    import textwrap, traceback
-                    embed(header=textwrap.dedent(
-                            f"""\
-                            Caught the following {type(err).__name__}:
-                            %s
-                            Exception will be re-raised upon exiting this embedded interpreter.
-                            """) % traceback.format_exc())
-                    raise
-                    
+                delta_mtx = np.abs(v1[:, None] - v0)
+
                 # split sub groups for closest match
                 # if more than one attribute key provided for `closest`,
                 # we take 'closest' to mean overall closeness as measured
@@ -1232,6 +1222,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                     out0[key] = obs0
 
                 out1[key] = obs1
+
 
         if report:
             pprint_match(out0, out1, deltas, closest, threshold_warn)
@@ -1300,7 +1291,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         hdu.header.add_history(msg)
         return hdu
 
-    def merge_combine(func, *args, **kws):
+    def merge_combine(self, func, *args, **kws):
         return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
     def subtract(self, master_bias):
@@ -1422,23 +1413,22 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 sel.set_attrs(coords=obj_coords,
                               target=names[i],
                               obstype='object')
-    
 
     def missing(self, kind):
         kind = kind.lower()
         assert kind in CALIBRATION_NAMES
         kind = OBSTYPE_EQUIVALENT.get(kind, kind)
-        
+
         g = self.group_by('obstype')
         attr = MATCH[kind][0]
-        
+
         atrset = set(g['object'].attrs(*attr))
         if kind == 'dark':
-            atrset += set(g['flat'].attrs(*attr))
-        
+            atrset |= set(g['flat'].attrs(*attr))
+
         atrset -= set(g[kind].attrs(*attr))
         return sorted(atrset, key=str)
-    
+
     def missing_calibration(self, report=False):
         missing = {kind: self.missing(kind) for kind in ('flat', 'dark')}
 
@@ -1667,22 +1657,20 @@ class shocObsGroups(Grouped):
         ordered_keys = list(tables.keys())  # key=sort
         stack = [tables[key] for key in ordered_keys]
 
-        if braces:
-            braces = ''
-            for i, gid in enumerate(ordered_keys):
-                tbl = tables[gid]
-                braces += ('\n' * bool(i) +
-                           hbrace(tbl.data.shape[0], gid) +
-                           '\n' * (tbl.has_totals + vspace))
+        if not braces:
+            return vstack(stack, bool(titled), vspace)
 
-            # vertical offset
-            offset = stack[0].n_head_lines
-            final = hstack([vstack(stack, True, vspace), braces],
-                           spacing=1, offset=offset)
-        else:
-            final = vstack(stack, not bool(titled), vspace)
+        braces = ''
+        for i, gid in enumerate(ordered_keys):
+            tbl = tables[gid]
+            braces += ('\n' * bool(i) +
+                       hbrace(tbl.data.shape[0], gid) +
+                       '\n' * (tbl.has_totals + vspace))
 
-        return final
+        # vertical offset
+        offset = stack[0].n_head_lines
+        return hstack([vstack(stack, True, vspace), braces],
+                      spacing=1, offset=offset)
 
     def pprint(self, titled=make_title, headers=False, braces=False, vspace=0,
                **kws):
