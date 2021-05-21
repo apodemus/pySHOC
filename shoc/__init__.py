@@ -12,7 +12,6 @@ register_hdu(shocHDU)
 
 
 # initialize calibration database
-# CALDB = Path('/media/Oceanus/work/Observing/data/SHOC/calibration/')
 calDB = CalDB('/media/Oceanus/work/Observing/data/SHOC/calibration/')
 # calDB.autovivify(False)
 

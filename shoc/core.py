@@ -1,4 +1,4 @@
-# __version__ = '2.13'
+# __version__ = '3.14'
 
 
 # std libs
@@ -7,7 +7,7 @@ from obstools.phot.campaign import FnHelp
 import functools as ftl
 import itertools as itt
 from collections import defaultdict
-import warnings
+import warnings as wrn
 from pathlib import Path
 
 # third-party libs
@@ -48,8 +48,9 @@ from .pprint import BraceContract
 
 from motley.table import Table
 
-# only emit this warning once!!
-warnings.filterwarnings('once', 'Using telescope pointing coordinates')
+# only emit this warning once!
+wrn.filterwarnings('once', 'Using telescope pointing coordinates')
+
 
 # TODO
 # __all__ = ['']
@@ -80,12 +81,12 @@ FOVr = {'74': FOV74r,
         '1.9': FOV74r}
 
 # Exact GPS locations of telescopes
-LOCATIONS = {
-    '74in': EarthLocation.from_geodetic(20.81167, -32.462167, 1822),
-    '40in': EarthLocation.from_geodetic(20.81, -32.379667, 1810),
-    'lesedi': EarthLocation.from_geodetic(20.8105, -32.379667, 1811),
-    'salt': EarthLocation.from_geodetic(20.810808, 32.375823, 1798)
-}
+TEL_GEO_LOC = {'74in': (20.81167, -32.462167, 1822),
+               '40in': (20.81, -32.379667, 1810),
+               'lesedi': (20.8105, -32.379667, 1811),
+               'salt': (20.810808, 32.375823, 1798)}
+LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
+             for tel, geo in TEL_GEO_LOC.items()}
 
 
 # ----------------------------- module constants ----------------------------- #
@@ -114,21 +115,35 @@ def str2tup(keys):
     return keys
 
 
-def hbrace(size, name=''):
-    #
-    if size < 3:
-        return '← ' + str(name) + '\n' * (int(size) // 2)
-
-    d, r = divmod(int(size) - 3, 2)
-    return '\n'.join(['⎫'] +
-                     ['⎪'] * d +
-                     ['⎬ %s' % str(name)] +
-                     ['⎪'] * (d + r) +
-                     ['⎭'])
+def apply_stack(func, *args, **kws):  # TODO: move to proc
+    # TODO:  MULTIPROCESS HERE!
+    return func(*args, **kws)
 
 
-# def _thing(obs0, obs1, keys):
+def split_dist(v0, v1):
+    # split sub groups for closest match. closeness of runs is measured by
+    # the sum of the relative distance between attribute values.
+    # todo: use cutoff
     
+    v0 = np.c_[v0][:, None]
+    v1 = np.c_[v1][None]
+    delta_mtx = np.abs(v0 - v1)
+
+    # with wrn.catch_warnings():
+    #     wrn.filterwarnings('ignore', 'divide by zero', RuntimeWarning)
+    # scale = delta_mtx.max(1, keepdims=True))
+    dist = delta_mtx.sum(-1)
+    selection = (dist == dist.min(1, keepdims=True))
+    
+    for l1 in selection:
+        # there may be multiple HDUs that are equidistant from the selected set
+        # group these together
+        l0 = (l1 == selection).all(1)
+        # values are the same for this group (selected by l0), so we can just
+        # take the first row of attribute values
+        # vals array to tuple for hashing
+        yield tuple(v0[l0][0, 0]), l0, l1, delta_mtx[l0][:, l1]
+
 
 # def get_id(hdu):
 #     """
@@ -151,11 +166,6 @@ def hbrace(size, name=''):
 #     return ''.join((chr(int(s[i:i + 3])) for i in range(0, len(s), 3)))
 
 
-def apply_stack(func, *args, **kws):  # TODO: move to proc
-    # TODO:  MULTIPROCESS HERE!
-    return func(*args, **kws)
-
-
 # ------------------------------ Helper classes ------------------------------ #
 
 # class yxTuple(tuple):
@@ -165,12 +175,15 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
 
 
 class Binning:
+    """Simple class to represent CCD pixel binning"""
+
     def __init__(self, args):
         # assert len(args) == 2
         self.y, self.x = args
 
     def __repr__(self):
         return f'{self.y}x{self.x}'
+        # return f'{self.__class__.__name__}{self.y, self.x}'
 
     def __iter__(self):
         yield from (self.y, self.x)
@@ -190,6 +203,50 @@ class Binning:
         raise TypeError(
             f"'<' not supported between instances of {self.__class__} and "
             f"{type(other)}")
+
+
+class Filters:
+    """Simple class to represent position of the filter wheels"""
+
+    def __init__(self, a, b):
+        self.A = self.get(a)
+        self.B = self.get(b)
+
+    def get(self, long):
+        # get short description like "U",  "z'", or "∅"
+        if long == 'Empty':
+            return EMPTY_FILTER_NAME
+        if long:
+            return long.split(' - ')[0]
+        return (long or EMPTY_FILTER_NAME)
+
+    def __members(self):
+        return self.A, self.B
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}{self.__members()}'
+
+    def __format__(self, spec):
+        return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
+
+    def __str__(self):
+        return self.name
+
+    def __iter__(self):
+        yield from self.__members()
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__members() == other.__members()
+        return False
+
+    def __hash__(self):
+        return hash(self.__members())
+
+    @property
+    def name(self):
+        """Name of the non-empty filter in either position A or B, else ∅"""
+        return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
 
 
 @dataclass()
@@ -285,52 +342,6 @@ class ReadoutMode:
     # def fn_repr(self):
     #     return 'γ{:g}@{:g}MHz.{:s}'.format(
     #             self.preAmpGain, self.frq, self.outAmp.mode)
-
-
-class Filters:
-    """Simple class to represent position of the filter wheels"""
-
-    def __init__(self, a, b):
-        self.A = self.get(a)
-        self.B = self.get(b)
-
-    def get(self, long):
-        # get short description like "U",  "z'", or "∅"
-        if long == 'Empty':
-            return EMPTY_FILTER_NAME
-        if long:
-            return long.split(' - ')[0]
-        return (long or EMPTY_FILTER_NAME)
-
-    def __members(self):
-        return self.A, self.B
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}{self.__members()}'
-
-    def __format__(self, spec):
-        return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
-        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), '')
-
-    def __str__(self):
-        return next(filter(EMPTY_FILTER_NAME.__ne__, self), EMPTY_FILTER_NAME)
-        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), EMPTY_FILTER_NAME)
-
-    def __iter__(self):
-        yield from self.__members()
-
-    def __eq__(self, other):
-        if isinstance(other, self.__class__):
-            return self.__members() == other.__members()
-        return False
-
-    def __hash__(self):
-        return hash(self.__members())
-
-    @property
-    def name(self):
-        """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
 
 
 class shocFnHelp(FnHelp):
@@ -1001,8 +1012,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         too_wide=False,
         totals=['n', 'duration'])
 
-    def new_groups(self, *keys, **kws):
-        return shocObsGroups(self.__class__, *keys, **kws)
+    @classmethod
+    def new_groups(cls, *keys, **kws):
+        return shocObsGroups(cls, *keys, **kws)
 
     # def map(self, func, *args, **kws):
     #     """Map and arbitrary function onto the data of each observation"""
@@ -1118,37 +1130,37 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         exact: tuple or str
             single or multiple attribute names to check for equality between
             the two runs. For null matches, None is returned.
-        closest: tuple or str, optional
+        closest: tuple or str, optional, default=()
             single or multiple keywords to match as closely as possible between
             the two runs. The attributes which are pointed to by these should
             support item subtraction since closeness is taken to mean the
             absolute difference between the two attribute values.
-        keep_nulls: bool, optional
+        keep_nulls: bool, optional, default=False
             Whether to keep the empty matches. ie. if there are observations in
             `other` that have no match in this observation set, keep those
             observations in the grouping and substitute `None` as the value for
             the corresponding key in the resulting dict. This parameter affects
             only matches in the grouping of the `other` shocCampaign.
-            Observations without matches in this campaign are always kept so
+            Observations without matches in `self` (this run) are always kept so
             that full set of observations are always accounted for in the
-            grouping. A consequence of setting this to False (the default) is
-            therefore that the two groupings returned by this function will have
-            different keys, which may or may not be desired for further
+            resultant grouping. A consequence of setting this to False (the
+            default) is therefore that the two groupings returned by this
+            function will have different keys, which may or may not be desired
+            for further
             analysis.
-        return_deltas: bool
+        return_deltas: bool, default=False
             return a dict of distance matrices between 'closest' attributes
-        threshold_warn: int, optional
+        report: bool, optional, default=False
+            whether to print the resulting matches in a table
+        threshold_warn: int, optional, default=None
             If the difference in attribute values for attributes in `closest`
             are greater than `threshold_warn`, a warning is emitted
-        report: bool
-            whether to print the resulting matches in a table
 
         Returns
         -------
-        g0: shocObsGroups
-            a dict-like object keyed on the attribute values at `keys` and
-            mapping to unique shocRun instances
-        out_sr
+        out0, out1: shocObsGroups
+            a dict-like object keyed on the attribute values of `keys` and
+            mapping to unique `shocCampaign` instances
         """
 
         # self.logger.info(
@@ -1159,70 +1171,32 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         exact, closest = str2tup(exact), str2tup(closest)
         keys = OrderedSet(filter(None, mit.flatten([exact, closest])))
 
-        assert len(keys), ('Need at least one `key` (attribute name) by which '
-                           'to match')
+        if not keys:
+            raise ValueError('Need at least one `key` (attribute name) by which'
+                             ' to match')
         # assert len(other), 'Need at least one other observation to match'
         if threshold_warn is not None:
             threshold_warn = np.atleast_1d(threshold_warn)
             assert threshold_warn.size == len(closest)
 
-        g0, idx0 = self.group_by(*exact, return_index=True)
-        g1, idx1 = other.group_by(*exact, return_index=True)
-
-        # Do the matching - map observation to those in `other` with attribute
-        # values matching most closely
-
-        # keys are attributes of the HDUs
-        vals0 = np.array(self.attrs(*keys), object)
-        vals1 = np.array(other.attrs(*keys), object)
-
-        #
+        g0 = self.group_by(*exact)
+        g1 = other.group_by(*exact)
         out0 = self.new_groups()
         out0.group_id = keys, {}
         out1 = other.new_groups()
         out1.group_id = keys, {}
-        lme = len(exact)
 
-        # iterate through all group keys. Their may be unmatched groups in both
+        # iterate through all group keys. There may be unmatched groups in both
         deltas = {}
-        # all_keys = set(g1.keys()) | set(g0.keys())
-        # tmp = other.new_groups()
-        for key in g0.keys():
-            # array to tuple for hashing
-            obs0 = g0.get(key)
+        for key, obs0 in g0.items():
             obs1 = g1.get(key)
-
-            # todo: function here
-            # here we have some exact matches. tiebreak with closest match
-            if len(closest) and (None not in (obs0, obs1)):
-                # get delta matrix
-                v1 = vals1[idx1[key], lme:]
-                v0 = vals0[idx0[key], lme:]
-                delta_mtx = np.abs(v1[:, None] - v0)
-
-                # split sub groups for closest match
-                # if more than one attribute key provided for `closest`,
-                # we take 'closest' to mean overall closeness as measured
-                # by the sum of absolute differences between these.
-                closeness = delta_mtx.sum(-1)
-                # todo: use cutoff
-                idx = closeness.argmin(0)
-                for i in np.unique(idx):
-                    l = (idx == i)
-                    # check if more than one closest matching
-                    ll = (closeness[:, l] == closeness[i, l]).all(-1)
-                    # subgroup deltas are the same, use first only
-                    gid = key + tuple(v1[ll][0])
-                    out0[gid] = obs0[l]
-                    out1[gid] = obs1[ll]
-                    # delta matrix
-                    deltas[gid] = delta_mtx[ll][:, l]
-            else:
-                if (obs0 is not None) or keep_nulls:
-                    out0[key] = obs0
-
-                out1[key] = obs1
-
+            for id_, sub0, sub1, delta in obs0._group_close(obs1, closest):
+                gid = (*key, *id_)
+                # group
+                out0[gid] = sub0
+                out1[gid] = sub1
+                # delta matrix
+                deltas[gid] = delta
 
         if report:
             pprint_match(out0, out1, deltas, closest, threshold_warn)
@@ -1234,10 +1208,28 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 if out1[key] is None:
                     out1.pop(key)
 
-        if len(closest) and return_deltas:
+        if closest and return_deltas:
             return out0, out1, deltas
 
         return out0, out1
+
+    # def delta_matrix(self, other, keys):
+    #     # get delta matrix.  keys are attributes of the HDUs
+    #     v0 = self.attrs(*keys)
+    #     v1 = other.attrs(*keys)
+    #     return np.abs(v0[:, None] - v1)
+
+    def _group_close(self, other, keys):
+        # Do the matching - map observation to those in `other` with attribute
+        # values matching most closely
+        if None in (self, other) or not keys:
+            yield (), self, other, None
+            return
+
+        # split sub groups for closest match
+        for vals, l0, l1, deltas in split_dist(self.attrs(*keys),
+                                               other.attrs(*keys)):
+            yield vals, self[l0], other[l1], deltas
 
     def combine(self, func=None, *args, **kws):
         """
