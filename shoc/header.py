@@ -22,6 +22,8 @@ from motley.table import Table
 
 # module level logger
 logger = get_module_logger()
+logging.basicConfig()
+logger.setLevel(logging.INFO)
 
 HEADER_KEYS_MISSING_OLD = \
     [
