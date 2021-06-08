@@ -9,7 +9,6 @@ pipeline.py
 uncertainty.py
 fast.py
 filenaming.py
-setup_.py
 
 # needs integrating
 tests/test_pre.py
