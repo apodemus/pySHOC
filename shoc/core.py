@@ -3,50 +3,46 @@
 
 # std libs
 import operator as op
-from obstools.phot.campaign import FnHelp
-import functools as ftl
-import itertools as itt
-from collections import defaultdict
 import warnings as wrn
+import itertools as itt
 from pathlib import Path
+from collections import defaultdict
+from dataclasses import dataclass, field
 
 # third-party libs
-import numpy as np
-import more_itertools as mit
-from dataclasses import dataclass, field
+from scipy import stats
+from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
-from astropy.time import Time
-
-from scipy import stats
+import numpy as np
 
 # local libs
-from motley import codes
-from motley.utils import overlay
-from motley.table import AttrTable
-from obstools.phot.campaign import PhotCampaign, HDUExtra
-from obstools.stats import median_scaled_median
-from obstools.image.calibration import keep
-from obstools.utils import get_coords_named, convert_skycoords
+from motley.table import AttrTable, Table
+from scrawl.imagine import plot_image_grid
 from recipes import pprint
 from recipes.sets import OrderedSet
-from recipes.containers import Grouped, OfType
-from recipes.introspect import get_caller_name
 from recipes.string import sub, remove_prefix
-from recipes import bash
-from scrawl.imagine import plot_image_grid
+from pyxis.containers import Grouped, OfType
+from recipes.introspect import get_caller_name
+from obstools.image.calibration import keep
+from obstools.stats import median_scaled_median
+from obstools.utils import get_coords_named, convert_skycoords
+from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
 
 # relative libs
-# from shoc.image.sample import ResampleFlip
-from .timing import shocTiming, shocTimingOld, Trigger
+from .utils import str2tup
+from .pprint import BraceContract
+from .match import MatchedObservations
 from .readnoise import readNoiseTables
+from .timing import shocTiming, Trigger, UnknownTime
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
 from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
-# from recipes.decor import expose
-from .pprint import BraceContract
 
-from motley.table import Table
+
+# from shoc.image.sample import ResampleFlip
+# from recipes.decor import expose
+
 
 # only emit this warning once!
 wrn.filterwarnings('once', 'Using telescope pointing coordinates')
@@ -56,8 +52,7 @@ wrn.filterwarnings('once', 'Using telescope pointing coordinates')
 # __all__ = ['']
 
 # TODO: can you pickle these classes
-# FIXME: shocHDU classes are assigned based on header keywords which are often
-#   incorrect!!!  Think of a better way of re-assigning the HDU classes
+
 
 # ------------------------------ Instrument info ----------------------------- #
 
@@ -97,7 +92,7 @@ EMPTY_FILTER_NAME = '∅'
 # Attributes for matching calibration frames
 ATT_EQUAL_DARK = ('camera', 'binning',  # subrect
                   'readout.frq', 'readout.preAmpGain', 'readout.outAmp.mode')  # <-- 'readout'
-ATT_CLOSE_DARK = ('readout.outAmp.emGain', 'timing.exp')
+ATT_CLOSE_DARK = ('readout.outAmp.emGain', )  # 'timing.exp'
 
 ATT_EQUAL_FLAT = ('telescope', 'camera', 'binning', 'filters')
 ATT_CLOSE_FLAT = ('timing.date', )
@@ -109,40 +104,18 @@ MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 # ----------------------------- helper functions ----------------------------- #
 
-def str2tup(keys):
-    if isinstance(keys, str):
-        keys = keys,  # a tuple
-    return keys
-
+def _3d(array):
+    """Add axis in 0th position to make 3d"""
+    if array.ndim == 2:
+        return array.reshape((1, *array.shape))
+    if array.ndim == 3:
+        return array
+    raise ValueError('Nope!') 
+    
 
 def apply_stack(func, *args, **kws):  # TODO: move to proc
     # TODO:  MULTIPROCESS HERE!
     return func(*args, **kws)
-
-
-def split_dist(v0, v1):
-    # split sub groups for closest match. closeness of runs is measured by
-    # the sum of the relative distance between attribute values.
-    # todo: use cutoff
-    
-    v0 = np.c_[v0][:, None]
-    v1 = np.c_[v1][None]
-    delta_mtx = np.abs(v0 - v1)
-
-    # with wrn.catch_warnings():
-    #     wrn.filterwarnings('ignore', 'divide by zero', RuntimeWarning)
-    # scale = delta_mtx.max(1, keepdims=True))
-    dist = delta_mtx.sum(-1)
-    selection = (dist == dist.min(1, keepdims=True))
-    
-    for l1 in selection:
-        # there may be multiple HDUs that are equidistant from the selected set
-        # group these together
-        l0 = (l1 == selection).all(1)
-        # values are the same for this group (selected by l0), so we can just
-        # take the first row of attribute values
-        # vals array to tuple for hashing
-        yield tuple(v0[l0][0, 0]), l0, l1, delta_mtx[l0][:, l1]
 
 
 # def get_id(hdu):
@@ -206,11 +179,17 @@ class Binning:
 
 
 class Filters:
-    """Simple class to represent position of the filter wheels"""
+    """Simple class to represent positions of the filter wheels"""
 
-    def __init__(self, a, b):
-        self.A = self.get(a)
-        self.B = self.get(b)
+    def __init__(self, a, b=None):
+        A = self.get(a)
+        # sloan filters usually in wheel B. Keep consistency here when assigning
+        if (b is None) and A.islower():
+            self.A = EMPTY_FILTER_NAME
+            self.B = A
+        else:
+            self.A = A
+            self.B = self.get(b)
 
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
@@ -344,27 +323,28 @@ class ReadoutMode:
     #             self.preAmpGain, self.frq, self.outAmp.mode)
 
 
-class shocFnHelp(FnHelp):
+class shocFilenameHelper(FilenameHelper):
     @property
     def nr(self):
         """
-        File sequence number 
+        File sequence number
             eg. '0010' in 'SHA_20200729.0010.fits'
         """
         return self.path.suffixes[0].lstrip('.')
 
 
 class Messenger:
-    def message(self, message, cls_name=True):
+    # TODO: control through logger and Handlers etc
+    def message(self, message, sep='.'):
         """Make a message tagged with class and function name"""
-        return (f'{self.__class__.__name__}.{get_caller_name(2)} {Time.now()}: '
+        return (f'{self.__class__.__name__}{sep}{get_caller_name(2)} {Time.now()}: '
                 f'{message}')
 
 # ------------------------------ HDU Subclasses ------------------------------ #
 
 
 class shocHDU(HDUExtra, Messenger):
-    _FnHelper = shocFnHelp
+    _FilenameHelperClass = shocFilenameHelper
     __shoc_hdu_types = {}
     filename_format = None
 
@@ -378,28 +358,36 @@ class shocHDU(HDUExtra, Messenger):
         # hierarch keywords, so for SHOC we cannot tell if it's the old format
         # header by checking those.
 
+        # handle direct init here eg:   shocDarkHDU(data, header)
+        if cls in cls.__shoc_hdu_types.values():
+            return super().__new__(cls)
+
+        # assign class based on obstype and age
         obstype = (obstype or '').lower()
         if not obstype:
             obstype = header.get('OBSTYPE', '')
 
         # check if all the new keywords are present
-        age, kind, suffix = '', '', 'HDU'
-        if any((kw not in header for kw in HEADER_KEYS_MISSING_OLD)):
+        if any(kw not in header for kw in HEADER_KEYS_MISSING_OLD):
             age = 'Old'
 
-        # calibration stacks
+        # identify calibration files
+        age, kind, suffix = '', '', 'HDU'
         obstype = OBSTYPE_EQUIVALENT.get(obstype, obstype)
         if obstype in CALIBRATION_NAMES:
             kind = obstype.title()
-            if (header['NAXIS'] == 2 and header['MASTER']):
+            if (header['NAXIS'] == 2 and header.get('MASTER')):
                 suffix = 'Master'
-        elif obstype not in ('', 'object'):
-            cls.logger.warning('Unknown OBSTYPE: %r', obstype)
+                age = ''
 
         #
         class_name = f'shoc{age}{kind}{suffix}'
+        if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
+            # pylint: disable=no-member
+            cls.logger.warning('Unknown OBSTYPE: %r', obstype)
+
         # cls = cls.__shoc_hdu_types.get(class_name, cls)
-        # print(f'{class_name=:}; {cls=:}')
+        # print(f'{class_name=}; {cls=}')
         return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
 
     def __init_subclass__(cls):
@@ -440,12 +428,12 @@ class shocHDU(HDUExtra, Messenger):
         #  out in opposite direction in the EM register to CON readout.
 
         # filters
-        self.filters = Filters(*(header.get(f'FILTER{_}', 'Empty')
-                                 for _ in 'AB'))
+        self._filters = Filters(*(header.get(f'FILTER{_}', 'Empty')
+                                  for _ in 'AB'))
 
         # object name
         self.target = header.get('OBJECT')
-        self.obstype = header.get('OBSTYPE')
+        self.obstype = obstype or header.get('OBSTYPE')
 
         # # manage on-the-fly image orientation
         # self.oriented = ImageOrienter(self, x=self.readout.isEM)
@@ -459,7 +447,13 @@ class shocHDU(HDUExtra, Messenger):
         sep = ' | '
         return f'<{self.__class__.__name__}:{sep.join(map(str, info))}>'
 
-    # def __repr__(self):
+    @property
+    def filters(self):
+        return self._filters
+
+    @filters.setter
+    def filters(self, filters):
+        self._filters = Filters(*str2tup(filters))
 
     @property
     def nframes(self):
@@ -493,7 +487,10 @@ class shocHDU(HDUExtra, Messenger):
         # initially be created with a `_BasicHeader` only, in which case we
         # will not yet have all the correct keywords available yet to identify
         # old vs new shoc data
-        return shocTiming(self)
+        try:
+            return shocTiming(self)
+        except:
+            return UnknownTime
 
     # alias
     t = timing
@@ -539,14 +536,14 @@ class shocHDU(HDUExtra, Messenger):
 
         # TODO: optionally query for named sources in this location
         if coords:
-            warnings.warn('Using telescope pointing coordinates')
+            wrn.warn('Using telescope pointing coordinates')
 
         return coords
 
     def pointing_zenith(self, tol=2):
         """
-        Whether the telescope was pointing at the zenith at the start of the 
-        observation. Useful for helping to discern if the observation is a sky 
+        Whether the telescope was pointing at the zenith at the start of the
+        observation. Useful for helping to discern if the observation is a sky
         flat.
 
         Parameters
@@ -665,7 +662,7 @@ class shocHDU(HDUExtra, Messenger):
         subset : tuple, optional
             Subset of the image stack that will be sampled, by default (0, 100)
         return_stats : bool, optional
-            Whether or not to return the computed sample statistics, 
+            Whether or not to return the computed sample statistics,
             by default False
 
         Returns
@@ -734,7 +731,9 @@ class shocHDU(HDUExtra, Messenger):
 
         """
 
-        assert callable(func), 'Func needs to be callable'
+        if not callable(func):
+            raise TypeError(
+                f'Parameter `func` should be callable. Received {type(func)}')
 
         # check if single image
         if (self.ndim == 2) or ((self.ndim == 3) and len(self.data) == 1):
@@ -742,18 +741,20 @@ class shocHDU(HDUExtra, Messenger):
 
         # log some info
         msg = f'{func.__name__} of {self.nframes} images from {self.file.name}'
-        msg = self.message(msg)
+        msg = self.message(msg, sep='')
         self.logger.info(remove_prefix(msg, self.__class__.__name__))
 
         # combine across images
         kws.setdefault('axis', 0)
         # TODO: self.calibrated ???
-        hdu = self.__class__(func(self.data, *args, **kws), self.header)
+        hdu = shocHDU(func(self.data, *args, **kws), self.header)
+        # FIXME: MasterHDU not used here :(((
 
         # update header
         hdu.header['MASTER'] = True
         hdu.header['NCOMBINE'] = self.nframes
         hdu.header.add_history(msg)
+
         return hdu
 
     def subtract(self, bias):
@@ -778,6 +779,7 @@ class shocHDU(HDUExtra, Messenger):
 
     def auto_update_header(self, **kws):
         # FIXME: better to handle these as property and update header there ?
+        # TODO: filters!
         new_kws = {'obstype': self.obstype}
         if self.target:
             new_kws['object'] = self.target
@@ -835,7 +837,9 @@ class shocHDU(HDUExtra, Messenger):
 
         self.logger.info('%s %r', action, str(path))
         self.writeto(path, overwrite=overwrite)
-        return path
+
+        # reload
+        return self.__class__.readfrom(path)
 
 
 # FILENAME_TRANS = str.maketrans({'-': '', ' ': '-'})
@@ -850,9 +854,9 @@ class shocOldHDU(shocHDU):
             if old in header:
                 self.header.rename_keyword(old, new)
 
-    @lazyproperty
-    def timing(self):
-        return shocTimingOld(self)
+    # @lazyproperty
+    # def timing(self):
+    #     return shocTimingOld(self)
 
 
 class shocCalibrationHDU(shocHDU):
@@ -886,6 +890,9 @@ class shocDarkHDU(shocCalibrationHDU):
     # events such as cosmic rays, use the median or sigma clipping method."
     # - Newberry
 
+    def __init__(self, data, header, obstype='dark', *args, **kws):
+        super().__init__(data, header, obstype, *args, **kws)
+
 
 class shocFlatHDU(shocCalibrationHDU):
 
@@ -893,6 +900,9 @@ class shocFlatHDU(shocCalibrationHDU):
     _combine_func = staticmethod(median_scaled_median)
     # default combine algorithm first median scales each image, then takes
     # median across images
+
+    def __init__(self, data, header, obstype='flat', *args, **kws):
+        super().__init__(data, header, obstype, *args, **kws)
 
 
 class shocOldDarkHDU(shocOldHDU, shocDarkHDU):
@@ -907,11 +917,15 @@ class shocOldFlatHDU(shocOldHDU, shocDarkHDU):
 #     pass
 
 
-class shocDarkMaster(shocDarkHDU):
+class shocMaster(shocCalibrationHDU):
     pass
 
 
-class shocFlatMaster(shocFlatHDU):
+class shocDarkMaster(shocMaster, shocDarkHDU):
+    pass
+
+
+class shocFlatMaster(shocMaster, shocFlatHDU):
     pass
 
 # -------------------------- Pretty printing helpers ------------------------- #
@@ -996,7 +1010,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         },
         formatters={
             'duration': hms,
-            't0': lambda t: t.iso
+            't0': op.attrgetter('iso'),
+            'tExp': str  # so that UnknownTime formats as ??
         },
         units={
             # 'readout.preAmpGain': 'e⁻/ADU',
@@ -1008,7 +1023,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         },
 
         compact=True,
-        title_props=dict(txt=('underline', 'bold'), bg='g'),
+        title_props=dict(txt=('underline', 'bold'), bg='b'),
         too_wide=False,
         totals=['n', 'duration'])
 
@@ -1022,9 +1037,21 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     # @expose.args
 
-    def save(self, folder=None, name_format=None,  overwrite=False):
-        filenames = self.calls('save', None, folder, name_format, overwrite)
-        return self.__class__.load(filenames)
+    def save(self, filenames=(), folder=None, name_format=None, overwrite=False):
+        if filenames:
+            assert len(filenames) == len(self)
+        else:
+            filenames = self.calls('get_save_name', name_format)
+
+        if len(set(filenames)) < len(self):
+            from recipes.lists import tally
+            dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
+            self.logger.warning('Duplicate filenames: %s', dup)
+
+        hdus = self.calls('save', None, folder, name_format, overwrite)
+        # reload
+        self[:] = self.__class__(hdus)
+        return self
 
     def update_headers(self, **kws):
         self.calls('auto_update_header', **kws)
@@ -1114,122 +1141,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         return groups
 
-    def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False,
-              return_deltas=False, report=False, threshold_warn=None, ):
-        """
-        Match these observations with those in `other` according to their
-        attribute values. Matches exactly the attributes given in `exact`,
-        and as closely as possible to those in `closest`. Group both
-        campaigns by the values at attributes.
-
-        Parameters
-        ----------
-        other: shocCampaign
-            shocCampaign instance from which observations will be picked to
-            match those in this list
-        exact: tuple or str
-            single or multiple attribute names to check for equality between
-            the two runs. For null matches, None is returned.
-        closest: tuple or str, optional, default=()
-            single or multiple keywords to match as closely as possible between
-            the two runs. The attributes which are pointed to by these should
-            support item subtraction since closeness is taken to mean the
-            absolute difference between the two attribute values.
-        keep_nulls: bool, optional, default=False
-            Whether to keep the empty matches. ie. if there are observations in
-            `other` that have no match in this observation set, keep those
-            observations in the grouping and substitute `None` as the value for
-            the corresponding key in the resulting dict. This parameter affects
-            only matches in the grouping of the `other` shocCampaign.
-            Observations without matches in `self` (this run) are always kept so
-            that full set of observations are always accounted for in the
-            resultant grouping. A consequence of setting this to False (the
-            default) is therefore that the two groupings returned by this
-            function will have different keys, which may or may not be desired
-            for further
-            analysis.
-        return_deltas: bool, default=False
-            return a dict of distance matrices between 'closest' attributes
-        report: bool, optional, default=False
-            whether to print the resulting matches in a table
-        threshold_warn: int, optional, default=None
-            If the difference in attribute values for attributes in `closest`
-            are greater than `threshold_warn`, a warning is emitted
-
-        Returns
-        -------
-        out0, out1: shocObsGroups
-            a dict-like object keyed on the attribute values of `keys` and
-            mapping to unique `shocCampaign` instances
-        """
-
-        # self.logger.info(
-        #         'Matching %s frames to %s frames by:\tExact %s;\t Closest %r',
-        #         other.kind.upper(), self.kind.upper(), exact, closest)
-
-        # create the GroupedRun for science frame and calibration frames
-        exact, closest = str2tup(exact), str2tup(closest)
-        keys = OrderedSet(filter(None, mit.flatten([exact, closest])))
-
-        if not keys:
-            raise ValueError('Need at least one `key` (attribute name) by which'
-                             ' to match')
-        # assert len(other), 'Need at least one other observation to match'
-        if threshold_warn is not None:
-            threshold_warn = np.atleast_1d(threshold_warn)
-            assert threshold_warn.size == len(closest)
-
-        g0 = self.group_by(*exact)
-        g1 = other.group_by(*exact)
-        out0 = self.new_groups()
-        out0.group_id = keys, {}
-        out1 = other.new_groups()
-        out1.group_id = keys, {}
-
-        # iterate through all group keys. There may be unmatched groups in both
-        deltas = {}
-        for key, obs0 in g0.items():
-            obs1 = g1.get(key)
-            for id_, sub0, sub1, delta in obs0._group_close(obs1, closest):
-                gid = (*key, *id_)
-                # group
-                out0[gid] = sub0
-                out1[gid] = sub1
-                # delta matrix
-                deltas[gid] = delta
-
-        if report:
-            pprint_match(out0, out1, deltas, closest, threshold_warn)
-
-        # filter null matches. If you do better with `pprint_match` you can
-        # remove this block
-        if not keep_nulls:
-            for key in list(out1.keys()):
-                if out1[key] is None:
-                    out1.pop(key)
-
-        if closest and return_deltas:
-            return out0, out1, deltas
-
-        return out0, out1
-
-    # def delta_matrix(self, other, keys):
-    #     # get delta matrix.  keys are attributes of the HDUs
-    #     v0 = self.attrs(*keys)
-    #     v1 = other.attrs(*keys)
-    #     return np.abs(v0[:, None] - v1)
-
-    def _group_close(self, other, keys):
-        # Do the matching - map observation to those in `other` with attribute
-        # values matching most closely
-        if None in (self, other) or not keys:
-            yield (), self, other, None
-            return
-
-        # split sub groups for closest match
-        for vals, l0, l1, deltas in split_dist(self.attrs(*keys),
-                                               other.attrs(*keys)):
-            yield vals, self[l0], other[l1], deltas
+    def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False):
+        return MatchedObservations(self, other)(
+            exact, closest, cutoffs, keep_nulls
+        )
 
     def combine(self, func=None, *args, **kws):
         """
@@ -1277,7 +1192,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         self.calls('auto_update_header')
         header = headers_intersect(self)
         #     header['DATE'] = self[0].header['date']  # HACK
-        hdu = shocHDU(np.dstack([hdu.data for hdu in self]),
+        hdu = shocHDU(np.concatenate([_3d(hdu.data) for hdu in self]),
                       header)
         msg = self.message(f'Stacked {len(self)} files.')
         hdu.header.add_history(msg)
@@ -1471,27 +1386,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     # def partition_by_source():
 
 
-class GroupTitle:
-    width = None
-    # formater = 'group {}'
-
-    def __init__(self, i, keys, props):
-        self.g = f'group {i}:'
-        self.s = self.format_key(keys)
-        # self.s = "; ".join(map('{:s} = {:s}'.format, *zip(*info.items())))
-        self.props = props
-
-    # @staticmethod
-    def format_key(self, keys):
-        if isinstance(keys, str):
-            return keys
-        return "; ".join(map(str, keys))
-
-    def __str__(self):
-        return '\n' + overlay(codes.apply(self.s, self.props),
-                              self.g.ljust(self.width))
-
-
 def make_title(keys):
     if isinstance(keys, str):
         return keys
@@ -1512,9 +1406,8 @@ class shocObsGroups(Grouped):
         # set default default factory ;)
         super().__init__(factory, *args, **kws)
 
-    def get_tables(self, titled=make_title, headers=False, **kws):
+    def get_tables(self, titled=make_title, **kws):
         # TODO: move to motley.table
-        # FIXME: headers param not used
         """
         Get a dictionary of tables (`motley.table.Table` objects) for this
         grouping. This method assists pretty printing groups of observation
@@ -1547,14 +1440,13 @@ class shocObsGroups(Grouped):
         if len(self) > 1:
             if self.group_id != ((), {}):
                 keys, _ = self.group_id
-                key_types = dict()
-                for gid, grp in itt.groupby(keys, type):
-                    key_types[gid] = list(grp)
+                key_types = {gid: list(grp)
+                             for gid, grp in itt.groupby(keys, type)}
                 attrs_grouped_by = key_types.get(str, ())
                 attrs -= set(attrs_grouped_by)
 
             # check which columns are compactable
-            attrs_varies = set(key for key in attrs if self.varies_by(key))
+            attrs_varies = {key for key in attrs if self.varies_by(key)}
             compactable = attrs - attrs_varies
             attrs -= compactable
 
@@ -1635,7 +1527,7 @@ class shocObsGroups(Grouped):
         # tables.update(empty)
         return tables
 
-    def pformat(self, titled=make_title, headers=False, braces=False, vspace=0,
+    def pformat(self, titled=make_title, braces=False, vspace=1,
                 **kws):
         """
         Run pprint on each group
@@ -1645,12 +1537,12 @@ class shocObsGroups(Grouped):
 
         from motley.utils import vstack, hstack
 
-        tables = self.get_tables(titled, headers, **kws)
+        tables = self.get_tables(titled, **kws)
         ordered_keys = list(tables.keys())  # key=sort
         stack = [tables[key] for key in ordered_keys]
 
         if not braces:
-            return vstack(stack, bool(titled), vspace)
+            return vstack(stack, not bool(titled), True, vspace)
 
         braces = ''
         for i, gid in enumerate(ordered_keys):
@@ -1666,7 +1558,7 @@ class shocObsGroups(Grouped):
 
     def pprint(self, titled=make_title, headers=False, braces=False, vspace=0,
                **kws):
-        print(self.pformat(titled, headers, braces, vspace, **kws))
+        print(self.pformat(titled, braces, vspace, **kws))
 
     def map(self, func, *args, **kws):
         # runs an arbitrary function on each shocCampaign in the group
@@ -1674,10 +1566,7 @@ class shocObsGroups(Grouped):
         out.group_id = self.group_id
 
         for key, obj in self.items():
-            if obj is None:
-                out[key] = None
-            else:
-                out[key] = func(obj, *args, **kws)
+            out[key] = None if obj is None else func(obj, *args, **kws)
         return out
 
     def calls(self, name, *args, **kws):
@@ -1703,11 +1592,11 @@ class shocObsGroups(Grouped):
 
     def attrs(self, *keys):
         out = {}
-        for key, obs in self.items():
+        for key, obj in self.items():
             if obj is None:
                 out[key] = None
-            elif isinstance(key, shocCampaign):
-                out[key] = obs.attrs(*keys)
+            elif isinstance(obj, shocCampaign):
+                out[key] = obj.attrs(*keys)
             elif isinstance(obj, shocHDU):
                 out[key] = op.attrgetter(*keys)(obj)
         return out
@@ -1728,6 +1617,7 @@ class shocObsGroups(Grouped):
                     if len(obs)})
         return out
 
+    # TODO: move methods below to MatchedObservations ???
     def comap(self, func, other, *args, **kws):
         out = self.__class__()
         for key, run in self.items():
@@ -1735,17 +1625,17 @@ class shocObsGroups(Grouped):
             if run is None:
                 continue
 
-            if co is None:
-                out[key] = None
-            else:
-                out[key] = func(run, co, *args, **kws)
-
+            out[key] = None if co is None else func(run, co, *args, **kws)
         return out
 
     def _comap_method(self, other, name, *args, **kws):
-
-        if not set(other.keys()) == set(self.keys()):
-            raise ValueError('GroupId mismatch')
+        
+        missing = set(self.keys()) - set(other.keys())
+        if missing:
+            raise ValueError(
+                'Can\'t map method {name} over group. Right group is missing '
+                'values for the following keys: ' + '\n'.join(map(str, missing))
+                )
 
         out = self.__class__()
         for key, run in self.items():
@@ -1753,11 +1643,8 @@ class shocObsGroups(Grouped):
             if run is None:
                 continue
 
-            if co is None:
-                out[key] = None
-            else:
-                out[key] = getattr(run, name)(co, *args, **kws)
-
+            out[key] = (None if co is None else
+                        getattr(run, name)(co, *args, **kws))
         return out
 
     def subtract(self, biases):
@@ -1803,142 +1690,17 @@ class shocObsGroups(Grouped):
         # since this calls `save` on polymorphic class HDU / Campaign and 'save'
         # method in each of those have different signature, we have to unpack
         # the keyword
-        return self.calls('save',
-                          folder=folder,
-                          name_format=name_format,
-                          overwrite=overwrite)
 
+        for key, obj in self.items():
+            self[key] = obj.save(folder=folder,
+                                 name_format=name_format,
+                                 overwrite=overwrite)
 
-class Filler:
-    s = 'NO MATCH'
-    table = None
+        # return self.to_list().save(folder=folder,
+        #                            name_format=name_format,
+        #                            overwrite=overwrite).group_by(self)
 
-    def __init__(self, style):
-        self.style = style
-
-    def __str__(self):
-        self.table.pre_table[0, 0] = codes.apply(self.s, self.style)
-        return str(self.table)
-
-    @classmethod
-    def make(cls, table):
-        cls.table = table.empty_like(1, frame=False)
-
-
-def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
-                 group_header_style='bold', no_match_style='r', g1_style='c',
-                 ):
-
-    # create tmp shocCampaign so we can use the builtin pprint machinery
-    tmp = shocCampaign()
-    size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
-    depth = np.product(
-        np.array(list(map(np.shape, deltas.values()))).max(0)[[0, -1]])
-    dtmp = np.ma.empty((size, depth), 'O')  # len(closest)
-    dtmp[:] = np.ma.masked
-
-    # remove group-by keys that are same for all
-    group_id = tuple(g0.group_id[0])
-    varies = [(g0.varies_by(key) | g1.varies_by(key)) for key in group_id]
-    unvarying = np.where(~np.array(varies))[0]
-    # use_key, = np.where(varies)
-
-    # remove keys that grouping is done by
-    attrs = OrderedSet(tmp.table.attrs)
-    for g in group_id:
-        for a in list(attrs):
-            if a.startswith(g):
-                attrs.remove(a)
-
-    #
-    insert = defaultdict(list)
-    highlight = {}
-    hlines = []
-    n = 0
-    for i, (key, obs) in enumerate(g0.items()):
-        other = g1[key]
-        use = varies[:len(key)]
-        display_keys = np.array(key, 'O')[use]
-        # headers = tmp.table.get_headers(np.array(group_id)[varies])
-        # info = dict(zip(headers, display_keys))
-
-        # insert group headers
-        group_header = GroupTitle(i, display_keys, group_header_style)
-        insert[n].append((group_header, '<', 'underline'))
-
-        # populate delta table
-        s0 = n + np.size(other)
-        delta_mtx = np.ma.hstack(deltas.get(key, [np.ma.masked]))
-        dtmp[s0:s0 + np.size(obs), :delta_mtx.shape[-1]] = delta_mtx
-
-        #
-        for j, (run, c) in enumerate(zip([other, obs], [no_match_style, ''])):
-            if run is None:
-                insert[n].append(Filler(c))
-            else:
-                tmp.extend(run or ())
-                size = len(run)
-                end = n + size
-                # highlight other
-                if j == 0:
-                    for m in range(n, end):
-                        highlight[m] = g1_style
-                n = end
-
-        # separate groups by horizontal lines
-        # hlines.append(n - 1)
-
-    # get title
-    lc = len(closest)
-    title = 'Matched Observations \nexact: {}'.format(group_id[:-lc])
-    if lc:
-        title += ' \nclosest: {}'.format(group_id[-lc:])
-
-    # get attribute table
-    tbl = get_table(tmp, attrs, hlines=hlines, title=title, title_align='<',
-                    insert=insert, row_nrs=False, totals=False)
-
-    # filler lines
-    Filler.make(tbl)
-    GroupTitle.width = tbl.get_width() - 1
-
-    # fix for final run null match
-    if run is None:
-        tbl.hlines.pop(-1)
-        tbl.insert[n][-1] = (tbl.insert[n][-1], '', 'underline')
-
-    # highlight `other`
-    tbl.highlight = highlight
-
-    # hack compact repr
-    tbl.compact_items = dict(zip(np.take(group_id, unvarying),
-                                 np.take(key, unvarying)))
-
-    # create delta table
-    if False:
-        import operator as op
-        import itertools as itt
-
-        from motley import codes
-        from motley.utils import hstack, overlay, ConditionalFormatter
-
-        headers = list(map('Δ({})'.format, tmp.table.get_headers(closest)))
-        formatters = []
-        fmt_db = {'date': lambda d: d.days}
-        deltas0 = next(iter(deltas.values())).squeeze()
-        for d, w in zip(deltas0, threshold_warn):
-            fmt = ConditionalFormatter('yellow', op.gt,
-                                       type(d)(w.item()), fmt_db.get(kw))
-            formatters.append(fmt)
-        #
-        insert = {ln: [('\n', '>', 'underline')] + ([''] * (len(v) - 2))
-                  for ln, v in tbl.insert.items()}
-        formatters = formatters or None
-        headers = headers * (depth // len(closest))
-        d_tbl = Table(dtmp, col_headers=headers, formatters=formatters,
-                      insert=insert, hlines=hlines)
-        print(hstack((tbl, d_tbl)))
-    else:
-        print(tbl)
-        print()
-        return tbl
+        # return self.calls('save',
+        #                   folder=folder,
+        #                   name_format=name_format,
+        #                   overwrite=overwrite)

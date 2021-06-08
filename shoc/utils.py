@@ -1,5 +1,11 @@
-import copy
+from copy import copy
 from astropy.io import fits
+
+
+def str2tup(keys):
+    if isinstance(keys, str):
+        keys = (keys, )
+    return keys
 
 
 def combine_single_images(ims, func):  # TODO MERGE WITH shocObs.combine????
