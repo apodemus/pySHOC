@@ -1,14 +1,20 @@
-import more_itertools as mit
-import re
-# from anytree.node.nodemixin import NodeMixin
+
+
+# local libs
+from recipes import bash
 from recipes.dicts import AVDict
+from recipes.logging import LoggingMixin
+from pyxis.containers import PrettyPrinter
+
+# std libs
+import re
+
+
+
+# from anytree.node.nodemixin import NodeMixin
 # from anytree import RenderTree
 # from collections import defaultdict
-from recipes.containers import PrettyPrinter
 # import itertools as itt
-from recipes import bash  # Node, brace_contract, render_tree
-
-from recipes.logging import logging, LoggingMixin
 
 
 # # module level logger
@@ -16,27 +22,23 @@ from recipes.logging import logging, LoggingMixin
 # logging.basicConfig()
 # logger.setLevel(logging.INFO)
 
-#                            prefix,    year,  month, date,    nr
-RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})\.(.+)')
+#                            prefix,    year,  month, date,  nr
+RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
+
+# ---------------------------------------------------------------------------- #
 
 
-# def name_grouper(name):
-#     if not name:
-#         return 0, name
+def hbrace(size, name=''):
+    #
+    if size < 3:
+        return '← ' + str(name) + '\n' * (int(size) // 2)
 
-#     mo = RGX_FILENAME.match(name)
-#     if mo:
-#         return 1, mo
-
-#     return 2, name
-
-
-# def group_names(run):
-#     names = defaultdict(list)
-#     for name in run.files.stems:
-#         g, mo = name_grouper(name)
-#         names[g].append(mo)
-#     return names
+    d, r = divmod(int(size) - 3, 2)
+    return '\n'.join(['⎫'] +
+                     ['⎪'] * d +
+                     ['⎬ %s' % str(name)] +
+                     ['⎪'] * (d + r) +
+                     ['⎭'])
 
 
 def morph(dic, parent):
@@ -49,7 +51,7 @@ def get_tree_ymd(names, depth=-1):
     for file in names:
         mo = RGX_FILENAME.match(file)
         if mo is None:
-            continue
+            raise ValueError('Filename does not have YYYYMMDD.nnn pattern')
         parts = mo.groups()
         node = tree
         for part in parts:
@@ -60,22 +62,28 @@ def get_tree_ymd(names, depth=-1):
     root.collapse(depth)
     return root
 
+# ---------------------------------------------------------------------------- #
 
+# FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES
 class TreeRepr(PrettyPrinter, LoggingMixin):
 
     brackets: str = ('', '')
-    depth = -1
+    depth = 1
 
-    def get_tree(self, run):
+    def get_tree(self, run, depth=None):
+        if depth is None:
+            depth = self.depth
         try:
             # Filenames partitioned by year, month day
-            return get_tree_ymd(run.files.names, self.depth)
+            return get_tree_ymd(run.files.names, depth)
         except ValueError as err:
-            self.logger.debug('Failed to get filename tree with YMD pattern.\n$=%s\n'
-                              'Building tree letter by letter', err)
+            self.logger.debug(
+                'Failed to get filename tree with YYYYMMDD.nnn pattern.\n$=%s\n'
+                'Building tree letter by letter', err
+            )
 
-        # more general partitioning
-        return bash.get_tree(run.files.names, self.depth)
+        # fully general partitioning of filenames
+        return bash.get_tree(run.files.names, depth)
 
     def joined(self, run, indent=None):
         return self.get_tree(run).render()
@@ -92,7 +100,7 @@ class BraceContract(TreeRepr):
     depth = 1
 
     def __call__(self, run):
-
+        # FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES
         if len(run) <= 1:
             return super().__call__(run)
 
