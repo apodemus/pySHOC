@@ -140,6 +140,10 @@ disable=print-statement,
         exception-escape,
         comprehension-escape,
         invalid-name,
+        import-outside-toplevel,
+        non-ascii-name,
+        too-many-instance-attributes,
+        too-many-arguments,
         too-many-lines
 
 # Enable the message, report, category or checker with the given id(s). You can
@@ -286,7 +290,10 @@ ignore-on-opaque-inference=yes
 # List of class names for which member attributes should not be checked (useful
 # for classes with dynamically set attributes). This supports the use of
 # qualified names.
-ignored-classes=optparse.Values,thread._local,_thread._local
+ignored-classes=optparse.Values,
+                thread._local,
+                _thread._local,
+                recipes.testing.Expect,
 
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime
@@ -382,7 +389,30 @@ function-naming-style=snake_case
 #function-rgx=
 
 # Good variable names which should always be accepted, separated by a comma.
-good-names=i, j, k, ex, Run, x, y, z, t, t0, ra, jd
+good-names=i,
+           j,
+           k,
+           l,
+           ex,
+           Run,
+           _,
+           n,
+           m,
+           p,
+           s,
+           t,
+           u,
+           w,
+           x,
+           y,
+           z,
+           ra,
+           jd,
+           fp,
+           nr,
+           dt,
+           df,
+           fs
 
 # Good variable names regexes, separated by a comma. If names match any regex,
 # they will always be accepted
@@ -418,7 +448,7 @@ name-group=
 
 # Regular expression which should only match function or class names that do
 # not require a docstring.
-no-docstring-rgx=^_
+no-docstring-rgx=^(_|[tT]est_)
 
 # List of decorators that produce properties, such as abc.abstractproperty. Add
 # to this list to register other decorators that produce valid properties.
@@ -430,7 +460,7 @@ variable-naming-style=snake_case
 
 # Regular expression matching correct variable names. Overrides variable-
 # naming-style.
-variable-rgx=[a-z_][a-z0-9_]{0,30}
+variable-rgx=[a-z_][a-z0-9_]{0,30}$
 
 
 [SPELLING]
@@ -533,7 +563,7 @@ preferred-modules=
 [DESIGN]
 
 # Maximum number of arguments for function / method.
-max-args=5
+max-args=7
 
 # Maximum number of attributes for a class (see R0902).
 max-attributes=7
@@ -560,7 +590,7 @@ max-returns=6
 max-statements=50
 
 # Minimum number of public methods for a class (see R0903).
-min-public-methods=2
+min-public-methods=0
 
 
 [CLASSES]
