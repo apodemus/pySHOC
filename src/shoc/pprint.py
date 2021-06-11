@@ -1,14 +1,15 @@
-
-
-# local libs
-from recipes import bash
-from recipes.dicts import AVDict
-from recipes.logging import LoggingMixin
-from pyxis.containers import PrettyPrinter
+"""
+Pretty printing for shocCampaign
+"""
 
 # std libs
 import re
 
+# local libs
+from pyxis.pprint import PrettyPrinter
+from recipes import bash
+from recipes.dicts import AVDict
+from recipes.logging import LoggingMixin
 
 
 # from anytree.node.nodemixin import NodeMixin
@@ -64,7 +65,8 @@ def get_tree_ymd(names, depth=-1):
 
 # ---------------------------------------------------------------------------- #
 
-# FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES
+# FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES???
+
 class TreeRepr(PrettyPrinter, LoggingMixin):
 
     brackets: str = ('', '')
@@ -85,7 +87,7 @@ class TreeRepr(PrettyPrinter, LoggingMixin):
         # fully general partitioning of filenames
         return bash.get_tree(run.files.names, depth)
 
-    def joined(self, run, indent=None):
+    def joined(self, run):
         return self.get_tree(run).render()
 
 
@@ -99,13 +101,12 @@ class BraceContract(TreeRepr):
     per_line = 1
     depth = 1
 
-    def __call__(self, run):
-        # FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES
-        if len(run) <= 1:
-            return super().__call__(run)
+    # def __call__(self, run):
+    #     if len(run) <= 1:
+    #         return super().__call__(run)
 
-        # contracted
-        return super().__call__(run)
+    #     # contracted
+    #     return super().__call__(run)
 
     # @ftl.rlu_cache()
     def joined(self, run):

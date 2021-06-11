@@ -1,6 +1,7 @@
 # __version__ = '3.14'
 
 
+
 # std libs
 import operator as op
 import warnings as wrn
@@ -10,25 +11,25 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 # third-party libs
+import numpy as np
 from scipy import stats
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
-import numpy as np
 
 # local libs
-from motley.table import AttrTable, Table
-from scrawl.imagine import plot_image_grid
 from recipes import pprint
 from recipes.sets import OrderedSet
 from recipes.string import sub, remove_prefix
-from pyxis.containers import Grouped, OfType
 from recipes.introspect import get_caller_name
 from obstools.image.calibration import keep
 from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
 from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
+from pyxis import Groups, OfType
+from motley.table import AttrTable, Table
+from scrawl.imagine import plot_image_grid
 
 # relative libs
 from .utils import str2tup
@@ -1392,7 +1393,7 @@ def make_title(keys):
     return "; ".join(map(str, keys))
 
 
-class shocObsGroups(Grouped):
+class shocObsGroups(Groups):
     """
     Emulates dict to hold multiple shocRun instances keyed by their shared
     common attributes. The attribute names given in groupId are the ones by
