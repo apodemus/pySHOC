@@ -1,7 +1,6 @@
 # __version__ = '3.14'
 
 
-
 # std libs
 import operator as op
 import warnings as wrn
@@ -111,8 +110,8 @@ def _3d(array):
         return array.reshape((1, *array.shape))
     if array.ndim == 3:
         return array
-    raise ValueError('Nope!') 
-    
+    raise ValueError('Not 3D!')
+
 
 def apply_stack(func, *args, **kws):  # TODO: move to proc
     # TODO:  MULTIPROCESS HERE!
@@ -383,6 +382,8 @@ class shocHDU(HDUExtra, Messenger):
 
         #
         class_name = f'shoc{age}{kind}{suffix}'
+        print(f'{obstype=}')
+        print(f'{class_name=}')
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: %r', obstype)
@@ -734,7 +735,8 @@ class shocHDU(HDUExtra, Messenger):
 
         if not callable(func):
             raise TypeError(
-                f'Parameter `func` should be callable. Received {type(func)}')
+                f'Parameter `func` should be callable. Received {type(func)}'
+            )
 
         # check if single image
         if (self.ndim == 2) or ((self.ndim == 3) and len(self.data) == 1):
@@ -1561,47 +1563,6 @@ class shocObsGroups(Groups):
                **kws):
         print(self.pformat(titled, braces, vspace, **kws))
 
-    def map(self, func, *args, **kws):
-        # runs an arbitrary function on each shocCampaign in the group
-        out = self.__class__()
-        out.group_id = self.group_id
-
-        for key, obj in self.items():
-            out[key] = None if obj is None else func(obj, *args, **kws)
-        return out
-
-    def calls(self, name, *args, **kws):
-        """
-        For each group of observations (shocCampaign), call the
-        method with name `name`  passing  `args` and `kws`.
-
-        Parameters
-        ----------
-        name
-        args
-        kws
-
-        Returns
-        -------
-
-        """
-
-        def run_method(obj, *args, **kws):
-            return getattr(obj, name)(*args, **kws)
-
-        return self.map(run_method, *args, **kws)
-
-    def attrs(self, *keys):
-        out = {}
-        for key, obj in self.items():
-            if obj is None:
-                out[key] = None
-            elif isinstance(obj, shocCampaign):
-                out[key] = obj.attrs(*keys)
-            elif isinstance(obj, shocHDU):
-                out[key] = op.attrgetter(*keys)(obj)
-        return out
-
     def combine(self, func=None, *args, **kws):
         return self.calls('combine', func, *args, **kws)
 
@@ -1630,13 +1591,13 @@ class shocObsGroups(Groups):
         return out
 
     def _comap_method(self, other, name, *args, **kws):
-        
+
         missing = set(self.keys()) - set(other.keys())
         if missing:
             raise ValueError(
                 'Can\'t map method {name} over group. Right group is missing '
                 'values for the following keys: ' + '\n'.join(map(str, missing))
-                )
+            )
 
         out = self.__class__()
         for key, run in self.items():
