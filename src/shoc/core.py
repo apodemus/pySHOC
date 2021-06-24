@@ -19,6 +19,7 @@ from astropy.coordinates import SkyCoord, EarthLocation
 
 # local libs
 from recipes import pprint
+from recipes.dicts import pformat
 from recipes.sets import OrderedSet
 from recipes.string import sub, remove_prefix
 from recipes.introspect import get_caller_name
@@ -33,20 +34,15 @@ from scrawl.imagine import plot_image_grid
 # relative libs
 from .utils import str2tup
 from .pprint import BraceContract
-from .match import MatchedObservations
+
 from .readnoise import readNoiseTables
 from .timing import shocTiming, Trigger, UnknownTime
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
 from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
 
 
-# from shoc.image.sample import ResampleFlip
-# from recipes.decor import expose
-
-
-# only emit this warning once!
+# emit these warnings once only!
 wrn.filterwarnings('once', 'Using telescope pointing coordinates')
-
 
 # TODO
 # __all__ = ['']
@@ -62,31 +58,33 @@ SERIAL_NRS = [5982, 6448]
 # ------------------------------ Telescope info ------------------------------ #
 
 # Field of view of telescopes in arcmin
-FOV74 = (1.29, 1.29)
-FOV74r = (2.79, 2.79)  # with focal reducer
-FOV40 = (2.85, 2.85)
-FOV_LESEDI = (5.7, 5.7)
+FOV = {'74':     (1.29, 1.29),
+       '40':     (2.85, 2.85),
+       'lesedi': (5.7, 5.7)}
+FOVr = {'74':    (2.79, 2.79)}  # with focal reducer
 # fov30 = (3.73, 3.73) # decommissioned
-
-FOV = {'74': FOV74, '1.9': FOV74,
-       '40': FOV40, '1.0': FOV40, '1': FOV40,
-       # '30': fov30, '0.75': fov30, # decommissioned
-       }
-FOVr = {'74': FOV74r,
-        '1.9': FOV74r}
+# '30': fov30, '0.75': fov30, # decommissioned
 
 # Exact GPS locations of telescopes
-TEL_GEO_LOC = {'74in': (20.81167, -32.462167, 1822),
-               '40in': (20.81, -32.379667, 1810),
-               'lesedi': (20.8105, -32.379667, 1811),
-               'salt': (20.810808, 32.375823, 1798)}
+TEL_GEO_LOC = {'74in':   (20.81167,  -32.462167, 1822),
+               '40in':   (20.81,     -32.379667, 1810),
+               'lesedi': (20.8105,   -32.379667, 1811),
+               'salt':   (20.810808, -32.375823, 1798)}
 LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
              for tel, geo in TEL_GEO_LOC.items()}
+
+# names
+TEL_NAME_EQUIVALENT = {'74': 74, '1.9': 74,
+                       '40': 40, '1.0': 40, '1': 40}
+KNOWN_TEL_NAMES = [*LOCATIONS, *TEL_NAME_EQUIVALENT]
 
 
 # ----------------------------- module constants ----------------------------- #
 CALIBRATION_NAMES = ('bias', 'flat', 'dark')
-OBSTYPE_EQUIVALENT = {'bias': 'dark'}
+OBSTYPE_EQUIVALENT = {'bias': 'dark',
+                      'skyflat': 'flat'}
+KNOWN_OBSTYPE = {*CALIBRATION_NAMES, *OBSTYPE_EQUIVALENT, 'object'}
+
 EMPTY_FILTER_NAME = '∅'
 
 # Attributes for matching calibration frames
@@ -104,6 +102,7 @@ MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 # ----------------------------- helper functions ----------------------------- #
 
+
 def _3d(array):
     """Add axis in 0th position to make 3d"""
     if array.ndim == 2:
@@ -118,26 +117,53 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
     return func(*args, **kws)
 
 
-# def get_id(hdu):
-#     """
-#     Unique identifier (hash) for hdus
-#     """
-#     # use the hashed header as identifier for the file in HISTORY
-#     fid = string_to_int(str(hdu.header))
-#     if hdu._file:
-#         fid = " ".join((str(fid), hdu.filename))
-#     return fid
+def get_tel(telescope):
+    telescope = str(telescope)
+    telescope = telescope.rstrip('inm ')  # strip "units" in name
+    if telescope not in KNOWN_TEL_NAMES:
+        raise ValueError(f'Telescope name {telescope!r} not recognised. Please '
+                         f'use one of the following\n: {KNOWN_TEL_NAMES}')
+
+    return f'{TEL_NAME_EQUIVALENT[telescope]}in'
 
 
-# def string_to_int(s):
-#     # persistent hash https://stackoverflow.com/a/2511232
-#     return int(''.join(('%.3d' % ord(x) for x in s)))
+def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
+    """
+    Get telescope field of view
 
+    Parameters
+    ----------
+    telescope
+    with_focal_reducer
+    unit
 
-# def int_to_string(n):
-#     s = str(n)
-#     return ''.join((chr(int(s[i:i + 3])) for i in range(0, len(s), 3)))
+    Returns
+    -------
 
+    Examples
+    --------
+    >>> get_fov(1)               # 1.0m telescope
+    >>> get_fov(1.9)             # 1.9m telescope
+    >>> get_fov(74)              # 1.9m
+    >>> get_fov('74in')          # 1.9m
+    >>> get_fov('40 in')         # 1.0m
+    """
+
+    telescope = get_tel(telescope)
+    fov = (FOVr if with_focal_reducer else FOV).get(telescope)
+
+    # at this point we have the FoV in arcmin
+    # resolve units
+    if unit in ('arcmin', "'"):
+        factor = 1
+    elif unit in ('arcsec', '"'):
+        factor = 60
+    elif unit.startswith('deg'):
+        factor = 1 / 60
+    else:
+        raise ValueError('Unknown unit %s' % unit)
+
+    return np.multiply(fov, factor)
 
 # ------------------------------ Helper classes ------------------------------ #
 
@@ -205,8 +231,8 @@ class Filters:
     def __repr__(self):
         return f'{self.__class__.__name__}{self.__members()}'
 
-    def __format__(self, spec):
-        return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
+    # def __format__(self, spec):
+    #     return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
 
     def __str__(self):
         return self.name
@@ -226,6 +252,11 @@ class Filters:
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
         return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
+
+    def to_header(self, header):
+        _remap = {EMPTY_FILTER_NAME: 'Empty'}
+        for name, val in self.__dict__.items():
+            header[f'FILTER{name}'] = _remap.get(val, val)
 
 
 @dataclass()
@@ -382,8 +413,7 @@ class shocHDU(HDUExtra, Messenger):
 
         #
         class_name = f'shoc{age}{kind}{suffix}'
-        print(f'{obstype=}')
-        print(f'{class_name=}')
+        cls.logger.debug(f'{obstype=}, {class_name=}')
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: %r', obstype)
@@ -399,16 +429,15 @@ class shocHDU(HDUExtra, Messenger):
         # init PrimaryHDU
         super().__init__(data=data, header=header, *args, **kws)
 
-        serial = header['SERNO']
-        self.camera = f'SHOC{SERIAL_NRS.index(serial) + 1}'
-        self.telescope = header.get('TELESCOP')
+        #
+        self.camera = f'SHOC{SERIAL_NRS.index(header["SERNO"]) + 1}'
         self.location = LOCATIONS.get(self.telescope)
-
+        self._coords = None     # placeholder
         # # field of view
         # self.fov = self.get_fov()
 
         # image binning
-        self.binning = Binning(header['%sBIN' % _] for _ in 'VH')
+        self.binning = Binning(header[f'{_}BIN'] for _ in 'VH')
 
         # sub-framing
         self.subrect = np.array(header['SUBRECT'].split(','), int)
@@ -429,19 +458,19 @@ class shocHDU(HDUExtra, Messenger):
         # NOTE: IMAGE ORIENTATION reversed for EM mode data since it gets read
         #  out in opposite direction in the EM register to CON readout.
 
-        # filters
-        self._filters = Filters(*(header.get(f'FILTER{_}', 'Empty')
-                                  for _ in 'AB'))
-
-        # object name
-        self.target = header.get('OBJECT')
-        self.obstype = obstype or header.get('OBSTYPE')
-
         # # manage on-the-fly image orientation
         # self.oriented = ImageOrienter(self, x=self.readout.isEM)
 
         # # manage on-the-fly calibration for large files
         # self.calibrated = ImageCalibration(self)
+
+        # filters
+        self._filters = Filters(*(header.get(f'FILTER{_}', 'Empty')
+                                  for _ in 'AB'))
+
+        # observation type
+        if obstype:
+            self.obstype = obstype
 
     def __str__(self):
         attrs = ('t.t0_flagged', 'binning', 'readout.mode', 'filters')
@@ -450,55 +479,53 @@ class shocHDU(HDUExtra, Messenger):
         return f'<{self.__class__.__name__}:{sep.join(map(str, info))}>'
 
     @property
-    def filters(self):
-        return self._filters
-
-    @filters.setter
-    def filters(self, filters):
-        self._filters = Filters(*str2tup(filters))
-
-    @property
     def nframes(self):
         """Total number of images in observation"""
         if self.ndim == 2:
             return 1
         return self.shape[0]  #
 
-    @lazyproperty
-    def oriented(self):
-        """
-        Use this to get images with the correct orientation:
-        North up, East left.
+    @property
+    def obstype(self):
+        return self._obstype
 
-        This is necessary since EM mode images have opposite x-axis
-        orientation since  pixels are read out in the opposite direction
-        through the readout register.
+    @obstype.setter
+    def obstype(self, obstype):
+        if obstype not in KNOWN_OBSTYPE:
+            raise ValueError(f'Unrecognised {OBSTYPE=}')
 
-        Images taken in CON mode are flipped left-right.
-        Images taken in EM  mode are left unmodified
+        self._obstype = self.header['OBSTYPE'] = obstype
 
-        """
-        from obstools.image.orient import ImageOrienter
-        # will flip EM images x axis (2nd axis)
-        return ImageOrienter(self, x=self.readout.isCON)
+    @property
+    def filters(self):
+        return self._filters
 
-    @lazyproperty
-    def timing(self):
-        # Initialise timing
-        # this is delayed from init on the hdu above since this class may
-        # initially be created with a `_BasicHeader` only, in which case we
-        # will not yet have all the correct keywords available yet to identify
-        # old vs new shoc data
-        try:
-            return shocTiming(self)
-        except:
-            return UnknownTime
+    @filters.setter
+    def filters(self, filters):
+        self._filters = Filters(*str2tup(filters))
+        self._filters.to_header(self.header)
 
-    # alias
-    t = timing
+    @property
+    def telescope(self):
+        return self.header.get('TELESCOP')
 
-    @lazyproperty
-    def coords(self):
+    @telescope.setter
+    def telescope(self, telescope):
+        tel = self.header['TELESCOP'] = get_tel(telescope)
+        self.location = LOCATIONS.get(tel)
+
+    @property
+    def target(self):
+        return self.header.get('OBJECT')
+
+    @target.setter
+    def target(self, name):
+        ot = self.target
+        trg = self.header['OBJECT'] = str(name)
+        if ot != trg:
+            del self.coords
+
+    def _get_coords(self):
         """
         The target coordinates.  This function will look in multiple places
         to find the coordinates.
@@ -536,11 +563,21 @@ class shocHDU(HDUExtra, Messenger):
         ra, dec = header.get('TELRA'), header.get('TELDEC')
         coords = convert_skycoords(ra, dec)
 
-        # TODO: optionally query for named sources in this location
         if coords:
             wrn.warn('Using telescope pointing coordinates')
 
         return coords
+
+    def _set_coords(self, coords):
+        from astropy.coordinates import SkyCoord
+
+        self._coords = coo = SkyCoord(coords, unit=('h', 'deg'))
+        self.header.update(
+            OBJRA=coo.ra.to_string('hourangle', sep=':', precision=1),
+            OBJDEC=coo.dec.to_string('deg', sep=':', precision=1),
+        )
+
+    coords = lazyproperty(_get_coords, _set_coords)
 
     def pointing_zenith(self, tol=2):
         """
@@ -566,67 +603,72 @@ class shocHDU(HDUExtra, Messenger):
             )
         return self.t[0].zd(self.coords, self.location).deg < tol
 
-    # def pointing_park(obs, tol=1):
-    #     if obs.telescope == '40in':
-    #         'ha' approx 1
-    #     return pointing_zenith(obs, tol)
+        # def pointing_park(obs, tol=1):
+        #     if obs.telescope == '40in':
+        #         'ha' approx 1
+        #     return pointing_zenith(obs, tol)
 
-    # NOTE: for the moment, the methods below are duplicated while migration
-    #  to this class in progress
+        # NOTE: for the moment, the methods below are duplicated while migration
+        #  to this class in progress
 
-    def get_fov(self, telescope=None, unit='arcmin', with_focal_reducer=False):
+    # ------------------------------------------------------------------------ #
+    # Timing
+
+    @lazyproperty
+    def timing(self):
+        # Initialise timing
+        # this is delayed from init on the hdu above since this class may
+        # initially be created with a `_BasicHeader` only, in which case we
+        # will not yet have all the correct keywords available yet to identify
+        # old vs new shoc data at init.
+        try:
+            return shocTiming(self)
+        except:
+            return UnknownTime
+
+    # alias
+    t = timing
+
+    @property
+    def needs_timing(self):
         """
-        Get image field of view
-
-        Parameters
-        ----------
-        telescope
-        with_focal_reducer
-        unit
-
-        Returns
-        -------
-
-        Examples
-        --------
-        >>> cube = shocObs.load(filename)
-        >>> cube.get_fov(1)               # 1.0m telescope
-        >>> cube.get_fov(1.9)             # 1.9m telescope
-        >>> cube.get_fov(74)              # 1.9m
-        >>> cube.get_fov('74in')          # 1.9m
-        >>> cube.get_fov('40 in')         # 1.0m
+        check for date-obs keyword to determine if header information needs
+        updating
         """
+        return ('date-obs' not in self.header)
+        # TODO: is this good enough???
 
-        # PS. welcome to the new millennium, we use the metric system now
-        if telescope is None:
-            telescope = getattr(self, 'telescope', self.header.get('telescop'))
+    def date(self):
+        return self.t.date
 
-        if telescope is None:
-            raise ValueError('Please specify telescope to get field of view.')
+    # ------------------------------------------------------------------------ #
 
-        telescope = str(telescope)
-        telescope = telescope.rstrip('inm ')  # strip "units" in name
-        fov = (FOVr if with_focal_reducer else FOV).get(telescope)
+    @lazyproperty
+    def oriented(self):
+        """
+        Use this to get images with the correct orientation:
+        North up, East left.
 
-        # at this point we have the FoV in arcmin
-        # resolve units
-        if unit in ('arcmin', "'"):
-            factor = 1
-        elif unit in ('arcsec', '"'):
-            factor = 60
-        elif unit.startswith('deg'):
-            factor = 1 / 60
-        else:
-            raise ValueError('Unknown unit %s' % unit)
+        This is necessary since EM mode images have opposite x-axis
+        orientation since  pixels are read out in the opposite direction
+        through the readout register.
 
-        return np.multiply(fov, factor)
+        Images taken in CON mode are flipped left-right.
+        Images taken in EM  mode are left unmodified
+
+        """
+        from obstools.image.orient import ImageOrienter
+        # will flip EM images x axis (2nd axis)
+        return ImageOrienter(self, x=self.readout.isCON)
+
+    def get_fov(self):
+        return get_fov(self.telescope)
 
     def get_rotation(self):
         """
         Get the instrument rotation (position angle) wrt the sky in radians.
         This value seems to be constant for most SHOC data from various
-        telescopes that I've tested. You can measure this yourself by using the
-
+        telescopes that I've checked. You can measure this yourself by using the
         `obstools.phot.campaign.PhotCampaign.coalign_dss` method.
         """
         return -0.04527
@@ -705,19 +747,29 @@ class shocHDU(HDUExtra, Messenger):
 
         return o
 
-    @property
-    def needs_timing(self):
-        """
-        check for date-obs keyword to determine if header information needs
-        updating
-        """
-        return ('date-obs' not in self.header)
-        # TODO: is this good enough???
-
     # ------------------------------------------------------------------------ #
     # image arithmetic
+    def set_calibrators(self, bias=keep, flat=keep):
+        """
+        Set calibration images for this observation. Default it to keep
+        previously set image if none are provided here.  To remove a
+        previously set calibration image pass a value of `None` to this
+        function, or simply delete the attribute `self.calibrated.bias` or
+        `self.calibrated.flat`
 
-    def combine(self, func, *args, **kws):
+        Parameters
+        ----------
+        bias
+        flat
+
+        Returns
+        -------
+
+        """
+        super().set_calibrators(bias, flat)
+    
+    
+    def combine(self, func=None, args=(), **kws):
         """
         Combine images in the stack by applying the function `func` along the
         0th dimension.
@@ -751,6 +803,7 @@ class shocHDU(HDUExtra, Messenger):
         kws.setdefault('axis', 0)
         # TODO: self.calibrated ???
         hdu = shocHDU(func(self.data, *args, **kws), self.header)
+
         # FIXME: MasterHDU not used here :(((
 
         # update header
@@ -760,41 +813,27 @@ class shocHDU(HDUExtra, Messenger):
 
         return hdu
 
-    def subtract(self, bias):
+    def subtract(self, hdu):
         """
         Subtract the image
 
         Parameters
         ----------
-        bias
+        hdu
 
         Returns
         -------
 
         """
         # This may change the data type.
-        self.data = self.data - bias.data
+        self.data = self.data - hdu.data
 
         # update history
-        msg = self.message(f'Subtracted image {bias.file.name}')
+        msg = self.message(f'Subtracted image {hdu.file.name}')
         self.header.add_history(msg)
         return self
 
-    def auto_update_header(self, **kws):
-        # FIXME: better to handle these as property and update header there ?
-        # TODO: filters!
-        new_kws = {'obstype': self.obstype}
-        if self.target:
-            new_kws['object'] = self.target
-
-        if 'coords' in self.__dict__ and self.coords:
-            ra, dec = self.coords.ra, self.coords.dec
-            new_kws.update(
-                objra=ra.to_string('hourangle', sep=':', precision=1),
-                objdec=dec.to_string('deg', sep=':', precision=1),
-            )
-
-        self.header.update({**new_kws, **kws})
+    # ------------------------------------------------------------------------ #
 
     def get_save_name(self, name_format=None, ext='fits'):
         # TODO: at filename helper?
@@ -812,9 +851,6 @@ class shocHDU(HDUExtra, Messenger):
     # @expose.args()
     def save(self, filename=None, folder=None, name_format=None,
              overwrite=False):
-
-        # any changes to attrs maps to fits header before save
-        self.auto_update_header()
 
         filename = filename or self.get_save_name(name_format)
         if filename is None:
@@ -870,8 +906,8 @@ class shocCalibrationHDU(shocHDU):
     def get_coords(self):
         return
 
-    def combine(self, func=_combine_func, *args, **kws):
-        return super().combine(func or self._combine_func, *args, **kws)
+    def combine(self, func=_combine_func, args=(), **kws):
+        return super().combine(func or self._combine_func, args, **kws)
 
 
 class shocDarkHDU(shocCalibrationHDU):
@@ -1056,9 +1092,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         self[:] = self.__class__(hdus)
         return self
 
-    def update_headers(self, **kws):
-        self.calls('auto_update_header', **kws)
-
     def thumbnails(self, statistic='mean', depth=10, subset=None,
                    title='file.name', calibrated=False, figsize=None, **kws):
         """
@@ -1145,11 +1178,13 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         return groups
 
     def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False):
+        from .match import MatchedObservations
+        
         return MatchedObservations(self, other)(
             exact, closest, cutoffs, keep_nulls
         )
 
-    def combine(self, func=None, *args, **kws):
+    def combine(self, func=None, args=(), **kws):
         """
         Combine each `shocHDU` in the campaign into a 2D image by calling `func`
         on each data stack.  Can be used to compute image statistics.
@@ -1174,7 +1209,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         #     func = types.pop()._combine_func
         # #
         # assert callable(func), f'`func` should be a callable not {type(func)}'
-        return self.__class__(self.calls('combine', func, *args, **kws))
+        return self.__class__(self.calls('combine', func, args, **kws))
 
     def stack(self):
         """
@@ -1192,9 +1227,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             raise ValueError('Cannot stack images with different shapes')
 
         # keep only header keywords that are the same in all headers
-        self.calls('auto_update_header')
         header = headers_intersect(self)
-        #     header['DATE'] = self[0].header['date']  # HACK
+        header['FRAME'] = self[0].header['date']  # HACK: need date for flats!
+        header['NAXIS'] = 3                  # avoid misidentification as master
         hdu = shocHDU(np.concatenate([_3d(hdu.data) for hdu in self]),
                       header)
         msg = self.message(f'Stacked {len(self)} files.')
@@ -1204,20 +1239,32 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     def merge_combine(self, func, *args, **kws):
         return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
-    def subtract(self, master_bias):
+    def subtract(self, other):
+        if isinstance(other, shocCampaign) and len(other) == 1:
+            other = other[0]
 
-        if not isinstance(master_bias, PrimaryHDU):
-            raise TypeError(f'Expected shocHDU, got {type(master_bias)}')
+        if not isinstance(other, PrimaryHDU):
+            raise TypeError(f'Expected shocHDU, got {type(other)}')
 
-        if len(master_bias.shape) > 2:
+        if len(other.shape) > 2:
             raise TypeError(
                 'The input hdu contains multiple images instead of a single '
                 'image. Do `combine` to compute the master bias.'
             )
 
-        return self.__class__([hdu.subtract(master_bias) for hdu in self])
+        return self.__class__([hdu.subtract(other) for hdu in self])
 
-    # def set_calibrators(self, bias, flat):
+    def set_calibrators(self, darks=None, flats=None):
+        if isinstance(hdu, shocCampaign) and (len(hdu) == 1):
+                    hdu = hdu[0]
+        
+        if darks:
+            mo = self.match(darks, *MATCH_DARKS)
+            mo.left.set_calibrators(mo.right)
+        
+        if flats:
+            mo = self.match(flats, *MATCH_FLATS)
+            mo.left.set_calibrators(flats=mo.right)
 
     def plot_image_stats(self, stats, labels, titles, figsize=None):
         """
@@ -1264,7 +1311,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         list(map(z.extend, idx.values()))
 
         ax = axes[0]
-        ax.set_yticklabels(np.take(run.files.stems, z))
+        ax.set_yticklabels(np.take(self.files.stems, z))
         ax.set_yticks(np.arange(len(self) + 1) - 0.5)
         for tick in ax.yaxis.get_ticklabels():
             tick.set_va('top')
@@ -1291,11 +1338,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         CRITICAL: Only use this function if you are sure that the telescope
         pointing coordinates are correct in the headers. Turns out they are
         frequently wrong!
-
-        NOTE: The FITS headers are left unchanged by this function which only
-        alters the attributed of the `shocHDU` instances.  To update the headers
-        you should do `hdu.auto_update_header()` afterwards for each observation,
-        or alternatively `run.calls('auto_update_header')` on the shocCampaign.
 
         Parameters
         ----------
@@ -1408,6 +1450,11 @@ class shocObsGroups(Groups):
     def __init__(self, factory=shocCampaign, *args, **kws):
         # set default default factory ;)
         super().__init__(factory, *args, **kws)
+
+    def __repr__(self):
+        w = len(str(len(self)))
+        i = itt.count()
+        return pformat(self, lhs=lambda s: f'{next(i):<{w}}: {s}', hang=True)
 
     def get_tables(self, titled=make_title, **kws):
         # TODO: move to motley.table
@@ -1563,8 +1610,8 @@ class shocObsGroups(Groups):
                **kws):
         print(self.pformat(titled, braces, vspace, **kws))
 
-    def combine(self, func=None, *args, **kws):
-        return self.calls('combine', func, *args, **kws)
+    def combine(self, func=None, args=(), **kws):
+        return self.calls('combine', func, args, **kws)
 
     def stack(self):
         return self.calls('stack')
@@ -1609,43 +1656,45 @@ class shocObsGroups(Groups):
                         getattr(run, name)(co, *args, **kws))
         return out
 
-    def subtract(self, biases):
+    def subtract(self, other):
         """
-        Do the bias reductions on science / flat field data
+        Group by group subtraction
 
         Parameters
         ----------
-        biases :
-            Dictionary with key-value pairs for master biases
+        other :
+            Dictionary with key-value pairs. Values are HDUs.
 
         Returns
         ------
         Bias subtracted shocObsGroups
         """
 
-        return self._comap_method(biases, 'subtract')
+        return self._comap_method(other, 'subtract')
 
-    def set_calibrators(self, biases=None, flats=None):
+    def set_calibrators(self, darks=None, flats=None):
         """
 
         Parameters
         ----------
-        biases
+        darks
         flats
 
         Returns
         -------
 
         """
-        biases = biases or {}
+        darks = darks or {}
         flats = flats or {}
         for key, run in self.items():
             if run is None:
                 continue
 
-            bias = biases.get(key, keep)
+            bias = darks.get(key, keep)
             flat = flats.get(key, keep)
             for hdu in run:
+                if isinstance(hdu, shocCampaign) and (len(hdu) == 1):
+                    hdu = hdu[0]
                 hdu.set_calibrators(bias, flat)
 
     def save(self, folder=None, name_format=None, overwrite=False):
