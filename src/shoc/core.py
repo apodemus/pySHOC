@@ -27,7 +27,7 @@ from obstools.image.calibration import keep
 from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
 from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
-from pyxis import Groups, OfType
+from pyxides import Groups, OfType
 from motley.table import AttrTable, Table
 from scrawl.imagine import plot_image_grid
 

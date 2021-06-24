@@ -13,7 +13,7 @@ from motley.table import Table
 from recipes import io
 from recipes.dicts import AutoVivify, AttrDict
 from recipes.logging import logging, get_module_logger
-from pyxis.containers import ArrayLike1D, AttrGrouper, OfType
+from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 
 # relative libs
 from . import shocCampaign, MATCH
