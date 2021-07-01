@@ -1,17 +1,18 @@
 
+
 # std libs
-from recipes.logging import LoggingMixin
 import textwrap as txw
 import functools as ftl
-from collections import defaultdict
+from collections import defaultdict, abc
+
+# third-party libs
+import numpy as np
 
 # local libs
 import motley
 from motley.utils import Filler, GroupTitle, ConditionalFormatter
 from recipes.sets import OrderedSet
-
-# third-party libs
-import numpy as np
+from recipes.logging import LoggingMixin
 
 # relative libs
 from .utils import str2tup
@@ -72,8 +73,18 @@ class MatchedObservations(LoggingMixin):
             `shocCampaign` instances from which observations will be picked to
             match those in the other list
         """
-        self.a = a
-        self.b = b
+        data = dict(a=a, b=b)
+        for k, v in data.items():
+            if isinstance(v, dict):  # shocObsGroups
+                data[k] = v.to_list()
+            elif not isinstance(v, abc.Container):  # (shocCampaign, MockRun)
+                raise ValueError(
+                    f'Cannot match objects of type {type(a)} and {type(b)}. '
+                    f'Please ensure you pass `shocCampaign` or `shocObsGroups`'
+                    f' instances to this class.'
+                )
+
+        self.a, self.b = data.values()
         self.matches = {}
         self.deltas = {}
         #  dict of distance matrices between 'closest' attributes
@@ -178,7 +189,7 @@ class MatchedObservations(LoggingMixin):
         v1 = self.b.attrs(*keys)
         return np.abs(v0[:, None] - v1)
 
-    def pformat(self, 
+    def pformat(self,
                 title='Matched Observations', title_props=('g', 'bold'),
                 group_header_style=('g', 'bold'), g1_style='c',
                 no_match_style='r',
