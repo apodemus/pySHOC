@@ -50,16 +50,18 @@ def identify(run):
 def calibrate(run, path=None, overwrite=False):
 
     gobj = run.select_by(obstype='object')
-    fstax, mflat = find_cal(run, path, 'flat', overwrite)
-    dstax, mdark = find_cal(run.join(fstax), path, 'dark', overwrite)
+    fstax, mflat = find_cal(run, 'flat', path, overwrite)
+    dstax, mdark = find_cal(run.join(fstax), 'dark', path, overwrite)
 
-    mdark.update(compute_masters(dstax, 'dark', path, overwrite))
-    # debias flats
-    # check = [hdu.data[0,0,0] for hdu in fstax.to_list()]
-    fstax.group_by(mdark).subtract(mdark)
-    # check2 =  [hdu.data[0,0,0] for hdu in fstax.to_list()]
-    
-    mflat.update(compute_masters(fstax, 'flat', path, overwrite))
+    if dstax:
+        mdark.update(compute_masters(dstax, 'dark', path, overwrite))
+
+    if fstax:
+        # debias flats
+        # check = [hdu.data[0,0,0] for hdu in fstax.to_list()]
+        fstax.group_by(mdark).subtract(mdark)
+        # check2 =  [hdu.data[0,0,0] for hdu in fstax.to_list()]
+        mflat.update(compute_masters(fstax, 'flat', path, overwrite))
 
     if mdark or mflat:
         # enable on-the-fly calibration
@@ -73,7 +75,7 @@ def calibrate(run, path=None, overwrite=False):
 
 def split_cal(run, kind):
     """split off the calibration frames"""
-    
+
     # get calibrators in run
     grp = run.group_by('obstype')
     cal = grp.pop(kind, shocCampaign())
@@ -93,7 +95,7 @@ def split_cal(run, kind):
     return cal, grp.to_list()
 
 
-def find_cal(run, path, kind, ignore_masters=False):
+def find_cal(run, kind, path=None, ignore_masters=False):
 
     attrs = attx, attc = MATCH[kind]
     gid = (*attx, *attc)
@@ -103,7 +105,7 @@ def find_cal(run, path, kind, ignore_masters=False):
     # found_in_run = set(cal.attrs(*attx))
     # found_db_master = found_db_raw = found_in_path = set()
     # logger.info('Found %i calibration files in the run.', len(cal))
-    
+
     # no calibration stacks in run. Look for pre-computed master images.
     masters = run.new_groups()
     masters.group_id = gid, {}
@@ -126,8 +128,8 @@ def find_cal(run, path, kind, ignore_masters=False):
             # where = 'database'
             masters = calDB.get(run, kind, master=True)
 
-            found_db_master = set(masters.to_list().attrs(*attx))
-            need -= found_db_master
+            # found_db_master = 
+            need -= set(masters.to_list().attrs(*attx))
 
     # get missing calibration stacks (raw) from db. Here we prefer to use the
     # stacks that are passed in, and suplement from the db. The passed stacks
@@ -145,14 +147,14 @@ def find_cal(run, path, kind, ignore_masters=False):
             'database %s',
             plural(kind), Table(need, col_headers=attx), calDB[kind]
         )
-    
+
     # finally, group for convenience
     matched = run.match(cal.join(masters), *attrs)
     logger.info('The following files were matched:\n%s',
                 matched.pformat(title=f'Matched {kind.title()}',
-                           g1_style=COLOURS[kind]))
+                                g1_style=COLOURS[kind]))
 
-    return matched.right, masters
+    return gcal, masters
 
 
 # def get_combine_func(kind):
@@ -166,14 +168,14 @@ def find_cal(run, path, kind, ignore_masters=False):
 
 
 def compute_masters(stacks, kind, outpath=None, overwrite=False,
-                    dark_master=None, png=False, **kws):
+                    png=False, **kws):
 
     logger.info('Computing master %s for %i stacks.',
                 plural(kind), len(stacks))
 
     # all the stacks we need are here: combine
     masters = stacks.merge_combine()  # get_combine_func(kind)
-        
+
     # save fits
     masters.save(outpath or calDB.master[kind], overwrite=overwrite)
 

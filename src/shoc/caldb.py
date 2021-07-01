@@ -98,9 +98,9 @@ class CalDB(DB):
         return self[which][kind]
 
     @staticmethod
-    def get_dict(run, kind):
+    def get_dict(run, kind, master):
         # set the telescope from the folder path
-        if kind == 'flat':
+        if kind == 'flat' and not master:
             run.set_attrs(filters=run.attrs('file.path.parent.name'),
                           telescope=run.attrs('file.path.parent.parent.name'),
                           each=True)
@@ -122,8 +122,8 @@ class CalDB(DB):
             close = False
         else:
             if not kind:
-                raise ValueError('Require `kind` to be given if no observation '
-                                 '`run` is provided.')
+                raise ValueError('Require `kind` to be given if no `new` '
+                                 'observations (shocCampaign) is provided.')
 
             # look for new files
             new = self.get_new_files(kind, master)
@@ -136,7 +136,7 @@ class CalDB(DB):
 
         # update
         db = self.load(kind, master)
-        db.update(self.get_dict(new, kind))
+        db.update(self.get_dict(new, kind, master))
 
         # (re)write
         path = self.get_path(kind, master)

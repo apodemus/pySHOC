@@ -1,6 +1,7 @@
 # __version__ = '3.14'
 
 
+
 # std libs
 import operator as op
 import warnings as wrn
@@ -12,12 +13,15 @@ from dataclasses import dataclass, field
 # third-party libs
 import numpy as np
 from scipy import stats
+from pyxides import Groups, OfType
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
 
 # local libs
+from motley.table import AttrTable, Table
+from scrawl.imagine import plot_image_grid
 from recipes import pprint
 from recipes.dicts import pformat
 from recipes.sets import OrderedSet
@@ -27,14 +31,10 @@ from obstools.image.calibration import keep
 from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
 from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
-from pyxides import Groups, OfType
-from motley.table import AttrTable, Table
-from scrawl.imagine import plot_image_grid
 
 # relative libs
 from .utils import str2tup
 from .pprint import BraceContract
-
 from .readnoise import readNoiseTables
 from .timing import shocTiming, Trigger, UnknownTime
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
@@ -58,8 +58,8 @@ SERIAL_NRS = [5982, 6448]
 # ------------------------------ Telescope info ------------------------------ #
 
 # Field of view of telescopes in arcmin
-FOV = {'74':     (1.29, 1.29),
-       '40':     (2.85, 2.85),
+FOV = {'74in':     (1.29, 1.29),
+       '40in':     (2.85, 2.85),
        'lesedi': (5.7, 5.7)}
 FOVr = {'74':    (2.79, 2.79)}  # with focal reducer
 # fov30 = (3.73, 3.73) # decommissioned
@@ -117,14 +117,49 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
     return func(*args, **kws)
 
 
-def get_tel(telescope):
-    telescope = str(telescope)
-    telescope = telescope.rstrip('inm ')  # strip "units" in name
-    if telescope not in KNOWN_TEL_NAMES:
-        raise ValueError(f'Telescope name {telescope!r} not recognised. Please '
-                         f'use one of the following\n: {KNOWN_TEL_NAMES}')
+def get_tel(name):
+    """
+    Get standardized telescope name from description.
 
-    return f'{TEL_NAME_EQUIVALENT[telescope]}in'
+    Parameters
+    ----------
+    name : str or int
+        Telescope name (see Examples).
+
+    Returns
+    -------
+    str
+        Standardized telescope name
+
+    Examples
+    --------
+    >>> get_tel(74)
+    '74in'
+    >>> get_tel(1.9)
+    '74in'
+    >>> get_tel('1.9 m')
+    '74in'
+    >>> get_tel(1)
+    '40in'
+    >>> get_tel('40     in')
+    '40in'
+    >>> get_tel('LESEDI')
+    'lesedi'
+
+    Raises
+    ------
+    ValueError
+        If name is unrecognised.
+    """
+
+    # sanitize name:  strip "units" (in,m), lower case
+    name = str(name).rstrip('inm ').lower()
+    if name not in KNOWN_TEL_NAMES:
+        raise ValueError(f'Telescope name {name!r} not recognised. Please '
+                         f'use one of the following\n: {KNOWN_TEL_NAMES}')
+    if name in TEL_NAME_EQUIVALENT:
+        return f'{TEL_NAME_EQUIVALENT[name]}in'
+    return name
 
 
 def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
@@ -638,6 +673,7 @@ class shocHDU(HDUExtra, Messenger):
         return ('date-obs' not in self.header)
         # TODO: is this good enough???
 
+    @property
     def date(self):
         return self.t.date
 
@@ -657,7 +693,8 @@ class shocHDU(HDUExtra, Messenger):
         Images taken in EM  mode are left unmodified
 
         """
-        from obstools.image.orient import ImageOrienter
+        from obstools.image.calibration import ImageOrienter
+
         # will flip EM images x axis (2nd axis)
         return ImageOrienter(self, x=self.readout.isCON)
 
@@ -749,26 +786,7 @@ class shocHDU(HDUExtra, Messenger):
 
     # ------------------------------------------------------------------------ #
     # image arithmetic
-    def set_calibrators(self, bias=keep, flat=keep):
-        """
-        Set calibration images for this observation. Default it to keep
-        previously set image if none are provided here.  To remove a
-        previously set calibration image pass a value of `None` to this
-        function, or simply delete the attribute `self.calibrated.bias` or
-        `self.calibrated.flat`
 
-        Parameters
-        ----------
-        bias
-        flat
-
-        Returns
-        -------
-
-        """
-        super().set_calibrators(bias, flat)
-    
-    
     def combine(self, func=None, args=(), **kws):
         """
         Combine images in the stack by applying the function `func` along the
@@ -1179,7 +1197,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False):
         from .match import MatchedObservations
-        
+
         return MatchedObservations(self, other)(
             exact, closest, cutoffs, keep_nulls
         )
@@ -1255,13 +1273,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         return self.__class__([hdu.subtract(other) for hdu in self])
 
     def set_calibrators(self, darks=None, flats=None):
-        if isinstance(hdu, shocCampaign) and (len(hdu) == 1):
-                    hdu = hdu[0]
-        
         if darks:
             mo = self.match(darks, *MATCH_DARKS)
             mo.left.set_calibrators(mo.right)
-        
+
         if flats:
             mo = self.match(flats, *MATCH_FLATS)
             mo.left.set_calibrators(flats=mo.right)
@@ -1360,11 +1375,11 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         for obs, cx in zip(self, cxx):
             i = coords.separation(cx).argmin()
             obj_coords = coords[i]
-            sel = self[cxx.separation(obj_coords).deg < tolerance]
-            if len(sel):
-                sel.set_attrs(coords=obj_coords,
-                              target=names[i],
-                              obstype='object')
+            selected = self[cxx.separation(obj_coords).deg < tolerance]
+            if selected:
+                selected.set_attrs(coords=obj_coords,
+                                   target=names[i],
+                                   obstype='object')
 
     def missing(self, kind):
         kind = kind.lower()
@@ -1693,8 +1708,6 @@ class shocObsGroups(Groups):
             bias = darks.get(key, keep)
             flat = flats.get(key, keep)
             for hdu in run:
-                if isinstance(hdu, shocCampaign) and (len(hdu) == 1):
-                    hdu = hdu[0]
                 hdu.set_calibrators(bias, flat)
 
     def save(self, folder=None, name_format=None, overwrite=False):

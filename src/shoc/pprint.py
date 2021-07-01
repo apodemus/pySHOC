@@ -6,7 +6,7 @@ Pretty printing for shocCampaign
 import re
 
 # local libs
-from pyxis.pprint import PrettyPrinter
+from pyxides.pprint import PrettyPrinter
 from recipes import bash
 from recipes.dicts import AVDict
 from recipes.logging import LoggingMixin
