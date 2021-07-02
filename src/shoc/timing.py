@@ -2,35 +2,36 @@
 Functions for time-stamping SHOC data and writing time stamps to FITS headers
 """
 
-
-from recipes.oo import Null
-import logging
+# std libs
 import inspect
-# from pathlib import Path
-# from warnings import warn
-# from urllib.error import URLError
-import datetime
+import logging
+
+# third-party libs
 import numpy as np
 from astropy import time
-from astropy.table import Table as aTable
-from astropy.coordinates import EarthLocation, AltAz
 import astropy.units as u
-from astropy.coordinates.angles import Angle
 from astropy.utils import lazyproperty
-# from astroplan import Observer
+from astropy.table import Table as aTable
+from astropy.coordinates import AltAz
+from astropy.coordinates.angles import Angle
+
+# local libs
+import motley
+from recipes.oo import Null
+from recipes.logging import LoggingMixin
+from obstools.airmass import Young94, altitude
+# from pathlib import Path
+# from warnings import warn
 # import spiceypy as spice
 
-from obstools.airmass import Young94, altitude
-import recipes.pprint as ppr
-from .header import HEADER_KEYS_MISSING_OLD
-import motley
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
 # TODO: Q: are gps times in UTC / UT1 ??
 
+# --------------------------------- constants -------------------------------- #
+
 # SHOC Exposure dead time in frame transfer mode
 DEAD_TIME = 0.00676  # seconds           header['vshift'] * 1024 ????
-
 
 TIMEZONE = +2 * u.hour  # SAST is UTC + 2
 
@@ -356,7 +357,7 @@ class Date(time.Time):
 # ******************************************************************************
 
 
-class shocTiming:
+class shocTiming(LoggingMixin):
     """
     Time stamps and corrections for SHOC data.
 
@@ -369,7 +370,7 @@ class shocTiming:
         * DATE-OBS
             - The time the user pushed start button (UTC)
         * FRAME
-            - Time at the **end** of the first exposure
+            - Time at the **end** of the first exposure (file creation time)
         * KCT
             - Kinetic Cycle Time   (exposure time + dead time)
             - **Not recorded** for single frame exposures:
@@ -487,20 +488,63 @@ class shocTiming:
     def __getitem__(self, key):
         return self.t[key]
 
+    def from_local(self, t0, tz=2):
+        """
+        Set start time of the observation. You will only need to explicitly
+        provide times for older SHOC data with external GPS triggering where
+        these timestamps were not recorded in the fits headers. Input value for
+        `t0` is assumed to be SAST. If you are providing UTC times use the
+        `sast=False` flag.
+
+        Parameters
+        ----------
+        t0 : str, optional A string representing the time: eg: '04:20:00'. If
+            not given, the GPS starting time recorded in the fits header will be
+            used. sast : bool, optional Flag indicating that the times are given
+            in local SAST time, by default True
+
+        Raises
+        ------
+        ValueError If the GPS trigger time GPSSTART is not given and cannot be
+            found in the fits header
+        """
+
+        # Convert trigger time to seconds from midnight
+        h = Angle(t0, 'h').hour - tz
+
+        # adjust to positive value -- this needs to be done for non-zero tz so
+        # we don't accidentally shift the date. Since DATE/FRAME in header is
+        # UT.
+        sec = (h + ((h <= 0) * 24)) * 3600
+        # `h` now in sec UTC from midnight
+        return self.date + TimeDelta(sec, format='sec')
+
     def _reset_cache(self):
         """Reset all lazy properties.  Will work for subclasses"""
-        for key, value in inspect.getmembers(self.__class__, is_lazy):
+        for key, _ in inspect.getmembers(self.__class__, is_lazy):
             self.__dict__.pop(key, None)
 
     @lazyproperty
     def t0(self):
-        """time stamp for the 0th frame start in UTC"""
+        """
+        Timestamp for the starting time of the 0th frame in UTC as a
+        `shoc.timing.Time` object.
+        """
 
         # `t0` can be used as a representative str for the start time of an
         # observation. For old SHOC data with External GPS triggering, this will
         # be an `UnknowTime` object which (formats as '??') since this info is
         # not recorded in the headers. This allows pprinting info about the
         # run before timestamps have been set.
+
+        hdu = self._hdu
+        if hdu.rollover:
+            self.logger.info('Computing timestamps for %s, rolled over from %s',
+                        hdu.file.name, hdu.rollover.parent)
+            from .core import shocHDU
+
+            assert isinstance(self._hdu.rollover.parent, shocHDU)
+            return self._hdu.rollover.parent.t[-1] + self.delta
 
         # Timing keys in order of accuracy
         # if not GPS triggered skip GPSSTART key
@@ -553,37 +597,6 @@ class shocTiming:
     def t0_flagged(self):
         return self.t0.iso + self.trigger.flag
 
-    def from_local(self, t0, tz=2):
-        """
-        Set start time of the observation. You will only need to explicitly
-        provide times for older SHOC data with external GPS triggering where
-        these timestamps were not recorded in the fits headers. Input value for
-        `t0` is assumed to be SAST. If you are providing UTC times use the
-        `sast=False` flag.
-
-        Parameters
-        ----------
-        t0 : str, optional A string representing the time: eg: '04:20:00'. If
-            not given, the GPS starting time recorded in the fits header will be
-            used. sast : bool, optional Flag indicating that the times are given
-            in local SAST time, by default True
-
-        Raises
-        ------
-        ValueError If the GPS trigger time GPSSTART is not given and cannot be
-            found in the fits header
-        """
-
-        # Convert trigger time to seconds from midnight
-        h = Angle(t0, 'h').hour - tz
-
-        # adjust to positive value -- this needs to be done for non-zero tz so
-        # we don't accidentally shift the date. Since DATE/FRAME in header is
-        # UT.
-        sec = (h + ((h <= 0) * 24)) * 3600
-        # `h` now in sec UTC from midnight
-        return self.date + TimeDelta(sec, format='sec')
-
     @lazyproperty
     def expose(self):
         """
@@ -621,7 +634,7 @@ class shocTiming:
     #     # TimeDelta has higher precision than Quantity
     #     return TimeDelta(self.interval, format='sec')
 
-    exp = expose
+    exp = t_exp = expose
     """exposure time"""
 
     dead = DEAD_TIME
@@ -633,19 +646,6 @@ class shocTiming:
     # TODO: MAYBE CHECK stack_header['VSHIFT']
     # EDGE CASE: THE DEADTIME MAY BE LARGER IF WE'RE NOT OPERATING IN FRAME
     # TRANSFER MODE!
-
-    def check_info(self):
-        # cofilter(.,  negate(first))
-        mia = [name for name, i in {'EXPOSURE': self.expose,
-                                    'DATE-OBS': self.t0}.items()
-               if not i]
-        if mia:
-            plural = (len(mia) > 1)
-            raise UnknownTimeException(
-                f'No timestamps available for {self._hdu.file.name}. '
-                f'Please set{" the" * (not plural)} {" and ".join(mia)} header'
-                f' keyword{"s" * plural}.'
-            )
 
     @lazyproperty
     def t(self):
@@ -661,10 +661,23 @@ class shocTiming:
         """
         #
         self.check_info()
-
         deltas = self.delta * np.arange(self._hdu.nframes, dtype=float)
         t0mid = self.t0 + 0.5 * self.delta
         return t0mid + deltas
+
+    def check_info(self):
+        # Need some info from the headers to compute the time stamps. check if
+        # this is available
+        mia = [name for name, i in {'EXPOSURE': self.expose,
+                                    'DATE-OBS': self.t0}.items()
+               if not i]
+        if mia:
+            plural = (len(mia) > 1)
+            raise UnknownTimeException(
+                f'No timestamps available for {self._hdu.file.name}. '
+                f'Please set{" the" * (not plural)} {" and ".join(mia)} header'
+                f' keyword{"s" * plural}.'
+            )
 
     # NOTE:
     # the following attributes are accessed as properties to account for the

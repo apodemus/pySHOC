@@ -1,8 +1,8 @@
 # __version__ = '3.14'
 
 
-
 # std libs
+import re
 import operator as op
 import warnings as wrn
 import itertools as itt
@@ -80,6 +80,7 @@ KNOWN_TEL_NAMES = [*LOCATIONS, *TEL_NAME_EQUIVALENT]
 
 
 # ----------------------------- module constants ----------------------------- #
+
 CALIBRATION_NAMES = ('bias', 'flat', 'dark')
 OBSTYPE_EQUIVALENT = {'bias': 'dark',
                       'skyflat': 'flat'}
@@ -98,6 +99,9 @@ ATT_CLOSE_FLAT = ('timing.date', )
 MATCH = {}
 MATCH['flats'] = MATCH['flat'] = MATCH_FLATS = (ATT_EQUAL_FLAT, ATT_CLOSE_FLAT)
 MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
+
+# regex to find the roll-over number (auto_split counter value in filename)
+REGEX_ROLLED = re.compile('\._X([0-9]+)')
 
 
 # ----------------------------- helper functions ----------------------------- #
@@ -389,6 +393,26 @@ class ReadoutMode:
     #             self.preAmpGain, self.frq, self.outAmp.mode)
 
 
+class RollOver():
+
+    def __init__(self, hdu):
+        # Check whether the filenames contain '._X' an indicator for whether the
+        # datacube reached the 2GB windows file size limit on the shoc server,
+        # and was consequently split into a sequence of fits cubes. The
+        # timestamps of these need special treatment
+
+        checked = map(REGEX_ROLLED.match, hdu.file.path.suffixes)
+        match = next(filter(None, checked), None)
+
+        self.nr = n = int(match[1]) if match else 0
+        self.state = bool(n)
+        filename = hdu.file.name
+        self.parent = filename.replace(f'._X{n}', f'._X{n-1}' if n > 2 else '')
+    
+    def __bool__(self):
+        return self.state
+
+
 class shocFilenameHelper(FilenameHelper):
     @property
     def nr(self):
@@ -509,9 +533,12 @@ class shocHDU(HDUExtra, Messenger):
 
     def __str__(self):
         attrs = ('t.t0_flagged', 'binning', 'readout.mode', 'filters')
-        info = ('', ) + op.attrgetter(*attrs)(self) + ('',)
+        info = ('', *op.attrgetter(*attrs)(self), '')
         sep = ' | '
-        return f'<{self.__class__.__name__}:{sep.join(map(str, info))}>'
+        return f'<{self.__class__.__name__}:{sep.join(map(str, info)).strip()}>'
+
+    def __repr__(self):
+        return str(self)
 
     @property
     def nframes(self):
@@ -676,6 +703,10 @@ class shocHDU(HDUExtra, Messenger):
     @property
     def date(self):
         return self.t.date
+
+    @lazyproperty
+    def rollover(self):
+        return RollOver(self)
 
     # ------------------------------------------------------------------------ #
 
@@ -1093,6 +1124,20 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #     shocHDU.data.get
 
     # @expose.args
+    @classmethod
+    def load_files(cls, filenames, *args, **kws):
+        run = super().load_files(filenames, *args, **kws)
+
+        rolled = run.group_by('rollover.state')
+        ok = rolled.pop(False)
+        rolled = rolled.pop(True, ())
+        for hdu in rolled:
+            hdu.rollover.parent = parent = ok[hdu.rollover.parent]
+            if not parent:
+                wrn.warn(f'Expected parent files {parent} to be loaded with '
+                         f'this file. Timestamps for {hdu.file.name} will be '
+                         f'wrong!!')
+        return run
 
     def save(self, filenames=(), folder=None, name_format=None, overwrite=False):
         if filenames:
@@ -1442,8 +1487,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # print((Time(t0) - Time(need_gps.attrs('t.t0'))).to('s'))
 
         # TODO: header keyword
-
-    # def partition_by_source():
 
 
 def make_title(keys):
