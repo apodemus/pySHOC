@@ -1,6 +1,8 @@
 # __version__ = '3.14'
 
 
+
+
 # std libs
 import re
 import operator as op
@@ -20,11 +22,11 @@ from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
 
 # local libs
-from motley.table import AttrTable, Table
+from motley.table import AttrTable
+from motley.utils import vstack_groups
 from scrawl.imagine import plot_image_grid
 from recipes import pprint
 from recipes.dicts import pformat
-from recipes.sets import OrderedSet
 from recipes.string import sub, remove_prefix
 from recipes.introspect import get_caller_name
 from obstools.image.calibration import keep
@@ -408,7 +410,7 @@ class RollOver():
         self.state = bool(n)
         filename = hdu.file.name
         self.parent = filename.replace(f'._X{n}', f'._X{n-1}' if n > 2 else '')
-    
+
     def __bool__(self):
         return self.state
 
@@ -1024,10 +1026,6 @@ def hms(t):
     return pprint.hms(t.to('s').value, unicode=True, precision=1)
 
 
-def get_table(r, attrs=None, **kws):
-    return r.table.get_table(r, attrs, **kws)
-
-
 class TableHelper(AttrTable):
 
     def get_table(self, run, attrs=None, **kws):
@@ -1069,7 +1067,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
     # controls which attributes will be printed
-    table = TableHelper(
+    tabulate = TableHelper(
         ['file.stem',
          'telescope', 'camera',
          'target', 'obstype',
@@ -1143,14 +1141,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if filenames:
             assert len(filenames) == len(self)
         else:
-            filenames = self.calls('get_save_name', name_format)
+            filenames = self.calls.get_save_name(name_format)
 
         if len(set(filenames)) < len(self):
             from recipes.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
             self.logger.warning('Duplicate filenames: %s', dup)
 
-        hdus = self.calls('save', None, folder, name_format, overwrite)
+        hdus = self.calls.save(None, folder, name_format, overwrite)
         # reload
         self[:] = self.__class__(hdus)
         return self
@@ -1190,7 +1188,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             title = title.replace('{', '{0.')
             titles = list(map(title.format, self))
         else:
-            for ats in self.attrs_gen(*str2tup(title)):
+            for ats in self.attrs(title):
                 if not isinstance(ats, tuple):
                     ats = (ats, )
                 titles.append('\n'.join(map(str, ats)))
@@ -1225,7 +1223,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         """
 
-        obstypes, stats = zip(*self.calls('guess_obstype', return_stats=True))
+        obstypes, stats = zip(*self.calls.guess_obstype(return_stats=True))
 
         if plot:
             self.plot_image_stats(stats, obstypes,
@@ -1272,7 +1270,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         #     func = types.pop()._combine_func
         # #
         # assert callable(func), f'`func` should be a callable not {type(func)}'
-        return self.__class__(self.calls('combine', func, args, **kws))
+        return self.__class__(self.calls.combine(func, args, **kws))
 
     def stack(self):
         """
@@ -1422,7 +1420,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             obj_coords = coords[i]
             selected = self[cxx.separation(obj_coords).deg < tolerance]
             if selected:
-                selected.set_attrs(coords=obj_coords,
+                selected.attrs.set(coords=obj_coords,
                                    target=names[i],
                                    obstype='object')
 
@@ -1489,12 +1487,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # TODO: header keyword
 
 
-def make_title(keys):
-    if isinstance(keys, str):
-        return keys
-    return "; ".join(map(str, keys))
-
-
 class shocObsGroups(Groups):
     """
     Emulates dict to hold multiple shocRun instances keyed by their shared
@@ -1514,8 +1506,7 @@ class shocObsGroups(Groups):
         i = itt.count()
         return pformat(self, lhs=lambda s: f'{next(i):<{w}}: {s}', hang=True)
 
-    def get_tables(self, titled=make_title, **kws):
-        # TODO: move to motley.table
+    def get_tables(self, attrs=None, titled=True, **kws):
         """
         Get a dictionary of tables (`motley.table.Table` objects) for this
         grouping. This method assists pretty printing groups of observation
@@ -1529,147 +1520,21 @@ class shocObsGroups(Groups):
         -------
 
         """
+        return shocCampaign.tabulate(self, attrs, titled=titled, 
+                                     filler_text='NO MATCH', **kws)
 
-        # TODO: consider merging this functionality into  motley.table
-        #       Table.group_rows(), or hstack or some somesuch
-
-        if titled is True:
-            titled = make_title
-
-        title = kws.pop('title', self.__class__.__name__)
-        ncc = kws.pop('compact', False)  # number of columns in compact part
-        kws['compact'] = False
-
-        pp = shocCampaign.table
-        attrs = OrderedSet(pp.attrs)
-        attrs_grouped_by = ()
-        compactable = set()
-        # multiple = (len(self) > 1)
-        if len(self) > 1:
-            if self.group_id != ((), {}):
-                keys, _ = self.group_id
-                key_types = {gid: list(grp)
-                             for gid, grp in itt.groupby(keys, type)}
-                attrs_grouped_by = key_types.get(str, ())
-                attrs -= set(attrs_grouped_by)
-
-            # check which columns are compactable
-            attrs_varies = {key for key in attrs if self.varies_by(key)}
-            compactable = attrs - attrs_varies
-            attrs -= compactable
-
-        # column headers
-        headers = pp.get_headers(attrs)
-
-        # handle column totals
-        totals = kws.pop('totals', pp.kws['totals'])
-        if totals:
-            # don't print totals for columns used for grouping since they will
-            # not be displayed
-            totals = set(totals) - set(attrs_grouped_by) - compactable
-            # convert totals to numeric since we remove column headers for
-            # lower tables
-            totals = list(map(headers.index, pp.convert_aliases(list(totals))))
-
-        units = kws.pop('units', pp.units)
-        if units:
-            want_units = set(units.keys())
-            nope = set(units.keys()) - set(headers)
-            units = {k: units[k] for k in (want_units - nope - compactable)}
-
-        tables = {}
-        empty = []
-        footnotes = OrderedSet()
-        for i, (gid, run) in enumerate(self.items()):
-            if run is None:
-                empty.append(gid)
-                continue
-
-            # get table
-            if titled:
-                # FIXME: problem with dynamically formatted group title.
-                # Table wants to know width at runtime....
-                title = titled(gid)
-                # title = titled(i, gid, kws.get('title_props'))
-
-            tables[gid] = tbl = get_table(run, attrs,
-                                          title=title,
-                                          totals=totals,
-                                          units=units,
-                                          # compact=False,
-                                          **kws)
-
-            # only first table gets title / headers
-            if not titled:
-                kws['title'] = None
-            if not headers:
-                kws['col_headers'] = kws['col_groups'] = None
-
-            # only last table gets footnote
-            footnotes |= set(tbl.footnotes)
-            tbl.footnotes = []
-        #
-        tbl.footnotes = list(footnotes)
-
-        # deal with null matches
-        first = next(iter(tables.values()))
-        if len(empty):
-            filler = [''] * first.shape[1]
-            filler[1] = 'NO MATCH'
-            filler = Table([filler])
-            for gid in empty:
-                tables[gid] = filler
-
-        # HACK compact repr
-        if ncc and first.compactable():
-            first.compact = ncc
-            first.compact_items = dict(zip(
-                list(compactable),
-                get_table(run[:1], compactable,
-                          chead=None, cgroups=None,
-                          row_nrs=False, **kws).pre_table[0]
-            ))
-            first._compact_table = first._get_compact_table()
-
-        # put empty tables at the end
-        # tables.update(empty)
-        return tables
-
-    def pformat(self, titled=make_title, braces=False, vspace=1,
-                **kws):
+    def pformat(self, titled=True, braces=False, vspace=1, **kws):
         """
         Run pprint on each group
         """
+        tables = self.get_tables(titled=titled, **kws)
+        return vstack_groups(tables, not bool(titled),  braces, vspace)
 
-        # ΤΟDO: could accomplish the same effect by colour coding...
-
-        from motley.utils import vstack, hstack
-
-        tables = self.get_tables(titled, **kws)
-        ordered_keys = list(tables.keys())  # key=sort
-        stack = [tables[key] for key in ordered_keys]
-
-        if not braces:
-            return vstack(stack, not bool(titled), True, vspace)
-
-        braces = ''
-        for i, gid in enumerate(ordered_keys):
-            tbl = tables[gid]
-            braces += ('\n' * bool(i) +
-                       hbrace(tbl.data.shape[0], gid) +
-                       '\n' * (tbl.has_totals + vspace))
-
-        # vertical offset
-        offset = stack[0].n_head_lines
-        return hstack([vstack(stack, True, vspace), braces],
-                      spacing=1, offset=offset)
-
-    def pprint(self, titled=make_title, headers=False, braces=False, vspace=0,
-               **kws):
+    def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
         print(self.pformat(titled, braces, vspace, **kws))
 
     def combine(self, func=None, args=(), **kws):
-        return self.calls('combine', func, args, **kws)
+        return self.calls.combine(func, args, **kws)
 
     def stack(self):
         return self.calls('stack')
@@ -1680,7 +1545,7 @@ class shocObsGroups(Groups):
     def select_by(self, **kws):
         out = self.__class__()
         out.update({key: obs
-                    for key, obs in self.calls('select_by', **kws).items()
+                    for key, obs in self.calls.select_by(**kws).items()
                     if len(obs)})
         return out
 

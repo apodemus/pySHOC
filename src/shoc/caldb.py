@@ -101,7 +101,7 @@ class CalDB(DB):
     def get_dict(run, kind, master):
         # set the telescope from the folder path
         if kind == 'flat' and not master:
-            run.set_attrs(filters=run.attrs('file.path.parent.name'),
+            run.attrs.set(filters=run.attrs('file.path.parent.name'),
                           telescope=run.attrs('file.path.parent.parent.name'),
                           each=True)
 
@@ -118,7 +118,7 @@ class CalDB(DB):
     def update(self, new=(), kind=None, master=True):
 
         if new:
-            kind = kind or next(new.attrs_gen('obstype'))
+            kind = kind or next(iter(new.attrs('obstype')))
             close = False
         else:
             if not kind:
@@ -201,7 +201,7 @@ class CalDB(DB):
 
             grp[key] = shocCampaign.load(mock.attrs('filename'), obstype=kind)
             if kind == 'flat':
-                grp[key].set_attrs(telescope=mock.attrs('telescope'), each=True)
+                grp[key].attrs.set(telescope=mock.attrs('telescope'), each=True)
 
         if not_found:
             logger.info(
