@@ -3,31 +3,19 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras
 """
 
 
-
 # std libs
 from pathlib import Path
 
 # local libs
-from motley import banner
+
 
 # relative libs
-from .. import __version__
+from .. import make_banner
+from .main import *
 
 
-LOGO = r"""
-                 _____ __  ______  ______
-    ____  __  __/ ___// / / / __ \/ ____/
-   / __ \/ / / /\__ \/ /_/ / / / / /     
-  / /_/ / /_/ /___/ / __  / /_/ / /___   
- / .___/\__, //____/_/ /_/\____/\____/   
-/_/    /____/                            
-"""
-SUBTITLE = f"""\
-Photometry Pipeline
-v{__version__}\
-"""
-WELCOME_BANNER = '\n'.join(banner(_, bar='', side='', align=al)
-                   for _, al in zip([LOGO, SUBTITLE], '^>'))
+BANNER_WIDTH = 100
+WELCOME_BANNER = make_banner('Photometry Pipeline', BANNER_WIDTH)
 
 
 _folders = (

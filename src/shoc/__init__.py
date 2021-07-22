@@ -15,9 +15,24 @@ from .caldb import CalDB
 
 
 try:
-    __version__ =  version('pyshoc')
+    __version__ = version('pyshoc')
 except PackageNotFoundError:
     __version__ = '?.?.?'
+
+# Banner
+LOGO = (Path(__file__).parent / 'banner.txt').read_text()
+
+
+def make_banner(subtitle='', width=80):
+    from motley.box import TextBox, clear_box, underline
+    from textwrap import dedent
+
+    text = f'{subtitle}\nv{__version__}'
+    parts = ('',
+             clear_box(LOGO, width),
+             clear_box(text, width, '>'))
+    return TextBox(underline, '')('\n'.join(parts), width)
+
 
 # register HDU classes (order is important!)
 register_hdu(shocHDU)
