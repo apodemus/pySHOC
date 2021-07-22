@@ -29,17 +29,6 @@ RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 # ---------------------------------------------------------------------------- #
 
 
-def hbrace(size, name=''):
-    #
-    if size < 3:
-        return '← ' + str(name) + '\n' * (int(size) // 2)
-
-    d, r = divmod(int(size) - 3, 2)
-    return '\n'.join(['⎫'] +
-                     ['⎪'] * d +
-                     ['⎬ %s' % str(name)] +
-                     ['⎪'] * (d + r) +
-                     ['⎭'])
 
 
 def morph(dic, parent):
