@@ -1143,14 +1143,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if filenames:
             assert len(filenames) == len(self)
         else:
-            filenames = self.calls('get_save_name', name_format)
+            filenames = self.calls.get_save_name(name_format)
 
         if len(set(filenames)) < len(self):
             from recipes.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
             self.logger.warning('Duplicate filenames: %s', dup)
 
-        hdus = self.calls('save', None, folder, name_format, overwrite)
+        hdus = self.calls.save(None, folder, name_format, overwrite)
         # reload
         self[:] = self.__class__(hdus)
         return self
@@ -1190,7 +1190,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             title = title.replace('{', '{0.')
             titles = list(map(title.format, self))
         else:
-            for ats in self.attrs_gen(*str2tup(title)):
+            for ats in self.attrs(title):
                 if not isinstance(ats, tuple):
                     ats = (ats, )
                 titles.append('\n'.join(map(str, ats)))
@@ -1225,7 +1225,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         """
 
-        obstypes, stats = zip(*self.calls('guess_obstype', return_stats=True))
+        obstypes, stats = zip(*self.calls.guess_obstype(return_stats=True))
 
         if plot:
             self.plot_image_stats(stats, obstypes,
@@ -1272,7 +1272,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         #     func = types.pop()._combine_func
         # #
         # assert callable(func), f'`func` should be a callable not {type(func)}'
-        return self.__class__(self.calls('combine', func, args, **kws))
+        return self.__class__(self.calls.combine(func, args, **kws))
 
     def stack(self):
         """
@@ -1422,7 +1422,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             obj_coords = coords[i]
             selected = self[cxx.separation(obj_coords).deg < tolerance]
             if selected:
-                selected.set_attrs(coords=obj_coords,
+                selected.attrs.set(coords=obj_coords,
                                    target=names[i],
                                    obstype='object')
 
@@ -1669,7 +1669,7 @@ class shocObsGroups(Groups):
         print(self.pformat(titled, braces, vspace, **kws))
 
     def combine(self, func=None, args=(), **kws):
-        return self.calls('combine', func, args, **kws)
+        return self.calls.combine(func, args, **kws)
 
     def stack(self):
         return self.calls('stack')
@@ -1680,7 +1680,7 @@ class shocObsGroups(Groups):
     def select_by(self, **kws):
         out = self.__class__()
         out.update({key: obs
-                    for key, obs in self.calls('select_by', **kws).items()
+                    for key, obs in self.calls.select_by(**kws).items()
                     if len(obs)})
         return out
 
