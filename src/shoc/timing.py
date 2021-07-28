@@ -2,14 +2,16 @@
 Functions for time-stamping SHOC data and writing time stamps to FITS headers
 """
 
+
 # std libs
 import inspect
 import logging
+import functools as ftl
 
 # third-party libs
 import numpy as np
-from astropy import time
 import astropy.units as u
+from astropy import time
 from astropy.utils import lazyproperty
 from astropy.table import Table as aTable
 from astropy.coordinates import AltAz
@@ -17,22 +19,30 @@ from astropy.coordinates.angles import Angle
 
 # local libs
 import motley
-from recipes.oo import Null
-from recipes.logging import LoggingMixin
 from obstools.airmass import Young94, altitude
+from recipes.oo import Null
+from recipes.io import read_lines
+from recipes.logging import LoggingMixin, logging, get_module_logger
+
+
 # from pathlib import Path
 # from warnings import warn
 # import spiceypy as spice
 
-
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
 # TODO: Q: are gps times in UTC / UT1 ??
+
+
+# module level logger
+logger = get_module_logger()
+logging.basicConfig()
+logger.setLevel(logging.INFO)
+
 
 # --------------------------------- constants -------------------------------- #
 
 # SHOC Exposure dead time in frame transfer mode
 DEAD_TIME = 0.00676  # seconds           header['vshift'] * 1024 ????
-
 TIMEZONE = +2 * u.hour  # SAST is UTC + 2
 
 # ----------------------------- Helper Functions ----------------------------- #
@@ -50,7 +60,7 @@ def iso_split(t, dtype=[('date', 'U10'), ('utc', 'U18')]):
 
 def iso_merge(date, utc, sep='T'):
     """
-    Vectorized merging for date and time strings to make isot format strings
+    Vectorize merging for date and time strings to make isot format strings
     """
     return np.char.add(np.char.add(date, sep), utc)
 
@@ -70,11 +80,8 @@ def timing_info_table(run):
 
     keys = ['TRIGGER', 'DATE', 'DATE-OBS', 'FRAME',
             'GPSSTART', 'GPS-INT', 'KCT', 'EXPOSURE']
-    tbl = []
-    for obs in run:
-        tbl.append([type(obs).__name__] + [obs.header.get(key, '--')
-                                           for key in keys])
-
+    tbl = [[type(obs).__name__, *(obs.header.get(key, '--') for key in keys)]
+           for obs in run]
     return Table(tbl, chead=['TYPE'] + keys)
 
 
@@ -133,27 +140,39 @@ UnknownTime = _UnknownTime()
 # class Duration(float, HMSrepr):``
 #     pass
 
+class InacurateTime:
+    def __str__(self):
+        return motley.red('\N{WARNING SIGN}')
 
-INACCURATE_TIME_FLAG = motley.red('\N{WARNING SIGN}')
+
+INACCURATE = InacurateTime()
 
 
 class Trigger:
     """
-    Class representing the trigger time and mechanism starting CCD exposure
+    Simple class representing the trigger mechanism that started the CCD
+    exposure sequence
     """
 
     FLAG_INFO = {
-        'flag':
-        {'*': 'GPS Trigger',
-         INACCURATE_TIME_FLAG: 'GPSSTART missing - timestamp may be inaccurate'},
-        'loop_flag': {'*': 'GPS Repeat'}}
+        'flag': {
+            '*':        'GPS Trigger',
+            INACCURATE: 'GPSSTART missing - timestamp may be inaccurate'
+        },
+        'loop_flag': {
+            '*': 'GPS Repeat'
+        }
+    }
+    # SYMBOLS =     ''
+    #       loop = '⟲'
+    #       start = '↓'
 
     def __init__(self, header):
         self.mode = header['trigger']
 
         self.flag = '*' * int(self.is_gps)
         if self.is_gps and ('GPSSTART' not in header):
-            self.flag = INACCURATE_TIME_FLAG
+            self.flag = INACCURATE
 
         self.loop_flag = ''
         if self.is_gps_loop and ('GPS-INT' in header):
@@ -196,15 +215,7 @@ class Trigger:
         """
         return self.is_gps and not self.is_gps_start
 
-    # @property
-    # def symbol(self):
-    #     # add symbolic rep for trigger
-    #     if self.is_internal():
-    #         return ''
-    #     if self.is_gps_loop():
-    #         return '⟲'
-    #     if self.is_gps_start():
-    #         return '↓'
+
 
 
 class Time(time.Time):
@@ -256,8 +267,8 @@ class Time(time.Time):
 
 # TODO: using this properly requires full implementation on Time and TimeDelta
 # subclasses with type preservation, which is tricky
-class InaccurateTimeStamp(Time):
-    _flag = INACCURATE_TIME_FLAG
+# class InaccurateTimeStamp(Time):
+#     _flag = INACCURATE_FLAG
 
 
 # class GPSTime(time.Time):
@@ -339,7 +350,7 @@ class Date(time.Time):
     """
 
     def __repr__(self):
-        return self.strftime('%Y%m%d')
+        return self.strftime('%Y-%m-%d')
 
     def __format__(self, spec):
         if self.shape == () and ('d' in spec):
@@ -428,15 +439,12 @@ class shocTiming(LoggingMixin):
     """
 
     # TODO: get example set of all mode + old / new combo + print table
-    # TODO Then print with  `timing_info_table(run)`
-
+    #   Then print with  `timing_info_table(run)`
     # TODO:  specify required timing accuracy --> decide which algorithms to
-    #  use based on this!
-
+    #     use based on this!
     # TODO: option to do flux weighted time stamps!!
 
     def __new__(cls, hdu):
-
         kls = shocTiming
         if 'Old' in hdu.__class__.__name__:
             kls = shocTimingOld
@@ -456,9 +464,8 @@ class shocTiming(LoggingMixin):
 
         """
 
-        self._hdu = hdu
+        self.hdu = hdu
         self.header = header = hdu.header
-        self.data = None  # calculated in `set` method
         self.location = hdu.location
         self.options = {**dict(format='isot',
                                scale='utc',
@@ -471,18 +478,21 @@ class shocTiming(LoggingMixin):
         # Timing trigger mode
         self.trigger = Trigger(header)
 
-        # flags
-        # self.t0_flag = ''
-        # self.tdelta_flag = ''
-        # self.delta = None  #
-        # self.sigma = 0.001 # # timestamp uncertainty
-
         # Date
         # use FRAME here since always available in header
-        date, time = header['FRAME'].split('T')
+        date, _ = header['FRAME'].split('T')
         self.date = Date(date)  # date from header
 
-    # def __array__(self):
+        # search for external gps time file
+        # if self.trigger.flag is INACCURATE:
+        #     file = hdu.file.path
+        #     extern = next(file.parent.glob('gps.*'), None)
+        #     if extern:
+        #         t0 = read_gps(extern)[file.name]
+        #         self.t0 = Time(str(self.date) + t0)
+        #         self.trigger.flag = '*'
+
+    # def __array__(self): 
     #     return self.t
 
     def __getitem__(self, key):
@@ -537,14 +547,16 @@ class shocTiming(LoggingMixin):
         # not recorded in the headers. This allows pprinting info about the
         # run before timestamps have been set.
 
-        hdu = self._hdu
-        if hdu.rollover:
+        hdu = self.hdu
+        if hdu.rollover:  # FIXME: only for old data.
+            # compute timestamp for files that rolled over 2Gb limit on old
+            # server
             self.logger.info('Computing timestamps for %s, rolled over from %s',
-                        hdu.file.name, hdu.rollover.parent)
+                             hdu.file.name, hdu.rollover.parent)
             from .core import shocHDU
 
-            assert isinstance(self._hdu.rollover.parent, shocHDU)
-            return self._hdu.rollover.parent.t[-1] + self.delta
+            assert isinstance(self.hdu.rollover.parent, shocHDU)
+            return self.hdu.rollover.parent.t[-1] + self.delta
 
         # Timing keys in order of accuracy
         # if not GPS triggered skip GPSSTART key
@@ -595,7 +607,7 @@ class shocTiming(LoggingMixin):
 
     @property
     def t0_flagged(self):
-        return self.t0.iso + self.trigger.flag
+        return f'{self.t0.iso}{self.trigger.flag}'
 
     @lazyproperty
     def expose(self):
@@ -661,7 +673,7 @@ class shocTiming(LoggingMixin):
         """
         #
         self.check_info()
-        deltas = self.delta * np.arange(self._hdu.nframes, dtype=float)
+        deltas = self.delta * np.arange(self.hdu.nframes, dtype=float)
         t0mid = self.t0 + 0.5 * self.delta
         return t0mid + deltas
 
@@ -674,7 +686,7 @@ class shocTiming(LoggingMixin):
         if mia:
             plural = (len(mia) > 1)
             raise UnknownTimeException(
-                f'No timestamps available for {self._hdu.file.name}. '
+                f'No timestamps available for {self.hdu.file.name}. '
                 f'Please set{" the" * (not plural)} {" and ".join(mia)} header'
                 f' keyword{"s" * plural}.'
             )
@@ -688,7 +700,7 @@ class shocTiming(LoggingMixin):
     @property
     def duration(self):
         """Duration of the observation"""
-        return self._hdu.nframes * self.delta
+        return self.hdu.nframes * self.delta
         # return UnknownTime
 
     @lazyproperty
@@ -698,12 +710,12 @@ class shocTiming(LoggingMixin):
 
     @lazyproperty
     def ha(self):
-        return self.lmst - self._hdu.coords.ra
+        return self.lmst - self.hdu.coords.ra
 
     @lazyproperty
     def zd(self):
         # zenith distance
-        return self.t.zd(self._hdu.coords, self.location)
+        return self.t.zd(self.hdu.coords, self.location)
 
     @lazyproperty
     def hour(self):
@@ -711,7 +723,7 @@ class shocTiming(LoggingMixin):
         return (self.t - self.date).to('hour').value
 
     def _check_coords_loc(self):
-        if self._hdu.coords is None:
+        if self.hdu.coords is None:
             raise UnknownPointing
 
         if self.location is None:
@@ -723,7 +735,7 @@ class shocTiming(LoggingMixin):
         Barycentric julian date [BJD(TDB)] at frame mid exposure times
         (includes light travel time corrections)
         """
-        return self.t.bjd(self._hdu.coords).jd
+        return self.t.bjd(self.hdu.coords).jd
 
     @lazyproperty
     def hjd(self):
@@ -731,7 +743,7 @@ class shocTiming(LoggingMixin):
         Heliocentric julian date [HJD(TCG)] at frame mid exposure times
         (includes light travel time corrections)
         """
-        return self.t.hjd(self._hdu.coords).jd
+        return self.t.hjd(self.hdu.coords).jd
 
     def airmass(self):
         """airmass of object at frame mid exposure times via Young 94"""
@@ -740,7 +752,7 @@ class shocTiming(LoggingMixin):
     def altitude(self):
         """altitude of object at frame mid exposure times"""
         self._check_coords_loc()
-        coords = self._hdu.coords
+        coords = self.hdu.coords
         return altitude(coords.ra.radian,
                         coords.dec.radian,
                         self.lmst.radian,
@@ -757,7 +769,7 @@ class shocTiming(LoggingMixin):
         # pass a string 'sutherland' below instead of the module variable
         # SUTHERLAND since EarthLocation is not hashable and will therefore not
         # cache the result of the call below
-        sun = Sun('SAAO', str(self._hdu.date))
+        sun = Sun('SAAO', str(self.hdu.date))
         return (  # entire observation occurs during evening twilight
             np.all((sun.set < t0) & (t1 < sun.dusk.astronomical))
             or  # entire observation occurs during morning twilight
@@ -787,14 +799,14 @@ class shocTiming(LoggingMixin):
                    'bjd': '%-18.9f'}
 
         #
-        table = aTable(self.data[tuple(formats.keys())])
+        table = aTable(self.t[tuple(formats.keys())])
         table.write(filename,
                     delimiter=delimiter,
                     format='ascii.commented_header',
                     formats=formats,
                     overwrite=True)
 
-    def stamp(self, j):
+    def stamp(self, j=0):
         """
         Timestamp the header
 
@@ -810,7 +822,7 @@ class shocTiming(LoggingMixin):
         """
 
         # FIXME: repeat print not necessary
-        logging.info('Time stamping %s', self._hdu.filepath.name)
+        logging.debug('Time stamping %s', self.hdu.file.path.name)
 
         header = self.header
         t = self.t[j]
@@ -828,10 +840,10 @@ class shocTiming(LoggingMixin):
         # header['HJD'] = (times.gjd[j], 'Geocentric Julian Date (TCG)')
         # header['LJD']      = ( times.ljd[j], 'Local Julian Date' )
 
-        if not ((self._hdu.coords is None) or (self.location is None)):
+        if None not in (self.hdu.coords, self.location):
             header['HJD'] = (self.hjd[j], 'Heliocentric Julian Date (TDB)')
             header['BJD'] = (self.bjd[j], 'Barycentric Julian Date (TDB)')
-            header['AIRMASS'] = (self.airmass[j], 'Young (1994) model')
+            header['AIRMASS'] = (self.t.airmass[j], 'Young (1994) model')
             # TODO: set model name dynamically
 
         # Add info to header HISTORY

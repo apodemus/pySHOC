@@ -4,22 +4,25 @@ Calibration files database
 
 
 # std libs
-from datetime import datetime
+import shutil
 import itertools as itt
 from pathlib import Path
+from datetime import datetime
+
+# third-party libs
+from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 
 # local libs
+import motley
 from motley.table import Table
 from recipes import io
 from recipes.dicts import AutoVivify, AttrDict
-from recipes.logging import logging, get_module_logger
-from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
+from recipes.logging import logging, get_module_logger, all_logging_disabled
 
 # relative libs
-from . import shocCampaign, MATCH
+from . import shocCampaign, MATCH, COLOURS
 
 
-import shutil
 # module level logger
 logger = get_module_logger()
 logging.basicConfig()
@@ -42,11 +45,12 @@ class DB(AttrDict, AutoVivify):
 
 
 class MockHDU(DB):
-    pass
+    """An HDU mocking helper"""
 
 
 class MockRun(ArrayLike1D, AttrGrouper, OfType(MockHDU)):
-    pass
+    """A lightweight Campaign emulator"""
+    
 
 
 def move_to_backup(file):
@@ -115,7 +119,6 @@ class CalDB(DB):
         return filelist - set(db.attrs('filename'))
 
     def update(self, new=(), kind=None, master=True):
-
         if new:
             kind = kind or next(iter(new.attrs('obstype')))
             close = False
@@ -127,7 +130,11 @@ class CalDB(DB):
             # look for new files
             new = self.get_new_files(kind, master)
             if new:
-                new = shocCampaign.load(new)
+                with all_logging_disabled(logger.WARN):
+                    new = shocCampaign.load(new)
+                i = len(new)
+                logger.info('Loaded %i file%s.', i, 's' * bool(i))
+
             close = True
 
         if not new:
@@ -152,6 +159,7 @@ class CalDB(DB):
         return {}
 
     def load_mock(self, kind, master=True):
+        """Load data as a MockRun object"""
         which = 'master' if master else 'raw'
         db = self.db[which][kind] = MockRun()
         att = sum(MATCH[kind], ())
@@ -179,8 +187,9 @@ class CalDB(DB):
             The matched and grouped `shocCampaign`s
         """
         which = 'master' if master else 'raw'
-        logger.info('Searching for %s %s files in database: %r',
-                    which, kind, self[which][kind])
+        which_kind = motley.apply(f'{which} {kind}', COLOURS[kind])
+        logger.info('Searching for %s files in database: %r',
+                    which_kind, str(self[which][kind]))
 
         if kind in self.db[which]:
             db = self.db[which][kind]
@@ -192,24 +201,27 @@ class CalDB(DB):
         attrs = (*attx, *attc)
         grp = run.new_groups()
         grp.group_id = attrs, {}
-        gobj, gcal = run.match(db, attx, attc)
+        _, gcal = run.match(db, attx, attc)
         for key, mock in gcal.items():
             if mock is None:
                 not_found.append(key)
                 continue
 
+            # load
             grp[key] = shocCampaign.load(mock.attrs('filename'), obstype=kind)
+            # set telescope from db folder path for flats
             if kind == 'flat':
-                grp[key].attrs.set(telescope=mock.attrs('telescope'), each=True)
+                tel = mock.attrs('telescope')
+                grp[key].attrs.set(telescope=tel)
 
         if not_found:
             logger.info(
-                'No files available in calibration database for %s %s with '
-                'observational setup(s):\n%s', which, kind,
-                Table(not_found, col_headers=attrs, nrs=True)
+                'No %s available in calibration database for with '
+                'observational setup(s):\n%s',
+                which_kind, Table(not_found, col_headers=attrs, nrs=True)
             )
         else:
-            logger.info('Found %i %s %s files.',
-                        sum(map(len, grp.values())), which, kind)
+            logger.info('Found %i %s files.',
+                        sum(map(len, grp.values())), which_kind)
 
         return grp

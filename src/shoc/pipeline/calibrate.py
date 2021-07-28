@@ -1,13 +1,14 @@
 
+"""
+Calibrate SHOC observations
+"""
 
 # std libs
+import motley
 import logging
-from pathlib import Path
 
 # third-party libs
-from matplotlib import rc
 import matplotlib.pyplot as plt
-from IPython.display import display
 
 # local libs
 from motley.table import Table
@@ -15,7 +16,7 @@ from scrawl.imagine import ImageDisplay
 from recipes.logging import logging, get_module_logger
 
 # relative libs
-from .. import calDB, shocCampaign, MATCH
+from .. import calDB, shocCampaign, MATCH, COLOURS
 
 
 # module level logger
@@ -24,27 +25,13 @@ logging.basicConfig()
 logger.setLevel(logging.INFO)
 
 
-COLOURS = {'flat': 'cornflowerblue',
-           'dark': 'tan'}
+def _plural(text):
+    return text + 'es' if text.endswith('s') else 's'
 
 
-def plural(s):
-    if s.endswith('s'):
-        return s + 'es'
-    return s + 's'
-
-
-def contains_fits(path, recurse=False):
-    glob = path.rglob if recurse else path.glob
-    return bool(next(glob('*.fits'), False))
-
-
-def identify(run):
-    # identify
-    # is_flat = np.array(run.calls('pointing_zenith'))
-    # run[is_flat].set_attrs(obstype='flat')
-
-    g = run.guess_obstype()
+def plural(text, obj=(())):
+    """conditional plural"""
+    return _plural(text) if (obj and len(obj) > 1) else text
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -128,7 +115,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
             # where = 'database'
             masters = calDB.get(run, kind, master=True)
 
-            # found_db_master = 
+            # found_db_master =
             need -= set(masters.to_list().attrs(*attx))
 
     # get missing calibration stacks (raw) from db. Here we prefer to use the
@@ -143,9 +130,11 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 
     if need:
         logger.warning(
-            'Could not find %s for observed data with setup(s)\n%s\n in '
-            'database %s',
-            plural(kind), Table(need, col_headers=attx), calDB[kind]
+            'Could not find %s for observed data with %s\n%s\n in '
+            'database %r', 
+            motley.apply(plural(kind), COLOURS[kind]),
+            plural('setup', need), Table(need, col_headers=attx),
+            str(calDB[kind])
         )
 
     # finally, group for convenience
@@ -155,16 +144,6 @@ def find_cal(run, kind, path=None, ignore_masters=False):
                                 g1_style=COLOURS[kind]))
 
     return gcal, masters
-
-
-# def get_combine_func(kind):
-#     if kind in ('dark', 'bias'):
-#         return np.median
-
-#     if kind == 'flat':
-#         return median_scaled_median
-
-#     raise ValueError(f'Unknown calibration type {kind}')
 
 
 def compute_masters(stacks, kind, outpath=None, overwrite=False,
@@ -194,46 +173,3 @@ def compute_masters(stacks, kind, outpath=None, overwrite=False,
 
     # calDB
     return masters
-
-
-def pre(run, folder, overwrite):
-
-    # do pre reductions
-    gobj, *masters = calibrate(run, folder, overwrite=False)
-
-    # create image grid
-    for i, m in enumerate(masters):
-        if not m:
-            continue
-
-        title = ('{filters!s}; ', '{readout}; {binning}')[(not i):]
-        logger.info('Master %s Images:', ('dark', 'flat')[i].title())
-        thumbs = m.to_list().thumbnails(title=''.join(title))
-        display(thumbs.figure)
-
-
-def main(folder):
-    #
-    root_folder = Path(folder)
-    output_folder = root_folder
-    fig_folder = Path('/home/hannes/Documents/papers/dev/J1928/figures')
-    rc('savefig', directory=fig_folder)
-
-    # Load data
-    run = shocCampaign.load(root_folder)
-
-    # identify
-    identify(run)
-
-    # calibrate
-    gobj, mbias, mflat = calibrate(run, output_folder, overwrite=False)
-
-    # TODO group by source
-
-    # register
-    gobj.coalign_
-
-    # track
-    # photomerty
-    # decorrelate
-    # spectral analysis
