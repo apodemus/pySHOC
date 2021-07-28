@@ -1,8 +1,6 @@
 # __version__ = '3.14'
 
 
-
-
 # std libs
 import re
 import operator as op
@@ -38,7 +36,7 @@ from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
 from .utils import str2tup
 from .pprint import BraceContract
 from .readnoise import readNoiseTables
-from .timing import shocTiming, Trigger, UnknownTime
+from .timing import shocTiming, Trigger
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
 from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
 
@@ -685,10 +683,10 @@ class shocHDU(HDUExtra, Messenger):
         # initially be created with a `_BasicHeader` only, in which case we
         # will not yet have all the correct keywords available yet to identify
         # old vs new shoc data at init.
-        try:
-            return shocTiming(self)
-        except:
-            return UnknownTime
+        # try:
+        return shocTiming(self)
+        # except:
+        #     return UnknownTime
 
     # alias
     t = timing
@@ -1033,9 +1031,8 @@ class TableHelper(AttrTable):
         flags = {}
         postscript = []
         for key, attr in [('timing.t0', 'timing.trigger.flag', ),
-                          ('timing.exp', 'timing.trigger.loop_flag')]:
-            head = self.aliases[key]
-            flg = flags[head] = run.attrs(attr)
+                          ('timing.exp', 'timing.trigger.loop_flag')]: 
+            flg = flags[self.aliases[key]] = run.attrs(attr)
             for flag in set(flg):
                 if flag:
                     info = Trigger.FLAG_INFO[self.get_header(attr)]
@@ -1061,13 +1058,15 @@ class TableHelper(AttrTable):
 
 # ------------------------------------- ~ ------------------------------------ #
 
-
 class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
     # controls which attributes will be printed
     tabulate = TableHelper(
+        # attrs = 
+        # todo: 
+        # 'file.stem' : Column('filename', unit='', fmt='', total=True )
         ['file.stem',
          'telescope', 'camera',
          'target', 'obstype',
@@ -1085,7 +1084,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         aliases={
             'file.stem': 'filename',
             'telescope': 'tel',
-            # 'camera': 'camera',
+            'camera': 'camera',
             'nframes': 'n',
             'binning': 'bin',
             # 'readout.mode.frq': 'mode',
@@ -1106,6 +1105,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             'tExp': 's',
             't0': 'UTC',
             'ishape': 'y, x',
+            'duration': 'hms'
         },
 
         compact=True,
@@ -1135,6 +1135,15 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 wrn.warn(f'Expected parent files {parent} to be loaded with '
                          f'this file. Timestamps for {hdu.file.name} will be '
                          f'wrong!!')
+                
+        # Check for external GPS timing file
+        need_gps = run.missing_gps()
+        if need_gps:
+            gps = run.search_gps_file()
+            if gps:
+                cls.logger.info('Using gps timestamps from %r', str(gps))
+                run.provide_gps(gps)
+            
         return run
 
     def save(self, filenames=(), folder=None, name_format=None, overwrite=False):
@@ -1393,15 +1402,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         within `tolerance` degrees from any targets, these attributes will be
         left unchanged.
 
-        CRITICAL: Only use this function if you are sure that the telescope
-        pointing coordinates are correct in the headers. Turns out they are
-        frequently wrong!
+        CRITICAL: This function uses the telescope pointing coordinates as
+        listed in the hdu headers. Only use this function if you are sure that
+        these are correct. They are sometimes wrong, in which case this function
+        will fail or assign objects incorrectly files.
 
         Parameters
         ----------
-        named_coords : dict
-            name, coordinate mapping
-        tolerance : float
+        named_coords : dict name, coordinate mapping tolerance : float
             coordinate distance tolerance in degrees
         """
         # is_flat = run.calls('pointing_zenith')
@@ -1452,34 +1460,42 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         return missing
 
-    def gps_start_(self):
-        gps_start_missing = np.array(self.attrs('t.trigger.flag'), bool)
-        return self[gps_start_missing]
+    # def gps_start_(self):
+    #     gps_start_missing = np.array(self.attrs('t.trigger.flag'), bool)
+    #     return self[gps_start_missing]
 
-    def no_gps_interval(self):
-        return self[self.calls('t.has_gps_interval')]
+    # def no_gps_interval(self):
+    #     return self[self.calls('t.has_gps_interval')]
 
     # def set_t0_sast(self, times):
     #     assert len(times) == len(self)
     #     for obs, t0 in zip(self, times):
     #         obs.t.t0 = obs.t.from_local(t0)
+    
+    def missing_gps(self):
+        return self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
 
+    def search_gps_file(self):
+        # get common root folder
+        folder = self.files.common_root()
+        if folder:
+            gps = folder / 'gps.sast'
+            if gps.exists():
+                return gps
+    
     def provide_gps(self, filename):
-
         # read file with gps triggers
-        names, sast = np.loadtxt(str(filename), str, unpack=True)
-
-        gps_provided = run[names]
-        need_gps = run.select_by(**{'t.trigger.flag': bool})
-        assert gps_provided == need_gps
-
-        # t0 = need_gps.attrs('t.t0')
-        # need_gps.set_t0_sast(sast)
+        path = Path(filename)
+        names, times = np.loadtxt(str(filename), str, unpack=True)
+        need_gps = self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
+        assert need_gps == self[names].sort_by('t.t0') 
 
         # assert len(times) == len(self)
-        for obs, t0 in zip(need_gps, sast):
-            obs.t.t0 = obs.t.from_local(t0)
-            obs.trigger.flag = ''
+        tz = 2 * path.suffix.endswith('sast')
+        for obs, t0 in zip(need_gps, times):
+            t = obs.t
+            t.t0 = t.from_local(t0, tz)
+            t.trigger.flag = '*'
 
         # print('TIMEDELTA')
         # print((Time(t0) - Time(need_gps.attrs('t.t0'))).to('s'))
@@ -1520,7 +1536,7 @@ class shocObsGroups(Groups):
         -------
 
         """
-        return shocCampaign.tabulate(self, attrs, titled=titled, 
+        return shocCampaign.tabulate(self, attrs, titled=titled,
                                      filler_text='NO MATCH', **kws)
 
     def pformat(self, titled=True, braces=False, vspace=1, **kws):
