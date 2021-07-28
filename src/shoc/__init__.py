@@ -11,6 +11,7 @@ from astropy.io.fits.hdu.base import register_hdu
 
 # relative libs
 from .core import *
+from .colours import COLOURS
 from .caldb import CalDB
 
 
@@ -19,13 +20,13 @@ try:
 except PackageNotFoundError:
     __version__ = '?.?.?'
 
+
 # Banner
 LOGO = (Path(__file__).parent / 'banner.txt').read_text()
 
 
 def make_banner(subtitle='', width=80):
     from motley.box import TextBox, clear_box, underline
-    from textwrap import dedent
 
     text = f'{subtitle}\nv{__version__}'
     parts = ('',
@@ -40,36 +41,3 @@ register_hdu(shocHDU)
 
 # initialize calibration database
 calDB = CalDB('/media/Oceanus/work/Observing/data/SHOC/calibration/')
-# calDB.autovivify(False)
-
-# # Collect named cubes in a dict
-# from recipes.iter import flatiter, itersubclasses
-#
-# namedObsClasses = {cls.kind: cls
-#                    for cls in flatiter((itersubclasses(shocObs), shocObs))}
-# namedRunClasses = {cls.obsClass.kind: cls
-#                    for cls in flatiter((itersubclasses(shocRun), shocRun))}
-#
-#
-# def cubeFactory(kind):  # not really a factory
-#     return namedObsClasses.get(kind, shocObs)
-#
-#
-# def runFactory(kind):
-#     return namedRunClasses.get(kind, shocRun)
-#
-#
-# def load(filenames, kind='science'):
-#     """
-#
-#     Parameters
-#     ----------
-#     filenames
-#     kind
-#
-#     Returns
-#     -------
-#
-#     """
-#     run = shocRun.load(filenames=filenames, kind=kind)
-#     return run

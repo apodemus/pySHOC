@@ -6,12 +6,9 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras
 # std libs
 from pathlib import Path
 
-# local libs
-
 
 # relative libs
 from .. import make_banner
-from .main import *
 
 
 BANNER_WIDTH = 100
@@ -28,10 +25,13 @@ _folders = (
 
 
 class FolderTree:
+    """Filesystem tree helper"""
+
     def __init__(self, input, output=None, folders=_folders):
-        input = Path(input)
+        self.input = Path(input)
         if output is None:
-            output = input / '.pyshoc'
+            output = self.input / '.pyshoc'
+        self.output = output
 
         for folder in folders:
             path = output / folder

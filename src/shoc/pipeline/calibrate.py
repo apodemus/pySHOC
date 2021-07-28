@@ -4,6 +4,7 @@ Calibrate SHOC observations
 """
 
 # std libs
+import motley
 import logging
 
 # third-party libs
@@ -15,7 +16,7 @@ from scrawl.imagine import ImageDisplay
 from recipes.logging import logging, get_module_logger
 
 # relative libs
-from .. import calDB, shocCampaign, MATCH
+from .. import calDB, shocCampaign, MATCH, COLOURS
 
 
 # module level logger
@@ -24,14 +25,13 @@ logging.basicConfig()
 logger.setLevel(logging.INFO)
 
 
-COLOURS = {'flat': 'cornflowerblue',
-           'dark': 'tan'}
+def _plural(text):
+    return text + 'es' if text.endswith('s') else 's'
 
 
-def plural(s):
-    if s.endswith('s'):
-        return s + 'es'
-    return s + 's'
+def plural(text, obj=(())):
+    """conditional plural"""
+    return _plural(text) if (obj and len(obj) > 1) else text
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -130,9 +130,11 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 
     if need:
         logger.warning(
-            'Could not find %s for observed data with setup(s)\n%s\n in '
-            'database %s',
-            plural(kind), Table(need, col_headers=attx), calDB[kind]
+            'Could not find %s for observed data with %s\n%s\n in '
+            'database %r', 
+            motley.apply(plural(kind), COLOURS[kind]),
+            plural('setup', need), Table(need, col_headers=attx),
+            str(calDB[kind])
         )
 
     # finally, group for convenience

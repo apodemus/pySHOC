@@ -3,12 +3,9 @@
 ###################################
 # old code
 dev
-iraf_hacks.py
-lightcurve.py
-pipeline.py
-uncertainty.py
-fast.py
-filenaming.py
+src/shoc/pipeline/new.py
+src/shoc/pipeline/parse.py
+src/shoc/_banner.txt
 
 # needs integrating
 tests/test_pre.py
@@ -106,6 +103,5 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
-
 
 
