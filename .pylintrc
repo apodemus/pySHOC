@@ -300,9 +300,9 @@ ignored-classes=optparse.Values,
                 recipes.testing.mock,
                 recipes.dicts.AttrReadItem,
                 recipes.dicts.AttrDict,
-                ; recipes.logging.LoggingMixin
                 shoc.pipeline.FolderTree,
-                
+                shoc.caldb.CalDB
+                ; recipes.logging.LoggingMixin
 
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime
