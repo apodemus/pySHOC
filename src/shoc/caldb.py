@@ -102,8 +102,7 @@ class CalDB(DB):
         # set the telescope from the folder path
         if kind == 'flat' and not master:
             run.attrs.set(filters=run.attrs('file.path.parent.name'),
-                          telescope=run.attrs('file.path.parent.parent.name'),
-                          each=True)
+                          telescope=run.attrs('file.path.parent.parent.name'))
 
         # get appropriate attributes for dark / flat
         files, *data = zip(*run.attrs('file.path', *sum(MATCH[kind], ())))
