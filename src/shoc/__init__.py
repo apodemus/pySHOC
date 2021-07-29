@@ -22,7 +22,7 @@ except PackageNotFoundError:
 
 
 # Banner
-LOGO = (Path(__file__).parent / 'banner.txt').read_text()
+LOGO = (Path(__file__).parent / 'banner/banner.txt').read_text()
 
 
 def make_banner(subtitle='', width=80):

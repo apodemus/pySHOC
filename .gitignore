@@ -5,7 +5,10 @@
 dev
 src/shoc/pipeline/new.py
 src/shoc/pipeline/parse.py
-src/shoc/_banner.txt
+src/shoc/banner/_banner.txt
+src/shoc/banner/*asciigram.txt
+
+
 
 # needs integrating
 tests/test_pre.py
@@ -103,5 +106,3 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
-
-
