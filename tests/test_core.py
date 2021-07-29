@@ -238,10 +238,10 @@ class TestCampaign:
     @pytest.mark.skip()
     def test_masters(self, run):
         from obstools.stats import median_scaled_median
-        from shoc import MATCH_FLATS, MATCH_DARKS
+        from shoc import MATCH_FLATS, MATCH_DARKS, repeat
 
         is_flat = np.array(run.calls('pointing_zenith'))
-        run[is_flat].set_attrs(obstype='flat')
+        run[is_flat].attrs.set(repeat(obstype='flat'))
 
         grp = run.group_by('obstype')
         gobj, gflats = grp['object'].match(grp['flat'], *MATCH_FLATS)

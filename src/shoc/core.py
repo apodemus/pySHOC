@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 from pyxides import Groups, OfType
+from pyxides.vectorize import repeat
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
@@ -1428,9 +1429,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             obj_coords = coords[i]
             selected = self[cxx.separation(obj_coords).deg < tolerance]
             if selected:
-                selected.attrs.set(coords=obj_coords,
-                                   target=names[i],
-                                   obstype='object')
+                selected.attrs.set(repeat(coords=obj_coords,
+                                          target=names[i],
+                                          obstype='object'))
 
     def required_calibration(self, kind):
         """
@@ -1562,7 +1563,7 @@ class shocObsGroups(Groups):
         return self.calls.combine(func, args, **kws)
 
     def stack(self):
-        return self.calls('stack')
+        return self.calls.stack()
 
     def merge_combine(self, func=None, *args, **kws):
         return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
@@ -1657,7 +1658,7 @@ class shocObsGroups(Groups):
         #                            name_format=name_format,
         #                            overwrite=overwrite).group_by(self)
 
-        # return self.calls('save',
+        # return self.calls.save(),
         #                   folder=folder,
         #                   name_format=name_format,
         #                   overwrite=overwrite)
