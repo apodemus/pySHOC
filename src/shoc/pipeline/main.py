@@ -72,7 +72,7 @@ def main(path, target=None):
     # ------------------------------------------------------------------------ #
     # setup
     paths = setup(path)
-    target = target or paths.base.name
+    target = target or paths.input.name
 
     # -------------------------------------------------------------------------#
     # logger.info('Creating log listener')
@@ -112,7 +112,7 @@ def _main(paths, target):
     # Load data
     run = shocCampaign.load(paths.input, obstype='object')
     run.attrs.set(repeat(telescope='74in',
-                  target=target))
+                         target=target))
     # HACK
     # run['202130615*'].calls('header.remove', 'DATE-OBS')
 

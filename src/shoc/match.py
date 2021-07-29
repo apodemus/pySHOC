@@ -227,7 +227,7 @@ class MatchedObservations(LoggingMixin):
         # use_key, = np.where(varies)
 
         # remove keys that runs are grouped into
-        attrs = OrderedSet(tmp.table.attrs) - self.attrs
+        attrs = OrderedSet(tmp.tabulate.attrs) - self.attrs
         insert = defaultdict(list)
         highlight = {}
         # hlines = []
@@ -260,7 +260,7 @@ class MatchedObservations(LoggingMixin):
             # hlines.append(n - 1)
 
         # get title
-        colour = ftl.partial(motley.codes.apply, txt=title_props)
+        colour = ftl.partial(motley.apply, txt=title_props)
         title = txw.dedent(f'''\
             {colour(title)}
             {colour("exact  :")} {self.exact}
@@ -268,11 +268,11 @@ class MatchedObservations(LoggingMixin):
             ''')
 
         # get attribute table
-        tbl = tmp.table.get_table(tmp, attrs,
-                                  title=title, title_align='<',
-                                  insert=insert,  # hlines=hlines,
-                                  row_nrs=False, totals=False,
-                                  title_props='underline')
+        tbl = tmp.tabulate(tmp, attrs,
+                           title=title, title_align='<',
+                           insert=insert,  # hlines=hlines,
+                           row_nrs=False, totals=False,
+                           title_props='underline')
 
         # filler lines
         Filler.make(tbl)
