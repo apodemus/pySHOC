@@ -1432,23 +1432,32 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                                    target=names[i],
                                    obstype='object')
 
-    def missing(self, kind):
+    def required_calibration(self, kind):
+        """
+        Given the set of image stacks, get the set of unique instrumental setups
+        (camera, telescope, binning etc.), that lack calibration ('dark',
+        'flat') observations.
+        
+        Note: OBSTYPE need to be accurate for this to work
+        """
+        
         kind = kind.lower()
         assert kind in CALIBRATION_NAMES
         kind = OBSTYPE_EQUIVALENT.get(kind, kind)
 
         g = self.group_by('obstype')
-        attr = MATCH[kind][0]
+        attx, _ = MATCH[kind]
 
-        atrset = set(g['object'].attrs(*attr))
+        atrset = set(g['object'].attrs(*attx))
         if kind == 'dark':
-            atrset |= set(g['flat'].attrs(*attr))
+            atrset |= set(g['flat'].attrs(*attx))
 
-        atrset -= set(g[kind].attrs(*attr))
+        atrset -= set(g[kind].attrs(*attx))
         return sorted(atrset, key=str)
 
     def missing_calibration(self, report=False):
-        missing = {kind: self.missing(kind) for kind in ('flat', 'dark')}
+        missing = {kind: self.required_calibration(kind) 
+                   for kind in ('flat', 'dark')}
 
         if report:
             s = ''

@@ -88,7 +88,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     gid = (*attx, *attc)
     cal, run = split_cal(run, kind)
     gcal = cal.group_by(*attx)
-    need = set(run.missing(kind))
+    need = set(run.required_calibration(kind)) # instrumental setups
     # found_in_run = set(cal.attrs(*attx))
     # found_db_master = found_db_raw = found_in_path = set()
     # logger.info('Found %i calibration files in the run.', len(cal))
@@ -122,7 +122,8 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     # stacks that are passed in, and suplement from the db. The passed stacks
     # will thus always be computed / used.
     if need:
-        gcal = calDB.get(run, kind, master=False)
+        req = run.select_by(**dict(zip(attx, *need)))
+        gcal = calDB.get(req, kind, master=False)
         # found_db_raw = gcal.keys()
         if gcal:
             cal = cal.join(gcal.to_list())
@@ -131,7 +132,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     if need:
         logger.warning(
             'Could not find %s for observed data with %s\n%s\n in '
-            'database %r', 
+            'database %r',
             motley.apply(plural(kind), COLOURS[kind]),
             plural('setup', need), Table(need, col_headers=attx),
             str(calDB[kind])
@@ -139,7 +140,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 
     # finally, group for convenience
     matched = run.match(cal.join(masters), *attrs)
-    logger.info('The following files were matched:\n%s',
+    logger.info('The following files were matched:\n%s\n',
                 matched.pformat(title=f'Matched {kind.title()}',
                                 g1_style=COLOURS[kind]))
 
