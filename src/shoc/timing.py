@@ -81,7 +81,7 @@ def timing_info_table(run):
     keys = ['TRIGGER', 'DATE', 'DATE-OBS', 'FRAME',
             'GPSSTART', 'GPS-INT', 'KCT', 'EXPOSURE']
     tbl = [[type(obs).__name__, *(obs.header.get(key, '--') for key in keys)]
-           for obs in run]
+                for obs in run]
     return Table(tbl, chead=['TYPE'] + keys)
 
 
@@ -103,6 +103,8 @@ class UnknownPointing(Exception):
 
 
 class _UnknownTime(Null):
+    
+    
     def __str__(self):
         return motley.red('??')
 
@@ -119,6 +121,9 @@ class _UnknownTime(Null):
         return self
 
     def __rmul__(self, _):
+        return self
+    
+    def __neg__(self):
         return self
 
 
@@ -140,12 +145,12 @@ UnknownTime = _UnknownTime()
 # class Duration(float, HMSrepr):``
 #     pass
 
-class InacurateTime:
+class GPSTimeStampMissing:
     def __str__(self):
         return motley.red('\N{WARNING SIGN}')
 
 
-INACCURATE = InacurateTime()
+NO_GPS = GPSTimeStampMissing()
 
 
 class Trigger:
@@ -157,10 +162,10 @@ class Trigger:
     FLAG_INFO = {
         'flag': {
             '*':        'GPS Trigger',
-            INACCURATE: 'GPSSTART missing - timestamp may be inaccurate'
+            NO_GPS:     'GPSSTART missing - timestamp may be inaccurate'
         },
         'loop_flag': {
-            '*': 'GPS Repeat'
+            '*':        'GPS Repeat'
         }
     }
     # SYMBOLS =     ''
@@ -172,7 +177,7 @@ class Trigger:
 
         self.flag = '*' * int(self.is_gps)
         if self.is_gps and ('GPSSTART' not in header):
-            self.flag = INACCURATE
+            self.flag = NO_GPS
 
         self.loop_flag = ''
         if self.is_gps_loop and ('GPS-INT' in header):
@@ -268,7 +273,7 @@ class Time(time.Time):
 # TODO: using this properly requires full implementation on Time and TimeDelta
 # subclasses with type preservation, which is tricky
 # class InaccurateTimeStamp(Time):
-#     _flag = INACCURATE_FLAG
+#     _flag = NO_GPS_FLAG
 
 
 # class GPSTime(time.Time):
@@ -276,13 +281,13 @@ class Time(time.Time):
 
 
 class TimeDelta(time.TimeDelta):
-    pass
+    # pass
 #     # _flag = ''
 
-#     # def __new__(cls, val, **kws):
-#     #     if val is UnknownTime:
-#     #         print('BAAAAAAAAAAAD')
-#     #         return UnknownTime
+    def __new__(cls, val, **kws):
+        if val is UnknownTime:
+            return UnknownTime
+        return super().__new__(cls, val, **kws)
 
 #         # obj = super().__new__(cls, val, **kws)
 #         # print('NEW', cls, val.__class__, obj.__class__ )
@@ -354,7 +359,7 @@ class Date(time.Time):
 
     def __format__(self, spec):
         if self.shape == () and ('d' in spec):
-            return repr(self)
+            return self.strftime('%Y%m%d')
         return super().__format__(spec)
 
     # def __add__(self, other):
@@ -478,13 +483,14 @@ class shocTiming(LoggingMixin):
         # Timing trigger mode
         self.trigger = Trigger(header)
 
-        # Date
-        # use FRAME here since always available in header
-        date, _ = header['FRAME'].split('T')
-        self.date = Date(date)  # date from header
+        # Date from header
+        # use FRAME here since it is most often available in header
+        date, _ = header.get('FRAME', 'T').split('T')
+        self.date = Date(date) if date else UnknownTime
+        
 
         # search for external gps time file
-        # if self.trigger.flag is INACCURATE:
+        # if self.trigger.flag is NO_GPS:
         #     file = hdu.file.path
         #     extern = next(file.parent.glob('gps.*'), None)
         #     if extern:
@@ -527,7 +533,7 @@ class shocTiming(LoggingMixin):
         # UT.
         sec = (h + ((h <= 0) * 24)) * 3600
         # `h` now in sec UTC from midnight
-        return self.date + TimeDelta(sec, format='sec')
+        return Time(self.date) + TimeDelta(sec, format='sec')
 
     def _reset_cache(self):
         """Reset all lazy properties.  Will work for subclasses"""
@@ -735,7 +741,7 @@ class shocTiming(LoggingMixin):
         Barycentric julian date [BJD(TDB)] at frame mid exposure times
         (includes light travel time corrections)
         """
-        return self.t.bjd(self.hdu.coords).jd
+        return self.t.bjd(self.hdu.coords, self.hdu.location).jd
 
     @lazyproperty
     def hjd(self):

@@ -13,17 +13,17 @@ from dataclasses import dataclass, field
 # third-party libs
 import numpy as np
 from scipy import stats
-from pyxides import Groups, OfType
-from pyxides.vectorize import repeat
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
 
 # local libs
+from scrawl.imagine import plot_image_grid
 from motley.table import AttrTable
 from motley.utils import vstack_groups
-from scrawl.imagine import plot_image_grid
+from pyxides import Groups, OfType
+from pyxides.vectorize import MethodVectorizer, repeat
 from recipes import pprint
 from recipes.dicts import pformat
 from recipes.string import sub, remove_prefix
@@ -31,11 +31,11 @@ from recipes.introspect import get_caller_name
 from obstools.image.calibration import keep
 from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
-from obstools.phot.campaign import FilenameHelper, PhotCampaign, HDUExtra
+from obstools.campaign import FilenameHelper, PhotCampaign, HDUExtra
 
 # relative libs
 from .utils import str2tup
-from .pprint import BraceContract
+from .printing import BraceContract
 from .readnoise import readNoiseTables
 from .timing import shocTiming, Trigger
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
@@ -102,7 +102,7 @@ MATCH['flats'] = MATCH['flat'] = MATCH_FLATS = (ATT_EQUAL_FLAT, ATT_CLOSE_FLAT)
 MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 # regex to find the roll-over number (auto_split counter value in filename)
-REGEX_ROLLED = re.compile('\._X([0-9]+)')
+REGEX_ROLLED = re.compile(r'\._X([0-9]+)')
 
 
 # ----------------------------- helper functions ----------------------------- #
@@ -396,22 +396,30 @@ class ReadoutMode:
 
 class RollOver():
 
+    nr = 0
+    parent = None
+
     def __init__(self, hdu):
         # Check whether the filenames contain '._X' an indicator for whether the
         # datacube reached the 2GB windows file size limit on the shoc server,
         # and was consequently split into a sequence of fits cubes. The
         # timestamps of these need special treatment
 
-        checked = map(REGEX_ROLLED.match, hdu.file.path.suffixes)
-        match = next(filter(None, checked), None)
+        path = hdu.file.path
+        if not path:
+            return
 
+        checked = map(REGEX_ROLLED.match, path.suffixes)
+        match = next(filter(None, checked), None)
         self.nr = n = int(match[1]) if match else 0
-        self.state = bool(n)
-        filename = hdu.file.name
-        self.parent = filename.replace(f'._X{n}', f'._X{n-1}' if n > 2 else '')
+        self.parent = path.name.replace(f'._X{n}', f'._X{n-1}' if n > 2 else '')
 
     def __bool__(self):
-        return self.state
+        return bool(self.nr)
+
+    @property
+    def state(self):
+        return bool(self)
 
 
 class shocFilenameHelper(FilenameHelper):
@@ -544,9 +552,7 @@ class shocHDU(HDUExtra, Messenger):
     @property
     def nframes(self):
         """Total number of images in observation"""
-        if self.ndim == 2:
-            return 1
-        return self.shape[0]  #
+        return 1 if (self.ndim == 2) else self.shape[0]
 
     @property
     def obstype(self):
@@ -738,9 +744,9 @@ class shocHDU(HDUExtra, Messenger):
         Get the instrument rotation (position angle) wrt the sky in radians.
         This value seems to be constant for most SHOC data from various
         telescopes that I've checked. You can measure this yourself by using the
-        `obstools.phot.campaign.PhotCampaign.coalign_dss` method.
+        `obstools.campaign.PhotCampaign.coalign_dss` method.
         """
-        return -0.04527
+        return 0#-0.04527
 
     def guess_obstype(self, sample_size=10, subset=(0, 100),
                       return_stats=False):
@@ -1032,7 +1038,7 @@ class TableHelper(AttrTable):
         flags = {}
         postscript = []
         for key, attr in [('timing.t0', 'timing.trigger.flag', ),
-                          ('timing.exp', 'timing.trigger.loop_flag')]: 
+                          ('timing.exp', 'timing.trigger.loop_flag')]:
             flg = flags[self.aliases[key]] = run.attrs(attr)
             for flag in set(flg):
                 if flag:
@@ -1065,8 +1071,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     # controls which attributes will be printed
     tabulate = TableHelper(
-        # attrs = 
-        # todo: 
+        # attrs =
+        # todo:
         # 'file.stem' : Column('filename', unit='', fmt='', total=True )
         ['file.stem',
          'telescope', 'camera',
@@ -1136,7 +1142,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 wrn.warn(f'Expected parent files {parent} to be loaded with '
                          f'this file. Timestamps for {hdu.file.name} will be '
                          f'wrong!!')
-                
+
         # Check for external GPS timing file
         need_gps = run.missing_gps()
         if need_gps:
@@ -1144,7 +1150,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             if gps:
                 cls.logger.info('Using gps timestamps from %r', str(gps))
                 run.provide_gps(gps)
-            
+
         return run
 
     def save(self, filenames=(), folder=None, name_format=None, overwrite=False):
@@ -1209,13 +1215,13 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         # get sample images
         sample_images = self.calls(f'sampler.{statistic}', depth, subset)
+
         if calibrated:
             # print(list(map(np.mean, sample_images)))
             sample_images = [hdu.calibrated(im) for hdu, im in
                              zip(self, sample_images)]
             # print(list(map(np.mean, sample_images)))
 
-        #
         return plot_image_grid(sample_images, titles=titles, figsize=figsize,
                                **kws)
 
@@ -1258,7 +1264,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     def combine(self, func=None, args=(), **kws):
         """
         Combine each `shocHDU` in the campaign into a 2D image by calling `func`
-        on each data stack.  Can be used to compute image statistics.
+        on each data stack.  Can be used to compute image statistics or compute 
+        master flat / dark image for calibration.
 
         Parameters
         ----------
@@ -1438,10 +1445,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         Given the set of image stacks, get the set of unique instrumental setups
         (camera, telescope, binning etc.), that lack calibration ('dark',
         'flat') observations.
-        
+
         Note: OBSTYPE need to be accurate for this to work
         """
-        
+
         kind = kind.lower()
         assert kind in CALIBRATION_NAMES
         kind = OBSTYPE_EQUIVALENT.get(kind, kind)
@@ -1457,7 +1464,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         return sorted(atrset, key=str)
 
     def missing_calibration(self, report=False):
-        missing = {kind: self.required_calibration(kind) 
+        missing = {kind: self.required_calibration(kind)
                    for kind in ('flat', 'dark')}
 
         if report:
@@ -1470,18 +1477,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         return missing
 
-    # def gps_start_(self):
-    #     gps_start_missing = np.array(self.attrs('t.trigger.flag'), bool)
-    #     return self[gps_start_missing]
-
-    # def no_gps_interval(self):
-    #     return self[self.calls('t.has_gps_interval')]
-
-    # def set_t0_sast(self, times):
-    #     assert len(times) == len(self)
-    #     for obs, t0 in zip(self, times):
-    #         obs.t.t0 = obs.t.from_local(t0)
-    
     def missing_gps(self):
         return self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
 
@@ -1492,13 +1487,13 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             gps = folder / 'gps.sast'
             if gps.exists():
                 return gps
-    
+
     def provide_gps(self, filename):
         # read file with gps triggers
         path = Path(filename)
         names, times = np.loadtxt(str(filename), str, unpack=True)
         need_gps = self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
-        assert need_gps == self[names].sort_by('t.t0') 
+        assert need_gps == self[names].sort_by('t.t0')
 
         # assert len(times) == len(self)
         tz = 2 * path.suffix.endswith('sast')
@@ -1559,14 +1554,16 @@ class shocObsGroups(Groups):
     def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
         print(self.pformat(titled, braces, vspace, **kws))
 
-    def combine(self, func=None, args=(), **kws):
-        return self.calls.combine(func, args, **kws)
+    # def combine(self, func=None, args=(), **kws):
+    #     return self.calls.combine(func, args, **kws)
 
-    def stack(self):
-        return self.calls.stack()
+    combine = MethodVectorizer('combine')  # , convert=shocCampaign
+    stack = MethodVectorizer('stack')  # , convert=shocCampaign
 
     def merge_combine(self, func=None, *args, **kws):
-        return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
+        return self.combine(func, *args, **kws).stack().combine(
+                func, *args, **kws)
+
 
     def select_by(self, **kws):
         out = self.__class__()
@@ -1653,12 +1650,3 @@ class shocObsGroups(Groups):
             self[key] = obj.save(folder=folder,
                                  name_format=name_format,
                                  overwrite=overwrite)
-
-        # return self.to_list().save(folder=folder,
-        #                            name_format=name_format,
-        #                            overwrite=overwrite).group_by(self)
-
-        # return self.calls.save(),
-        #                   folder=folder,
-        #                   name_format=name_format,
-        #                   overwrite=overwrite)
