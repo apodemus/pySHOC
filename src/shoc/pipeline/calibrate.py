@@ -3,17 +3,20 @@
 Calibrate SHOC observations
 """
 
+
 # std libs
-import motley
 import logging
 
 # third-party libs
+import numpy as np
 import matplotlib.pyplot as plt
 
 # local libs
+import motley
 from motley.table import Table
 from scrawl.imagine import ImageDisplay
 from recipes.logging import logging, get_module_logger
+from recipes.string import plural
 
 # relative libs
 from .. import calDB, shocCampaign, MATCH, COLOURS
@@ -23,15 +26,6 @@ from .. import calDB, shocCampaign, MATCH, COLOURS
 logger = get_module_logger()
 logging.basicConfig()
 logger.setLevel(logging.INFO)
-
-
-def _plural(text):
-    return text + 'es' if text.endswith('s') else 's'
-
-
-def plural(text, obj=(())):
-    """conditional plural"""
-    return _plural(text) if (obj and len(obj) > 1) else text
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -88,7 +82,8 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     gid = (*attx, *attc)
     cal, run = split_cal(run, kind)
     gcal = cal.group_by(*attx)
-    need = set(run.required_calibration(kind)) # instrumental setups
+    need = set(run.required_calibration(kind))  # instrumental setups
+
     # found_in_run = set(cal.attrs(*attx))
     # found_db_master = found_db_raw = found_in_path = set()
     # logger.info('Found %i calibration files in the run.', len(cal))
@@ -122,8 +117,10 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     # stacks that are passed in, and suplement from the db. The passed stacks
     # will thus always be computed / used.
     if need:
-        req = run.select_by(**dict(zip(attx, *need)))
-        gcal = calDB.get(req, kind, master=False)
+        selection = np.any([run.selection(**dict(zip(attx, _)))
+                            for _ in need], 0)
+        gcal = calDB.get(run[selection], kind, master=False)
+
         # found_db_raw = gcal.keys()
         if gcal:
             cal = cal.join(gcal.to_list())

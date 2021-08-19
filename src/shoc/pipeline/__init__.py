@@ -11,24 +11,41 @@ from pathlib import Path
 from .. import make_banner
 
 
-BANNER_WIDTH = 100
+BANNER_WIDTH = 120
 WELCOME_BANNER = make_banner('Photometry Pipeline', BANNER_WIDTH)
 
 
 _folders = (
     'logs',
     'plots',
-    'detection',
-    'sample',
+    # 'detection',
+    # 'samples',
     'photometry'
 )
 
 
-class FolderTree:
+class PartialAttributeLookup:
+    """
+    Attribute lookup that returns if the lookup key matches the start of the 
+    attribute name and the match is one-to-one. Raises AttributeError otherwise.
+    """
+
+    def __getattr__(self, key):
+        try:
+            return super().__getattribute__(key)
+        except AttributeError as err:
+            maybe = [_ for _ in self.__dict__ if _.startswith(key)]
+            real, *others = maybe or (None, ())
+            if others or not real:
+                raise err from None
+            return super().__getattribute__(real)
+
+
+class FolderTree(PartialAttributeLookup):
     """Filesystem tree helper"""
 
-    def __init__(self, input, output=None, folders=_folders):
-        self.input = Path(input)
+    def __init__(self, input_, output=None, folders=_folders):
+        self.input = Path(input_)
         if output is None:
             output = self.input / '.pyshoc'
         self.output = output

@@ -2,22 +2,20 @@
 
 # std libs
 import logging
-import logging.config
-import multiprocessing as mp
 
 # third-party libs
 import cmasher as cmr
 from matplotlib import rc
+from pyxides.vectorize import repeat
 
 # local libs
-from obstools.phot.core import PhotInterface
-from recipes.logging import logging, get_module_logger
+from recipes.logging import logging
 
 # relative libs
+from . import FolderTree
 from .calibrate import calibrate
 from .. import shocCampaign, shocHDU
-from . import logs, WELCOME_BANNER, FolderTree
-from pyxides.vectorize import repeat
+
 
 # TODO group by source
 
@@ -33,8 +31,9 @@ rc('axes', labelweight='bold')
 
 
 # module level logger
-logger = get_module_logger()
-logging.basicConfig()
+# logger = get_module_logger()
+# logging.basicConfig()
+logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
@@ -53,21 +52,28 @@ def identify(run):
 
 # def get_sample_image(hdu)
 
+def reset_cache_paths(mapping):
+    for func, folder in mapping.items():
+        cache = func.__cache__
+        cache.filename = folder / cache.path.name
+
+
 def setup(root):
     # setup results folder
     paths = FolderTree(root)
     paths.create()
+
+    # interactive gui save directory
+    rc('savefig', directory=paths.plots)
+
     # update cache locations
-    sample_cache = shocHDU.get_sample_image.__cache__
-    sample_cache.filename = paths.sample / sample_cache.path.name
+    reset_cache_paths({shocHDU.get_sample_image: paths.output,
+                       shocHDU.detect: paths.output})
 
     return paths
 
 
 def main(path, target=None):
-
-    # say hello
-    print(WELCOME_BANNER)
 
     # ------------------------------------------------------------------------ #
     # setup
@@ -108,6 +114,14 @@ def main(path, target=None):
 
 
 def _main(paths, target):
+    from obstools.phot import PhotInterface
+
+    # ------------------------------------------------------------------------ #
+    # This is needed because rcParams['savefig.directory'] doesn't work for
+    # fig.savefig
+    def savefig(fig, name, **kws):
+        return fig.savefig(paths.plots / name, **kws)
+
     # ------------------------------------------------------------------------ #
     # Load data
     run = shocCampaign.load(paths.input, obstype='object')
@@ -118,31 +132,32 @@ def _main(paths, target):
 
     #
     daily = run.group_by('date')
-    daily.pprint(titled=repr)
+    logger.info('\n%s', daily.pformat(titled=repr))
 
     # Sample thumbnails (before calibration)
     thumbnail_kws = dict(statistic='median',
                          figsize=(9, 7.5),
                          title_kws={'size': 'xx-small'})
     thumbs = run.thumbnails(**thumbnail_kws)
-    thumbs.fig.savefig(paths.plots / 'thumbs.png')
+    savefig(thumbs.fig, 'thumbs.png')
 
     # ------------------------------------------------------------------------ #
     # Calibrate
 
-    # Compute/retrieve master dark/flat. Point calibration images to science stacks
+    # Compute/retrieve master dark/flat. Point science stacks to calibration
+    # images.
     gobj, mdark, mflat = calibrate(run, overwrite=False)
 
     # Sample thumbnails (after calibration)
     thumbs = run.thumbnails(**thumbnail_kws)
-    thumbs.fig.savefig(paths.plots / 'thumbs-cal.png')
+    savefig(thumbs.fig, 'thumbs-cal.png')
 
     # Image Registration
     reg = run.coalign_dss(deblend=True)
-    mos = reg.mosaic(cmap=cmr.chroma,
-                     # regions={'alpha': 0.35}, labels=False
-                     )
-    mos.fig.savefig('mosaic.png')
+    mosaic = reg.mosaic(cmap=cmr.chroma,
+                        # regions={'alpha': 0.35}, labels=False
+                        )
+    savefig(mosaic.fig, 'mosaic.png', bbox_inches='tight')
 
     # txt, arrows = mos.mark_target(
     #     run[0].target,
@@ -154,8 +169,5 @@ def _main(paths, target):
 
     # %%
 
-    pi = PhotInterface()
-
-    for date, obs in daily.items():
-        filename = paths.phot / f'{date!r}-ragged.txt'
-        pi.ragged(obs, filename)
+    phot = PhotInterface(run, reg, paths.phot)
+    ts = phot.ragged()
