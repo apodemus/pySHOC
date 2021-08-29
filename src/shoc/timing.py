@@ -3,12 +3,12 @@ Functions for time-stamping SHOC data and writing time stamps to FITS headers
 """
 
 
-# std libs
+# std
 import inspect
 import logging
 import functools as ftl
 
-# third-party libs
+# third-party
 import numpy as np
 import astropy.units as u
 from astropy import time
@@ -17,7 +17,7 @@ from astropy.table import Table as aTable
 from astropy.coordinates import AltAz
 from astropy.coordinates.angles import Angle
 
-# local libs
+# local
 import motley
 from obstools.airmass import Young94, altitude
 from recipes.oo import Null

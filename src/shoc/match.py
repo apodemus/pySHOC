@@ -1,20 +1,20 @@
 
 
-# std libs
+# std
 import textwrap as txw
 import functools as ftl
 from collections import defaultdict, abc
 
-# third-party libs
+# third-party
 import numpy as np
 
-# local libs
+# local
 import motley
 from motley.utils import Filler, GroupTitle, ConditionalFormatter
 from recipes.sets import OrderedSet
 from recipes.logging import LoggingMixin
 
-# relative libs
+# relative
 from .utils import str2tup
 
 

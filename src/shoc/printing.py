@@ -2,10 +2,10 @@
 Pretty printing for shocCampaign
 """
 
-# std libs
+# std
 import re
 
-# local libs
+# local
 from pyxides.pprint import PrettyPrinter
 from recipes import bash
 from recipes.dicts import AVDict

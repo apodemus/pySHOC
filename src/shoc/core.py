@@ -1,7 +1,7 @@
 # __version__ = '3.14'
 
 
-# std libs
+# std
 import re
 import operator as op
 import warnings as wrn
@@ -10,7 +10,7 @@ from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-# third-party libs
+# third-party
 import numpy as np
 from scipy import stats
 from astropy.time import Time
@@ -18,7 +18,7 @@ from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
 
-# local libs
+# local
 from scrawl.imagine import plot_image_grid
 from motley.table import AttrTable
 from motley.utils import vstack_groups
@@ -33,7 +33,7 @@ from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
 from obstools.campaign import FilenameHelper, PhotCampaign, HDUExtra
 
-# relative libs
+# relative
 from .utils import str2tup
 from .printing import BraceContract
 from .readnoise import readNoiseTables

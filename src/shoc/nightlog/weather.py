@@ -3,13 +3,13 @@ Create a snapshot of sutherland weather page for nightlog
 """
 
 
-# std libs
+# std
 import io
 from pathlib import Path
 from datetime import datetime, timedelta
 import urllib.request
 
-# third-party libs
+# third-party
 from PIL import Image
 
 URL = 'http://suthweather.saao.ac.za/image.png'

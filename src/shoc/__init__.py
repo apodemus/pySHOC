@@ -3,13 +3,13 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras
 """
 
 
-# std libs
+# std
 from importlib.metadata import version, PackageNotFoundError
 
-# third-party libs
+# third-party
 from astropy.io.fits.hdu.base import register_hdu
 
-# relative libs
+# relative
 from .core import *
 from .colours import COLOURS
 from .caldb import CalDB

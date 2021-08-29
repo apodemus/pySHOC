@@ -4,21 +4,21 @@ Calibrate SHOC observations
 """
 
 
-# std libs
+# std
 import logging
 
-# third-party libs
+# third-party
 import numpy as np
 import matplotlib.pyplot as plt
 
-# local libs
+# local
 import motley
 from motley.table import Table
 from scrawl.imagine import ImageDisplay
 from recipes.logging import logging, get_module_logger
 from recipes.string import plural
 
-# relative libs
+# relative
 from .. import calDB, shocCampaign, MATCH, COLOURS
 
 

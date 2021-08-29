@@ -3,11 +3,11 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras
 """
 
 
-# std libs
+# std
 from pathlib import Path
 
 
-# relative libs
+# relative
 from .. import make_banner
 
 

@@ -3,19 +3,19 @@
 # pylint: disable=R0201     # Method could be a function
 
 
-# std libs
+# std
 import os
 import inspect
 import tempfile as tmp
 from pathlib import Path
 from collections import defaultdict
 
-# third-party libs
+# third-party
 import pytest
 import numpy as np
 
-# local libs
-from recipes.testing import Expect, Throws, expected, mock, logger
+# local
+from recipes.testing import Expected, Throws, expected, mock, logger
 from shoc.header import Header
 from shoc.core import (shocCampaign, shocHDU, shocDarkHDU, shocFlatHDU,
                        shocDarkMaster, shocFlatMaster,

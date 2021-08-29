@@ -12,14 +12,14 @@ utc2bjd
 
 """
 
-# std libs
+# std
 import urllib
 import re
 import numbers
 import itertools as itt
 from pathlib import Path
 
-# third-party libs
+# third-party
 import numpy as np
 import spiceypy as spice
 import more_itertools as mit

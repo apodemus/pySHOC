@@ -1,17 +1,17 @@
 
 
-# std libs
+# std
 import logging
 
-# third-party libs
+# third-party
 import cmasher as cmr
 from matplotlib import rc
 from pyxides.vectorize import repeat
 
-# local libs
+# local
 from recipes.logging import logging
 
-# relative libs
+# relative
 from . import FolderTree
 from .calibrate import calibrate
 from .. import shocCampaign, shocHDU

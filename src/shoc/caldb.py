@@ -3,23 +3,23 @@ Calibration files database
 """
 
 
-# std libs
+# std
 import shutil
 import itertools as itt
 from pathlib import Path
 from datetime import datetime
 
-# third-party libs
+# third-party
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 
-# local libs
+# local
 import motley
 from motley.table import Table
 from recipes import io
 from recipes.dicts import AutoVivify, AttrDict
 from recipes.logging import logging, get_module_logger, all_logging_disabled
 
-# relative libs
+# relative
 from . import shocCampaign, MATCH, COLOURS
 
 
