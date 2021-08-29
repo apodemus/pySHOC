@@ -143,10 +143,13 @@ disable=print-statement,
         import-outside-toplevel,
         protected-access,
         non-ascii-name,
+        superfluous-parens,
+        broad-except,
         too-many-instance-attributes,
         too-many-arguments,
         too-many-lines,
-        too-many-ancestors
+        too-many-ancestors,
+        inconsistent-return-statements
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
