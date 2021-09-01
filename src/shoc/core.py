@@ -1042,6 +1042,9 @@ class TableHelper(AttrTable):
         postscript = []
         for key, attr in [('timing.t0', 'timing.trigger.flag', ),
                           ('timing.exp', 'timing.trigger.loop_flag')]:
+            if key not in attrs:
+                continue
+
             flg = flags[self.aliases[key]] = run.attrs(attr)
             for flag in set(flg):
                 if flag:
