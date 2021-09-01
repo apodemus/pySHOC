@@ -443,6 +443,7 @@ class Messenger:
 
 
 class shocHDU(HDUExtra, Messenger):
+
     _FilenameHelperClass = shocFilenameHelper
     __shoc_hdu_types = {}
     filename_format = None
@@ -539,6 +540,8 @@ class shocHDU(HDUExtra, Messenger):
         # observation type
         if obstype:
             self.obstype = obstype
+        else:
+            self._obstype = self.header.get('OBSTYPE')
 
     def __str__(self):
         attrs = ('t.t0_flagged', 'binning', 'readout.mode', 'filters')
@@ -561,7 +564,7 @@ class shocHDU(HDUExtra, Messenger):
     @obstype.setter
     def obstype(self, obstype):
         if obstype not in KNOWN_OBSTYPE:
-            raise ValueError(f'Unrecognised {OBSTYPE=}')
+            raise ValueError(f'Unrecognised {obstype=}')
 
         self._obstype = self.header['OBSTYPE'] = obstype
 
