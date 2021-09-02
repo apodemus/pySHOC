@@ -485,7 +485,7 @@ class shocHDU(HDUExtra, Messenger):
         cls.logger.debug(f'{obstype=}, {class_name=}')
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
-            cls.logger.warning('Unknown OBSTYPE: %r', obstype)
+            cls.logger.warning('Unknown OBSTYPE: {!r:}', obstype)
 
         # cls = cls.__shoc_hdu_types.get(class_name, cls)
         # print(f'{class_name=}; {cls=}')
@@ -926,14 +926,14 @@ class shocHDU(HDUExtra, Messenger):
             path = folder / path
 
         if not path.parent.exists():
-            self.logger.info('Creating directory: %r', str(path.parent))
+            self.logger.info('Creating directory: {!r:}', str(path.parent))
             path.parent.mkdir()
 
         action = 'Saving to'
         if path.exists():
             action = 'Overwriting'
 
-        self.logger.info('%s %r', action, str(path))
+        self.logger.info('{:s} {!r:}', action, str(path))
         self.writeto(path, overwrite=overwrite)
 
         # reload
@@ -1154,7 +1154,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if need_gps:
             gps = run.search_gps_file()
             if gps:
-                cls.logger.info('Using gps timestamps from %r', str(gps))
+                cls.logger.info('Using gps timestamps from {!r:}', str(gps))
                 run.provide_gps(gps)
 
         return run
@@ -1168,7 +1168,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if len(set(filenames)) < len(self):
             from recipes.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
-            self.logger.warning('Duplicate filenames: %s', dup)
+            self.logger.warning('Duplicate filenames: {:s}', dup)
 
         hdus = self.calls.save(None, folder, name_format, overwrite)
         # reload

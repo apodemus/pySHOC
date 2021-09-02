@@ -1,20 +1,20 @@
 
 
 # std
-import logging
+import sys
 
 # third-party
 import cmasher as cmr
 from matplotlib import rc
-from pyxides.vectorize import repeat
+from loguru import logger
 
 # local
-from recipes.logging import logging
+from pyxides.vectorize import repeat
 
 # relative
+from .. import shocCampaign, shocHDU
 from . import FolderTree
 from .calibrate import calibrate
-from .. import shocCampaign, shocHDU
 
 
 # TODO group by source
@@ -30,11 +30,34 @@ rc('font', size=14)
 rc('axes', labelweight='bold')
 
 
-# module level logger
-# logger = get_module_logger()
-# logging.basicConfig()
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# logger config
+logger.configure(
+    handlers=[dict(
+        # console logger
+        sink=sys.stdout,
+        level='INFO',
+        catch=True,
+        colorize=True,
+        format=('{time:YYYY-MM-DD HH:mm:ss zz}|'
+                '<g>{name}.{function}</g>:<m>{line}</m>|'
+                '<lvl>{level}: {message}</lvl>')
+    ),
+        # File logger
+        # dict(sink= "file.log",
+        # serialize= True},
+    ],
+    # "extra": {"user": "someone"}
+)
+
+# from recipes.logging import LoggingMixin
+# class Tester(LoggingMixin):
+#     def method(self):
+#         logger.warning('Here be dragons!!!')
+#         self.logger.warning('Here be dragons!!!')
+        
+        
+# Tester().method()
+# raise SystemExit()
 
 
 def contains_fits(path, recurse=False):
@@ -132,7 +155,7 @@ def _main(paths, target):
 
     #
     daily = run.group_by('date')
-    logger.info('\n%s', daily.pformat(titled=repr))
+    logger.info('\n{:s}', daily.pformat(titled=repr))
 
     # Sample thumbnails (before calibration)
     thumbnail_kws = dict(statistic='median',
@@ -155,7 +178,7 @@ def _main(paths, target):
     # Image Registration
     reg = run.coalign_dss(deblend=True)
     mosaic = reg.mosaic(cmap=cmr.chroma,
-                        # regions={'alpha': 0.35}, labels=False
+                        # regions={'alpha': 0.35}, labels=Falseyou
                         )
     savefig(mosaic.fig, 'mosaic.png', bbox_inches='tight')
 
@@ -170,4 +193,17 @@ def _main(paths, target):
     # %%
 
     phot = PhotInterface(run, reg, paths.phot)
+
+    from scrawl.imagine import ImageDisplay
+
+    # plot ragged apertures
+    # TODO: move to phot once caching works
+    dilate = 2
+    for im, seg, hdu in zip(thumbs.images, reg.detections[1:], run):
+        seg.dilate(dilate)
+        img = ImageDisplay(im, cmap=cmr.voltage_r)
+        seg.show_contours(img.ax, cmap='hot', lw=1.5)
+        seg.show_labels(img.ax, color='w', size='xx-small')
+        img.save(paths.phot / f'{hdu.file.stem}-ragged.png')
+
     ts = phot.ragged()

@@ -33,10 +33,7 @@ from recipes.logging import LoggingMixin, logging, get_module_logger
 # TODO: Q: are gps times in UTC / UT1 ??
 
 
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
+from loguru import logger
 
 
 # --------------------------------- constants -------------------------------- #
@@ -557,7 +554,7 @@ class shocTiming(LoggingMixin):
         if hdu.rollover:  # FIXME: only for old data.
             # compute timestamp for files that rolled over 2Gb limit on old
             # server
-            self.logger.info('Computing timestamps for %s, rolled over from %s',
+            logger.info('Computing timestamps for {:s}, rolled over from {:s}',
                              hdu.file.name, hdu.rollover.parent)
             from .core import shocHDU
 

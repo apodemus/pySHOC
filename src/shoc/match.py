@@ -126,9 +126,11 @@ class MatchedObservations(LoggingMixin):
             mapping to unique `shocCampaign` instances
         """
 
-        self.logger.info(
-            'Matching %i files to %i files by:\n\tExact  : %r;\n\tClosest: %r',
-            len(self.a), len(self.b), exact, closest
+        self.logger.info(txw.dedent('''
+            Matching {:d} files to {:d} files by:
+               Exact  : {!r:};
+               Closest: {!r:}
+            '''), len(self.a), len(self.b), exact, closest
         )
 
         # create the GroupedRun for science frame and calibration frames
@@ -189,11 +191,11 @@ class MatchedObservations(LoggingMixin):
         v1 = self.b.attrs(*keys)
         return np.abs(v0[:, None] - v1)
 
-    def pformat(self,
-                title='Matched Observations', title_props=('g', 'bold'),
-                group_header_style=('g', 'bold'), g1_style='c',
-                no_match_style='r',
-                **kws):
+    def tabulate(self,
+                 title='Matched Observations', title_props=('g', 'bold'),
+                 group_header_style=('g', 'bold'), g1_style='c',
+                 no_match_style='r',
+                 **kws):
         """
         Format the resulting matches in a table
 
@@ -300,11 +302,21 @@ class MatchedObservations(LoggingMixin):
         # print()
         return tbl
 
+    def pformat(self, title='Matched Observations', title_props=('g', 'bold'),
+                group_header_style='bold', g1_style='c', no_match_style='r',
+                **kws):
+        """
+        Pretty format the resulting matches in a table.
+        """
+        return str(self.tabulate(title, title_props,
+                                 group_header_style, g1_style, no_match_style,
+                                 **kws))
+
     def pprint(self, title='Matched Observations', title_props=('g', 'bold'),
                group_header_style='bold', g1_style='c', no_match_style='r',
                **kws):
         """
-        Pretty print the resulting matches in a table
+        Pretty print the resulting matches in a table.
         """
         print(self.pformat(title, title_props,
                            group_header_style, g1_style, no_match_style,
