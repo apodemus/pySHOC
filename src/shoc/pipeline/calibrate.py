@@ -22,10 +22,7 @@ from recipes.string import plural
 from .. import calDB, shocCampaign, MATCH, COLOURS
 
 
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
+from loguru import logger
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -49,7 +46,7 @@ def calibrate(run, path=None, overwrite=False):
         gobj.set_calibrators(mdark, mflat)
         logger.info('Calibration frames set.')
     else:
-        logger.info('No calibration frames found in %s', run)
+        logger.info('No calibration frames found in {:s}', run)
 
     return gobj, mdark, mflat
 
@@ -70,7 +67,7 @@ def split_cal(run, kind):
             dropping = shocCampaign()
             for u in unneeded:
                 dropping.join(gcal.pop(u))
-            logger.info('Discarding unneeded calibration frames: %s', dropping)
+            logger.info('Discarding unneeded calibration frames: {:s}', dropping)
         cal = gcal.to_list()
 
     return cal, grp.to_list()
@@ -86,14 +83,14 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 
     # found_in_run = set(cal.attrs(*attx))
     # found_db_master = found_db_raw = found_in_path = set()
-    # logger.info('Found %i calibration files in the run.', len(cal))
+    # logger.info('Found {:d} calibration files in the run.', len(cal))
 
     # no calibration stacks in run. Look for pre-computed master images.
     masters = run.new_groups()
     masters.group_id = gid, {}
     if need:
         if path:
-            logger.info('Searching for calibration frames in path: %r', path)
+            logger.info('Searching for calibration frames in path: {!r:}', path)
             # get calibrators from provided path.
             xcal = shocCampaign.load(path)
             _, gcal = run.match(xcal, *attrs)
@@ -137,7 +134,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 
     # finally, group for convenience
     matched = run.match(cal.join(masters), *attrs)
-    logger.info('The following files were matched:\n%s\n',
+    logger.info('The following files were matched:\n{:s}\n',
                 matched.pformat(title=f'Matched {kind.title()}',
                                 g1_style=COLOURS[kind]))
 
@@ -147,7 +144,7 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 def compute_masters(stacks, kind, outpath=None, overwrite=False,
                     png=False, **kws):
 
-    logger.info('Computing master %s for %i stacks.',
+    logger.info('Computing master {:s} for {:d} stacks.',
                 plural(kind), len(stacks))
 
     # all the stacks we need are here: combine

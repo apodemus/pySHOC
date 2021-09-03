@@ -20,10 +20,7 @@ from recipes.logging import get_module_logger
 from motley.table import Table
 
 
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
+from loguru import logger
 
 HEADER_KEYS_MISSING_OLD = \
     [
@@ -279,7 +276,7 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
                                              what=comment, convert=converter)
             elif assumed and not default:
                 # assume likely values and warn user
-                logger.warning('Assuming %s is %r' % (header_key, assumed))
+                logger.warning('Assuming {:s} is {!r:}' % (header_key, assumed))
                 info = assumed
 
             if info:
@@ -317,7 +314,7 @@ class shocHeader(Header):
                 else:
                     self.rename_keyword(new, old)
             except ValueError as e:
-                logger.warning('Could not rename keyword %s due to the '
+                logger.warning('Could not rename keyword {:s} due to the '
                                'following exception \n%s' % (old, e))
                 success = False
 

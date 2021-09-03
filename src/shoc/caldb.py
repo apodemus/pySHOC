@@ -10,23 +10,19 @@ from pathlib import Path
 from datetime import datetime
 
 # third-party
-from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
+from loguru import logger
 
 # local
 import motley
 from motley.table import Table
+from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 from recipes import io
+from recipes.string import plural
 from recipes.dicts import AutoVivify, AttrDict
-from recipes.logging import logging, get_module_logger, all_logging_disabled
+from recipes.logging import logging, all_logging_disabled
 
 # relative
 from . import shocCampaign, MATCH, COLOURS
-
-
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
 
 
 class DB(AttrDict, AutoVivify):
@@ -130,10 +126,10 @@ class CalDB(DB):
             # look for new files
             new = self.get_new_files(kind, master)
             if new:
-                with all_logging_disabled(logger.WARN):
+                with all_logging_disabled(logging.WARN):
                     new = shocCampaign.load(new)
                 i = len(new)
-                logger.info('Loaded %i file%s.', i, 's' * bool(i))
+                logger.info('Loaded {:d} {:s}.', i, plural('file', new))
 
             close = True
 
@@ -188,7 +184,7 @@ class CalDB(DB):
         """
         which = 'master' if master else 'raw'
         which_kind = motley.apply(f'{which} {kind}', COLOURS[kind])
-        logger.info('Searching for %s files in database: %r',
+        logger.info('Searching for {:s} files in database: {!r:}',
                     which_kind, str(self[which][kind]))
 
         if kind in self.db[which]:
@@ -221,7 +217,7 @@ class CalDB(DB):
                 which_kind, Table(not_found, col_headers=attrs, nrs=True)
             )
         else:
-            logger.info('Found %i %s files.',
+            logger.info('Found {:d} {:s} files.',
                         sum(map(len, grp.values())), which_kind)
 
         return grp
