@@ -205,6 +205,16 @@ def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
 
     return np.multiply(fov, factor)
 
+
+def slice_size(s):
+    if isinstance(s, slice):
+        return s.stop - s.start
+
+    if isinstance(s, tuple):
+        return tuple(map(slice_size, s))
+
+    raise TypeError(f'Invalid type: {type(s)}')
+
 # ------------------------------ Helper classes ------------------------------ #
 
 # class yxTuple(tuple):
@@ -509,14 +519,12 @@ class shocHDU(HDUExtra, Messenger):
         self.binning = Binning(header[f'{_}BIN'] for _ in 'VH')
 
         # sub-framing
-        self.subrect = np.array(header['SUBRECT'].split(','), int)
-        # subrect stores the sub-region of the full CCD array captured for this
-        #  observation
-        # xsub, ysub = (xb, xe), (yb, ye) = \
-        xsub, ysub = self.subrect.reshape(-1, 2) // tuple(self.binning)
-        # for some reason the ysub order is reversed
-        self.sub = tuple(xsub), tuple(ysub[::-1])
-        self.sub_slices = list(map(slice, *np.transpose(self.sub)))
+        # `SUBRECT` stores the sub-region of the full CCD array captured for the
+        # observation. NOTE that for some reason the ysub order is reversed in
+        # the header
+        subrect = np.array(header['SUBRECT'].split(','), int)
+        xsub, ysub = subrect.reshape(-1, 2) // tuple(self.binning)
+        self.subrect = tuple(map(slice, *zip(ysub[::-1], xsub)))
 
         # CCD mode
         self.readout = ReadoutMode.from_header(header)
@@ -740,7 +748,10 @@ class shocHDU(HDUExtra, Messenger):
         return ImageOrienter(self, x=self.readout.isCON)
 
     def get_fov(self):
-        return get_fov(self.telescope)
+        fov = get_fov(self.telescope)
+        # scale by fractional size of subframe image
+        full_frame = np.floor_divide(1028, tuple(self.binning))
+        return fov * (slice_size(self.subrect) / full_frame)
 
     def get_rotation(self):
         """
