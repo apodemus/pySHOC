@@ -17,12 +17,38 @@ import motley
 from motley.table import Table
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 from recipes import io
-from recipes.string import plural
+from recipes.logging import LoggingMixin
+from recipes.string import numbered, plural
 from recipes.dicts import AutoVivify, AttrDict
-from recipes.logging import logging, all_logging_disabled
 
 # relative
 from . import shocCampaign, MATCH, COLOURS
+
+
+def move_to_backup(file, ext='bak'):
+    """
+    Rename and move the `file` to a backup storage location.
+
+    Parameters
+    ----------
+    file : Path
+        File to move.
+    ext : str
+        Filename extension for backup. An integer will be appended if necessary
+        for uniqueness.
+    """
+    if not file.exists():
+        return
+
+    path = file.parent
+    date = datetime.now().strftime('%Y%m%d')
+    new_file = path / f'{file.name}{date}.{ext}'
+    i = 1
+    while new_file.exists():
+        new_file = path / f'{file.stem}{date}.{ext}{i}'
+        i += 1
+
+    shutil.move(file, new_file)
 
 
 class DB(AttrDict, AutoVivify):
@@ -46,25 +72,10 @@ class MockHDU(DB):
 
 class MockRun(ArrayLike1D, AttrGrouper, OfType(MockHDU)):
     """A lightweight Campaign emulator"""
-    
 
 
-def move_to_backup(file):
-    if not file.exists():
-        return
-
-    path = file.parent
-    date = datetime.now().strftime('%Y%m%d')
-    new_file = path / f'{file.name}{date}.bak'
-    i = 1
-    while new_file.exists():
-        new_file = path / f'{file.stem}{date}.bak{i}'
-        i += 1
-
-    shutil.move(file, new_file)
-
-
-class CalDB(DB):
+class CalDB(DB, LoggingMixin):
+    """Calibration file database"""
 
     format = 'pkl'
     suffix = f'.{format}'
@@ -99,6 +110,7 @@ class CalDB(DB):
 
     @staticmethod
     def get_dict(run, kind, master):
+        # get filenames -> *attributes mapping
         # set the telescope from the folder path
         if kind == 'flat' and not master:
             run.attrs.set(filters=run.attrs('file.path.parent.name'),
@@ -126,10 +138,10 @@ class CalDB(DB):
             # look for new files
             new = self.get_new_files(kind, master)
             if new:
-                with all_logging_disabled(logging.WARN):
-                    new = shocCampaign.load(new)
-                i = len(new)
-                logger.info('Loaded {:d} {:s}.', i, plural('file', new))
+                shocCampaign.logger = self.logger
+                new = shocCampaign.load(new)
+                shocCampaign.logger = shocCampaign.Logger()
+                # logger.info('Loaded {:d} {:s}.', i, plural('file', new))
 
             close = True
 
@@ -165,22 +177,22 @@ class CalDB(DB):
 
     def get(self, run, kind, master=True):
         """
-        Get calibration files matching observation set `run`
+        Get calibration files matching observation campaign `run`.
 
         Parameters
         ----------
         run : shocCampaign
-            Observations to get calibration files for
+            Observations to get calibration files for.
         kind : {'dark', 'flat'}
-            The kind of calibration files requires
+            The kind of calibration files required.
         master : bool, optional
             Should master files or unprocessed raw stacks be returned, by
-            default True
+            default True.
 
         Returns
         -------
         shocObsGroups
-            The matched and grouped `shocCampaign`s
+            The matched and grouped `shocCampaign`s.
         """
         which = 'master' if master else 'raw'
         which_kind = motley.apply(f'{which} {kind}', COLOURS[kind])
@@ -198,26 +210,37 @@ class CalDB(DB):
         grp = run.new_groups()
         grp.group_id = attrs, {}
         _, gcal = run.match(db, attx, attc)
+
+        i = 0
         for key, mock in gcal.items():
             if mock is None:
                 not_found.append(key)
                 continue
 
             # load
-            grp[key] = shocCampaign.load(mock.attrs('filename'), obstype=kind)
+            logger.disable('obstools.campaign')
+            # catch repetative log message. Will emit below for loop
+            cal = grp[key] = shocCampaign.load(mock.attrs('filename'),
+                                               obstype=kind)
+            i += 1
+            logger.enable('obstools.campaign')
+
             # set telescope from db folder path for flats
             if kind == 'flat':
-                tel = mock.attrs('telescope')
-                grp[key].attrs.set(telescope=tel)
+                cal.attrs.set(telescope=mock.attrs('telescope'))
+                assert None not in cal.attrs.telescope
 
         if not_found:
             logger.info(
-                'No %s available in calibration database for with '
-                'observational setup(s):\n%s',
-                which_kind, Table(not_found, col_headers=attrs, nrs=True)
+                'No {:s} available in database for {:s} with '
+                'observational {:s}:\n{:s}',
+                which_kind,
+                numbered(not_found, 'file'),
+                plural('setup', not_found),
+                Table(not_found, col_headers=attrs, nrs=True)
             )
         else:
-            logger.info('Found {:d} {:s} files.',
-                        sum(map(len, grp.values())), which_kind)
+            logger.info('Found {:d} {:s} files.', sum(map(len, grp.values())),
+                        which_kind)
 
         return grp
