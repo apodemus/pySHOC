@@ -1,22 +1,22 @@
 
 
-# std
-import sys
-
 # third-party
 import cmasher as cmr
 from matplotlib import rc
 from loguru import logger
 
 # local
+from recipes import op
 from pyxides.vectorize import repeat
 
 # relative
 from .. import shocCampaign, shocHDU
-from . import FolderTree
+from . import FolderTree, logging
 from .calibrate import calibrate
 
 
+
+# t0 = time.time()
 # TODO group by source
 
 # track
@@ -29,35 +29,7 @@ from .calibrate import calibrate
 rc('font', size=14)
 rc('axes', labelweight='bold')
 
-
-# logger config
-logger.configure(
-    handlers=[dict(
-        # console logger
-        sink=sys.stdout,
-        level='INFO',
-        catch=True,
-        colorize=True,
-        format=('{time:YYYY-MM-DD HH:mm:ss zz}|'
-                '<g>{name}.{function}</g>:<m>{line}</m>|'
-                '<lvl>{level}: {message}</lvl>')
-    ),
-        # File logger
-        # dict(sink= "file.log",
-        # serialize= True},
-    ],
-    # "extra": {"user": "someone"}
-)
-
-# from recipes.logging import LoggingMixin
-# class Tester(LoggingMixin):
-#     def method(self):
-#         logger.warning('Here be dragons!!!')
-#         self.logger.warning('Here be dragons!!!')
-        
-        
-# Tester().method()
-# raise SystemExit()
+# ---------------------------------------------------------------------------- #
 
 
 def contains_fits(path, recurse=False):
@@ -84,14 +56,22 @@ def reset_cache_paths(mapping):
 def setup(root):
     # setup results folder
     paths = FolderTree(root)
+    if not paths.root.exists():
+        raise NotADirectoryError(str(root))
+    #
     paths.create()
+
+    # setup logging for pipeline
+    logging.config(paths.logs / 'main.log')
 
     # interactive gui save directory
     rc('savefig', directory=paths.plots)
 
     # update cache locations
-    reset_cache_paths({shocHDU.get_sample_image: paths.output,
-                       shocHDU.detect: paths.output})
+    reset_cache_paths({
+        shocHDU.get_sample_image: paths.output,
+        shocHDU.detect: paths.output
+    })
 
     return paths
 
@@ -101,23 +81,10 @@ def main(path, target=None):
     # ------------------------------------------------------------------------ #
     # setup
     paths = setup(path)
-    target = target or paths.input.name
+    target = target or paths.root.name
 
     # -------------------------------------------------------------------------#
-    # logger.info('Creating log listener')
-    # logQ = mp.Queue()  # The logging queue for workers
-    # # TODO: open logs in append mode if resume
-    # config_main, config_listener, config_worker = logs.config(paths.logs, logQ)
-    # #
-    # logging.config.dictConfig(config_main)
-
-    # # create log listener process
-    # stop_logging_event = mp.Event()
-    # logListener = mp.Process(name='logListener',
-    #                          target=logs.listener_process,
-    #                          args=(logQ, stop_logging_event, config_listener))
-    # logListener.start()
-    # logger.info('Log listener active')
+    #
 
     try:
         # pipeline main work

@@ -5,24 +5,22 @@ Calibrate SHOC observations
 
 
 # std
-import logging
+import textwrap
+import warnings
 
 # third-party
 import numpy as np
 import matplotlib.pyplot as plt
+from loguru import logger
 
 # local
 import motley
 from motley.table import Table
-from scrawl.imagine import ImageDisplay
-from recipes.logging import logging, get_module_logger
 from recipes.string import plural
+from scrawl.imagine import ImageDisplay
 
 # relative
 from .. import calDB, shocCampaign, MATCH, COLOURS
-
-
-from loguru import logger
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -67,7 +65,8 @@ def split_cal(run, kind):
             dropping = shocCampaign()
             for u in unneeded:
                 dropping.join(gcal.pop(u))
-            logger.info('Discarding unneeded calibration frames: {:s}', dropping)
+            logger.info('Discarding unnecessary calibration frames: {:s}.',
+                        dropping)
         cal = gcal.to_list()
 
     return cal, grp.to_list()
@@ -124,11 +123,15 @@ def find_cal(run, kind, path=None, ignore_masters=False):
             need -= set(cal.attrs(*attx))
 
     if need:
-        logger.warning(
-            'Could not find %s for observed data with %s\n%s\n in '
-            'database %r',
+        logger.warning(textwrap.dedent(
+            '''\
+            Could not find {:s} for observed data with instrumental {:s}
+            {:s}
+            in database {!r:}.\
+            '''),
             motley.apply(plural(kind), COLOURS[kind]),
-            plural('setup', need), Table(need, col_headers=attx),
+            plural('setup', need),
+            Table(need, col_headers=attx),
             str(calDB[kind])
         )
 
