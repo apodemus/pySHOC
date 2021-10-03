@@ -18,12 +18,34 @@ from recipes.logging import LoggingMixin
 from .utils import str2tup
 
 
-def proximity_groups(self, other, keys):
-    # Do the matching - map observation to those in `other` with attribute
-    # values matching most closely
+def proximity_groups(self, other, keys, null=None):
+    """
+    Match observations with each other for calibration - map observations in
+    `self` to those in `other` with attribute values matching most closely.
+
+    Parameters
+    ----------
+    self, other : shocCampaign
+        Observation sets to be matched.
+    keys : tuple of str
+        Attributes according to which the grouping and matching will be done.
+    null : object, optional
+        Sentinel value for a null match, by default None.
+
+    Yields
+    -------
+    gid : tuple
+        Group identifier: The values of attributes in `keys`, identical for all 
+        observations in the sub groups. If no matching observations exist in one 
+        of the observations sets for a particular subgroup, (null, ) is used as 
+        the group identifier.
+    sub0, sub1 : shocCampaign
+        The sub groups of matched observations.
+    """
+
     if not (self and other and keys):
         #vals = self.attrs(*keys) if self else (None, )
-        yield (None, ), self, other, None
+        yield (null, ), self, other, None
         return
 
     # split sub groups for closest match
@@ -34,9 +56,12 @@ def proximity_groups(self, other, keys):
 
 
 def proximity_split(v0, v1):
-    # split sub groups for closest match. closeness of runs is measured by
-    # the sum of the relative distance between attribute values.
-    # todo: use cutoff
+    """
+    Split into sub-groups for closest match. Closeness of runs is measured by
+    the sum of the relative distance between attribute values.
+    """
+
+    # TODO: use cutoff
 
     v0 = np.c_[v0][:, None]
     v1 = np.c_[v1][None]
@@ -56,6 +81,22 @@ def proximity_split(v0, v1):
         # vals array to tuple for hashing
         # deltas shape=(l0.sum(), l1.sum(), len(keys))
         yield tuple(v0[l0][0, 0]), l0, l1, delta_mtx[l0][:, l1]
+
+
+class Any:
+    """
+    Sentinel for proximity matching. If no exact match is found, use this object
+    to represent the value of the `closest` matching attribute values which is
+    allowed to take any value.
+    """
+
+    def __str__(self):
+        return 'any'
+
+    __repr__ = __str__
+
+
+ANY = Any()
 
 
 class MatchedObservations(LoggingMixin):
@@ -155,7 +196,8 @@ class MatchedObservations(LoggingMixin):
         for key in keys:
             obs0 = g0.get(key)
             obs1 = g1.get(key)
-            for id_, sub0, sub1, delta in proximity_groups(obs0, obs1, closest):
+            for id_, sub0, sub1, delta in proximity_groups(
+                    obs0, obs1, closest, null=ANY):
                 gid = (*key, *id_)
                 # group
                 self.matches[gid] = sub0, sub1
@@ -171,9 +213,9 @@ class MatchedObservations(LoggingMixin):
         yield from (self.left, self.right)
 
     def _make(self, i):
-        run = (self.a, self.b)[i]
+        run0 = (self.a, self.b)[i]
         split = list(zip(*self.matches.values()))[i]
-        groups = run.new_groups(zip(self.matches.keys(), split))
+        groups = run0.new_groups(zip(self.matches.keys(), split))
         groups.group_id = self.attrs, {}
         return groups
 
@@ -192,10 +234,22 @@ class MatchedObservations(LoggingMixin):
         return np.abs(v0[:, None] - v1)
 
     def tabulate(self,
-                 title='Matched Observations', title_props=('g', 'bold'),
-                 group_header_style=('g', 'bold'), g1_style='c',
+                 title='Matched Observations',
+                 title_props=('g', 'bold'),
+                 group_header_style=('g', 'bold'),
+                 g1_style='c',
                  no_match_style='r',
                  **kws):
+
+        #  colours=dict(title='gB',
+        #              group_headers='gB',
+        #              g1='gB',
+        #              no_match='rB'),
+
+        #  formatters=dict(title='{:s|gB}',
+        #                  group_headers='{:s|gB}',
+        #                  g1='{:s|gB}',
+        #                  no_match='{:s|rB}'),
         """
         Format the resulting matches in a table
 
@@ -243,7 +297,7 @@ class MatchedObservations(LoggingMixin):
             # info = dict(zip(headers, display_keys))
 
             # insert group headers
-            group_header = GroupTitle(i, display_keys, group_header_style)
+            group_header = GroupTitle(i, display_keys, group_header_style, '^')
             insert[n].append((group_header, '<', 'underline'))
 
             for j, (run, c) in enumerate([(other, no_match_style), (obs, '')]):
@@ -263,6 +317,7 @@ class MatchedObservations(LoggingMixin):
 
         # get title
         colour = ftl.partial(motley.apply, txt=title_props)
+
         title = txw.dedent(f'''\
             {colour(title)}
             {colour("exact  :")} {self.exact}
