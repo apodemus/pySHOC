@@ -605,6 +605,17 @@ class shocHDU(HDUExtra, Messenger):
         if ot != trg:
             del self.coords
 
+    def get_server_path(self):
+        if None in (self.file.path, self.telescope):
+            return
+
+        year, month, day, *_ = tuple(self.t.t0.ymdhms)
+        shoc_server = {'SHOC2': 'shd',
+                       'SHOC1': 'sha'}[self.camera]
+        return Path(f'astro:/data/{self.telescope}/{shoc_server}/'
+                    f'{year}/{month:0>2d}{day:0>2d}/'
+                    f'{self.file.name}')
+
     def _get_coords(self):
         """
         The target coordinates.  This function will look in multiple places
