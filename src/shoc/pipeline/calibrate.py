@@ -20,7 +20,10 @@ from recipes.string import plural
 from scrawl.imagine import ImageDisplay
 
 # relative
-from .. import calDB, shocCampaign, MATCH, COLOURS
+from .. import calDB, shocCampaign, MATCH, CONFIG
+
+
+COLOURS = CONFIG['colors']
 
 
 def calibrate(run, path=None, overwrite=False):

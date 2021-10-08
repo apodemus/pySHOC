@@ -22,7 +22,7 @@ from recipes.string import numbered, plural
 from recipes.dicts import AutoVivify, AttrDict
 
 # relative
-from . import shocCampaign, MATCH, COLOURS
+from . import shocCampaign, MATCH
 
 
 def move_to_backup(file, ext='bak'):
@@ -194,10 +194,12 @@ class CalDB(DB, LoggingMixin):
         shocObsGroups
             The matched and grouped `shocCampaign`s.
         """
+        from .import CONFIG
+        
         which = 'master' if master else 'raw'
-        which_kind = motley.apply(f'{which} {kind}', COLOURS[kind])
-        logger.info('Searching for {:s} files in database: {!r:}',
-                    which_kind, str(self[which][kind]))
+        name = motley.apply(f'{which} {kind}', CONFIG['colors'][kind])
+        logger.info("Searching for {:s} files in database: '{!s}'",
+                    name, self[which][kind])
 
         if kind in self.db[which]:
             db = self.db[which][kind]
@@ -234,13 +236,11 @@ class CalDB(DB, LoggingMixin):
             logger.info(
                 'No {:s} available in database for {:s} with '
                 'observational {:s}:\n{:s}',
-                which_kind,
-                numbered(not_found, 'file'),
-                plural('setup', not_found),
+                name, numbered(not_found, 'file'), plural('setup', not_found),
                 Table(not_found, col_headers=attrs, nrs=True)
             )
         else:
             logger.info('Found {:d} {:s} files.', sum(map(len, grp.values())),
-                        which_kind)
+                        name)
 
         return grp

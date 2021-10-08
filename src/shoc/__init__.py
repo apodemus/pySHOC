@@ -7,11 +7,11 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras
 from importlib.metadata import version, PackageNotFoundError
 
 # third-party
+import yaml
 from astropy.io.fits.hdu.base import register_hdu
 
 # relative
 from .core import *
-from .colours import COLOURS
 from .caldb import CalDB
 
 
@@ -20,9 +20,14 @@ try:
 except PackageNotFoundError:
     __version__ = '?.?.?'
 
+# settings
+SRC_ROOT = Path(__file__).parent
+CONFIG = yaml.load((SRC_ROOT / 'config.yaml').read_text(),
+                   Loader=yaml.FullLoader)
+
 
 # Banner
-LOGO = (Path(__file__).parent / 'banner/banner.txt').read_text()
+LOGO = (SRC_ROOT / 'banner/banner.txt').read_text()
 
 
 def make_banner(subtitle='', width=80):
