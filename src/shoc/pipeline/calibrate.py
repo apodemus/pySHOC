@@ -38,7 +38,8 @@ def calibrate(run, path=None, overwrite=False):
     if fstax:
         # debias flats
         # check = [hdu.data[0,0,0] for hdu in fstax.to_list()]
-        fstax.group_by(mdark).subtract(mdark)
+        fstax.group_by(mdark).subtract(mdark, handle_missing=warnings.warn)
+
         # check2 =  [hdu.data[0,0,0] for hdu in fstax.to_list()]
         mflat.update(compute_masters(fstax, 'flat', path, overwrite))
 

@@ -5,24 +5,22 @@ Functions for time-stamping SHOC data and writing time stamps to FITS headers
 
 # std
 import inspect
-import logging
-import functools as ftl
 
 # third-party
 import numpy as np
 import astropy.units as u
 from astropy import time
+from astropy.coordinates import AltAz
 from astropy.utils import lazyproperty
 from astropy.table import Table as aTable
-from astropy.coordinates import AltAz
 from astropy.coordinates.angles import Angle
+from loguru import logger
 
 # local
 import motley
 from obstools.airmass import Young94, altitude
 from recipes.oo import Null
-from recipes.io import read_lines
-from recipes.logging import LoggingMixin, logging, get_module_logger
+from recipes.logging import LoggingMixin
 
 
 # from pathlib import Path
@@ -31,9 +29,6 @@ from recipes.logging import LoggingMixin, logging, get_module_logger
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
 # TODO: Q: are gps times in UTC / UT1 ??
-
-
-from loguru import logger
 
 
 # --------------------------------- constants -------------------------------- #
@@ -49,23 +44,23 @@ def is_lazy(_):
     return isinstance(_, lazyproperty)
 
 
-def iso_split(t, dtype=[('date', 'U10'), ('utc', 'U18')]):
-    """Split ISO time between date and time (from midnight)"""
+def iso_split(t):  # , dtype=[('date', 'U10'), ('utc', 'U18')]):
+    """Split ISO time into date and time (from midnight)."""
     assert isinstance(t, Time)
     return np.array(np.char.split(t.isot, 'T').tolist())
 
 
 def iso_merge(date, utc, sep='T'):
     """
-    Vectorize merging for date and time strings to make isot format strings
+    Vectorize merging for date and time strings to make isot format strings.
     """
     return np.char.add(np.char.add(date, sep), utc)
 
 
 def time_from_local_midnight(t, unit='s'):
     """
-    Get the elapsed time in seconds since local midnight on the date of the first
-    time stamp in the sequence
+    Get the elapsed time in seconds since local midnight on the date of the
+    first time stamp in the sequence.
     """
     date0, _ = iso_split(t[0]).T
     return (t.utc - Time(date0)).to(unit)
@@ -78,7 +73,7 @@ def timing_info_table(run):
     keys = ['TRIGGER', 'DATE', 'DATE-OBS', 'FRAME',
             'GPSSTART', 'GPS-INT', 'KCT', 'EXPOSURE']
     tbl = [[type(obs).__name__, *(obs.header.get(key, '--') for key in keys)]
-                for obs in run]
+           for obs in run]
     return Table(tbl, chead=['TYPE'] + keys)
 
 
@@ -100,8 +95,7 @@ class UnknownPointing(Exception):
 
 
 class _UnknownTime(Null):
-    
-    
+
     def __str__(self):
         return motley.red('??')
 
@@ -119,7 +113,7 @@ class _UnknownTime(Null):
 
     def __rmul__(self, _):
         return self
-    
+
     def __neg__(self):
         return self
 
@@ -218,8 +212,6 @@ class Trigger:
         return self.is_gps and not self.is_gps_start
 
 
-
-
 class Time(time.Time):
     """
     Extends the `astropy.time.core.Time` class to include a few more convenience
@@ -279,7 +271,7 @@ class Time(time.Time):
 
 class TimeDelta(time.TimeDelta):
     # pass
-#     # _flag = ''
+    # _flag = ''
 
     def __new__(cls, val, **kws):
         if val is UnknownTime:
@@ -484,7 +476,6 @@ class shocTiming(LoggingMixin):
         # use FRAME here since it is most often available in header
         date, _ = header.get('FRAME', 'T').split('T')
         self.date = Date(date) if date else UnknownTime
-        
 
         # search for external gps time file
         # if self.trigger.flag is NO_GPS:
@@ -495,7 +486,7 @@ class shocTiming(LoggingMixin):
         #         self.t0 = Time(str(self.date) + t0)
         #         self.trigger.flag = '*'
 
-    # def __array__(self): 
+    # def __array__(self):
     #     return self.t
 
     def __getitem__(self, key):
@@ -530,7 +521,7 @@ class shocTiming(LoggingMixin):
         # UT.
         sec = (h + ((h <= 0) * 24)) * 3600
         # `h` now in sec UTC from midnight
-        return Time(self.date) + TimeDelta(sec, format='sec')
+        return Time(self.date, **self.options) + TimeDelta(sec, format='sec')
 
     def _reset_cache(self):
         """Reset all lazy properties.  Will work for subclasses"""
@@ -555,7 +546,7 @@ class shocTiming(LoggingMixin):
             # compute timestamp for files that rolled over 2Gb limit on old
             # server
             logger.info('Computing timestamps for {:s}, rolled over from {:s}',
-                             hdu.file.name, hdu.rollover.parent)
+                        hdu.file.name, hdu.rollover.parent)
             from .core import shocHDU
 
             assert isinstance(self.hdu.rollover.parent, shocHDU)
@@ -825,7 +816,7 @@ class shocTiming(LoggingMixin):
         """
 
         # FIXME: repeat print not necessary
-        logging.debug('Time stamping %s', self.hdu.file.path.name)
+        logger.debug('Time stamping %s', self.hdu.file.path.name)
 
         header = self.header
         t = self.t[j]

@@ -19,19 +19,20 @@ from astropy.io.fits.hdu import PrimaryHDU
 from astropy.coordinates import SkyCoord, EarthLocation
 
 # local
-from scrawl.imagine import plot_image_grid
+import motley
 from motley.table import AttrTable
 from motley.utils import vstack_groups
+from scrawl.imagine import plot_image_grid
 from pyxides import Groups, OfType
 from pyxides.vectorize import MethodVectorizer, repeat
-from recipes import pprint
-from recipes.dicts import pformat
-from recipes.string import sub, remove_prefix
-from recipes.introspect import get_caller_name
-from obstools.image.calibration import keep
 from obstools.stats import median_scaled_median
 from obstools.utils import get_coords_named, convert_skycoords
 from obstools.campaign import FilenameHelper, PhotCampaign, HDUExtra
+from recipes import pprint
+from recipes.dicts import pformat
+from recipes.functionals import raises
+from recipes.introspect import get_caller_name
+from recipes.string import sub, remove_prefix, named_items, strings
 
 # relative
 from .utils import str2tup
@@ -201,7 +202,7 @@ def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
     elif unit.startswith('deg'):
         factor = 1 / 60
     else:
-        raise ValueError('Unknown unit %s' % unit)
+        raise ValueError(f'Unknown unit {unit}')
 
     return np.multiply(fov, factor)
 
@@ -214,6 +215,10 @@ def slice_size(s):
         return tuple(map(slice_size, s))
 
     raise TypeError(f'Invalid type: {type(s)}')
+
+
+def slice_sizes(l):
+    return list(map(slice_size, l))
 
 # ------------------------------ Helper classes ------------------------------ #
 
@@ -312,7 +317,7 @@ class Filters:
 @dataclass()
 class OutAmpMode:
     """
-    Class to encapsulate the CCD output amplifier settings
+    Class to encapsulate the CCD output amplifier setting
     """
     mode_long: str
     emGain: int = 0
@@ -352,7 +357,7 @@ class ReadoutMode:
     def from_header(cls, header):
         return cls(int(round(1.e-6 / header['READTIME'])),  # readout freq MHz
                    header['PREAMP'],
-                   OutAmpMode(header['OUTPTAMP'], header.get('GAIN', '')),
+                   OutAmpMode(header['OUTPTAMP'], header.get('GAIN', 0)),
                    header['ACQMODE'],
                    header['SERNO'])
 
@@ -454,9 +459,9 @@ class Messenger:
 
 class shocHDU(HDUExtra, Messenger):
 
-    _FilenameHelperClass = shocFilenameHelper
     __shoc_hdu_types = {}
     filename_format = None
+    _FilenameHelperClass = shocFilenameHelper
 
     @classmethod
     def match_header(cls, header):
@@ -532,6 +537,7 @@ class shocHDU(HDUExtra, Messenger):
         # orientation
         # self.flip_state = yxTuple(header['FLIP%s' % _] for _ in 'YX')
         # WARNING: flip state wrong for EM!!
+
         # NOTE: IMAGE ORIENTATION reversed for EM mode data since it gets read
         #  out in opposite direction in the EM register to CON readout.
 
@@ -755,8 +761,10 @@ class shocHDU(HDUExtra, Messenger):
         """
         from obstools.image.calibration import ImageOrienter
 
-        # will flip EM images x axis (2nd axis)
+        # will flip CON images x axis (2nd axis)
         return ImageOrienter(self, x=self.readout.isCON)
+
+    # def set_calibrators(self)
 
     def get_fov(self):
         fov = get_fov(self.telescope)
@@ -771,7 +779,7 @@ class shocHDU(HDUExtra, Messenger):
         telescopes that I've checked. You can measure this yourself by using the
         `obstools.campaign.PhotCampaign.coalign_dss` method.
         """
-        return 0#-0.04527
+        return 0  # -0.04527
 
     def guess_obstype(self, sample_size=10, subset=(0, 100),
                       return_stats=False):
@@ -951,10 +959,7 @@ class shocHDU(HDUExtra, Messenger):
             self.logger.info('Creating directory: {!r:}', str(path.parent))
             path.parent.mkdir()
 
-        action = 'Saving to'
-        if path.exists():
-            action = 'Overwriting'
-
+        action = ('Saving to  ', 'Overwriting')[path.exists()]
         self.logger.info('{:s} {!r:}', action, str(path))
         self.writeto(path, overwrite=overwrite)
 
@@ -1062,8 +1067,10 @@ class TableHelper(AttrTable):
         # Add '*' flag to times that are gps triggered
         flags = {}
         postscript = []
-        for key, attr in [('timing.t0', 'timing.trigger.flag', ),
+        attrs = attrs or self.attrs
+        for key, attr in [('timing.t0', 'timing.trigger.flag'),
                           ('timing.exp', 'timing.trigger.loop_flag')]:
+            # key = 'timing.{}'
             if key not in attrs:
                 continue
 
@@ -1101,7 +1108,24 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     tabulate = TableHelper(
         # attrs =
         # todo:
-        # 'file.stem' : Column('filename', unit='', fmt='', total=True )
+        # {'file.stem' : Column('filename', unit='', fmt='', total=True),
+        # 'telescope' : Column('tel')
+        # 'camera':     Column(''),
+        # 'target':    Column(''),
+        # 'obstype':    Column(''),
+        # 'filters.A':     Column(''),
+        # 'filters.B':  Column(''),
+        # 'nframes':   Column('n', total=True),
+        # 'ishape':     Column(unit='y, x'),
+        # 'binning':    Column('bin'),
+        #  #  'readout.preAmpGain':     Column('preAmp'),
+        #  'readout.mode':  Column(''),
+        #  #  'readout.mode.frq':   Column(''),
+        #  #  'readout.mode.outAmp':    Column(''),
+        # 'timing.t0':     Column(fmt=op.attrgetter('iso'), unit='UTC'),
+        # 'timing.exp':    Column('tExp', fmt=str, unit='s'),
+        # 'timing.duration:    Column(fmt=hms, unit='hms', total=True)}
+
         ['file.stem',
          'telescope', 'camera',
          'target', 'obstype',
@@ -1119,7 +1143,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         aliases={
             'file.stem': 'filename',
             'telescope': 'tel',
-            'camera': 'camera',
+            # 'camera': 'camera',
             'nframes': 'n',
             'binning': 'bin',
             # 'readout.mode.frq': 'mode',
@@ -1161,6 +1185,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     def load_files(cls, filenames, *args, **kws):
         run = super().load_files(filenames, *args, **kws)
 
+        # TODO: bork if empty
+
         rolled = run.group_by('rollover.state')
         ok = rolled.pop(False)
         rolled = rolled.pop(True, ())
@@ -1176,7 +1202,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if need_gps:
             gps = run.search_gps_file()
             if gps:
-                cls.logger.info('Using gps timestamps from {!r:}', str(gps))
+                cls.logger.info(
+                    motley.stylize("Using gps timestamps from '{!r:|darkgreen,B}'"),
+                    gps.relative_to(gps.parent.parent),
+                )
                 run.provide_gps(gps)
 
         return run
@@ -1362,12 +1391,12 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     def set_calibrators(self, darks=None, flats=None):
         if darks:
-            mo = self.match(darks, *MATCH_DARKS)
-            mo.left.set_calibrators(mo.right)
+            matched = self.match(darks, *MATCH_DARKS)
+            matched.left.set_calibrators(matched.right)
 
         if flats:
-            mo = self.match(flats, *MATCH_FLATS)
-            mo.left.set_calibrators(flats=mo.right)
+            matched = self.match(flats, *MATCH_FLATS)
+            matched.left.set_calibrators(flats=matched.right)
 
     def plot_image_stats(self, stats, labels, titles, figsize=None):
         """
@@ -1589,9 +1618,9 @@ class shocObsGroups(Groups):
     stack = MethodVectorizer('stack')  # , convert=shocCampaign
 
     def merge_combine(self, func=None, *args, **kws):
-        return self.combine(func, *args, **kws).stack().combine(
-                func, *args, **kws)
-
+        return (
+            self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
+        )
 
     def select_by(self, **kws):
         out = self.__class__()
@@ -1611,26 +1640,28 @@ class shocObsGroups(Groups):
             out[key] = None if co is None else func(run, co, *args, **kws)
         return out
 
-    def _comap_method(self, other, name, *args, **kws):
-
+    def _comap_method(self, other, name, handle_missing=raises(ValueError),
+                      *args, **kws):
         missing = set(self.keys()) - set(other.keys())
         if missing:
-            raise ValueError(
-                'Can\'t map method {name} over group. Right group is missing '
-                'values for the following keys: ' + '\n'.join(map(str, missing))
+            handle_missing(
+                f'Can\'t map method {name!r} over groups. Right group is '
+                f'missing values for the following '
+                + named_items('key', strings(missing), '\n'.join)
             )
 
         out = self.__class__()
         for key, run in self.items():
             co = other[key]
-            if run is None:
+            if not run:
                 continue
 
-            out[key] = (None if co is None else
-                        getattr(run, name)(co, *args, **kws))
+            out[key] = (getattr(run, name)(co, *args, **kws)
+                        if co else None)
+
         return out
 
-    def subtract(self, other):
+    def subtract(self, other, handle_missing=raises(ValueError)):
         """
         Group by group subtraction
 
@@ -1644,7 +1675,7 @@ class shocObsGroups(Groups):
         Bias subtracted shocObsGroups
         """
 
-        return self._comap_method(other, 'subtract')
+        return self._comap_method(other, 'subtract', handle_missing)
 
     def set_calibrators(self, darks=None, flats=None):
         """
@@ -1658,6 +1689,8 @@ class shocObsGroups(Groups):
         -------
 
         """
+        from obstools.image.calibration import keep
+
         darks = darks or {}
         flats = flats or {}
         for key, run in self.items():

@@ -168,7 +168,7 @@ class MatchedObservations(LoggingMixin):
         """
 
         self.logger.info(txw.dedent('''
-            Matching {:d} files to {:d} files by:
+            Matching {:d} files to {:d} files by attributes:
                Exact  : {!r:};
                Closest: {!r:}
             '''), len(self.a), len(self.b), exact, closest
@@ -241,14 +241,14 @@ class MatchedObservations(LoggingMixin):
                  no_match_style='r',
                  **kws):
 
-        #  colours=dict(title='gB',
+        #  style=dict(title='gB',
         #              group_headers='gB',
         #              g1='gB',
         #              no_match='rB'),
 
         #  formatters=dict(title='{:s|gB}',
         #                  group_headers='{:s|gB}',
-        #                  g1='{:s|gB}',
+        #                  g1='{:s|cB}',
         #                  no_match='{:s|rB}'),
         """
         Format the resulting matches in a table

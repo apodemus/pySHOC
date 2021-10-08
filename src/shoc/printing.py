@@ -1,5 +1,5 @@
 """
-Pretty printing for shocCampaign
+Pretty printing list of filenames as tree structures 
 """
 
 # std
@@ -29,8 +29,6 @@ RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 # ---------------------------------------------------------------------------- #
 
 
-
-
 def morph(dic, parent):
     for name, branch in dic.items():
         morph(branch, bash.Node(name, parent))
@@ -55,6 +53,7 @@ def get_tree_ymd(names, depth=-1):
 # ---------------------------------------------------------------------------- #
 
 # FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES???
+
 
 class TreeRepr(PrettyPrinter, LoggingMixin):
 

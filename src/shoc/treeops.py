@@ -3,23 +3,24 @@ Operations on SHOC files residing in a nested directory structure (file system
 tree)
 """
 
-from recipes.decor import raises
-from astropy.coordinates.jparser import shorten
-from collections import defaultdict
+# std 
+import os
 import shutil
 import warnings
-from pathlib import Path
-import os
-import more_itertools as mit
-
-from astropy.io.fits.header import Header
-
-from recipes import io
-from recipes import pprint as ppr
-
-from .core import shocCampaign
 import itertools as itt
+from pathlib import Path
+from collections import defaultdict
 
+# third-party 
+import more_itertools as mit
+from astropy.coordinates.jparser import shorten
+
+# local 
+from recipes import io, pprint as ppr
+from recipes.decorators import raises
+
+# relative 
+from .core import shocCampaign
 
 
 def get_tree(root, extension=''):

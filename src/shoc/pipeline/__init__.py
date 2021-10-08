@@ -1,5 +1,5 @@
 """
-Photometry pipeline for the Sutherland High-Speed Optical Cameras
+Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 """
 
 
@@ -20,13 +20,13 @@ _folders = (
     'plots',
     # 'detection',
     # 'samples',
-    'photometry'
+    'phot'
 )
 
 
 class PartialAttributeLookup:
     """
-    Attribute lookup that returns if the lookup key matches the start of the 
+    Attribute lookup that returns if the lookup key matches the start of the
     attribute name and the match is one-to-one. Raises AttributeError otherwise.
     """
 
@@ -44,10 +44,10 @@ class PartialAttributeLookup:
 class FolderTree(PartialAttributeLookup):
     """Filesystem tree helper"""
 
-    def __init__(self, input_, output=None, folders=_folders):
-        self.input = Path(input_)
+    def __init__(self, root, output=None, folders=_folders):
+        self.root = Path(root)
         if output is None:
-            output = self.input / '.pyshoc'
+            output = self.root / '.pyshoc'
         self.output = output
 
         for folder in folders:

@@ -79,7 +79,7 @@ def header():
 # ----------------------------------- Tests ---------------------------------- #
 
 
-test_hdu_type = Expect(shocHDU.readfrom)(
+test_hdu_type = Expected(shocHDU.readfrom)(
     {
         CAL/'SHA_20200822.0005.fits':                       shocDarkHDU,
         CAL/'SHA_20200801.0001.fits':                       shocFlatHDU,
