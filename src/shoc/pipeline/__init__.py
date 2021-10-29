@@ -6,6 +6,8 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 # std
 from pathlib import Path
 
+# local
+from recipes.oo import PartialAttributeLookup
 
 # relative
 from .. import make_banner
@@ -28,21 +30,16 @@ _folders = (
 )
 
 
-class PartialAttributeLookup:
-    """
-    Attribute lookup that returns if the lookup key matches the start of the
-    attribute name and the match is one-to-one. Raises AttributeError otherwise.
-    """
-
-    def __getattr__(self, key):
-        try:
-            return super().__getattribute__(key)
-        except AttributeError as err:
-            maybe = [_ for _ in self.__dict__ if _.startswith(key)]
-            real, *others = maybe or (None, ())
-            if others or not real:
-                raise err from None
-            return super().__getattribute__(real)
+SUPPORTED_APERTURES = ['square',
+                       'ragged',
+                       'round',
+                       'circle',
+                       'ellipse',
+                       'optimal',
+                       # 'psf',
+                       # 'cog',
+                       ]
+APPERTURE_SYNONYMS = {'round': 'circle'}
 
 
 class FolderTree(PartialAttributeLookup):

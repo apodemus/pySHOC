@@ -1,20 +1,43 @@
+"""
+Photometry pipeline for the Sutherland High-Speed Optical Cameras.
+"""
 
+
+# std
+import sys
+import itertools as itt
+from pathlib import Path
 
 # third-party
+import click
 import cmasher as cmr
+import more_itertools as mit
+import matplotlib.pyplot as plt
 from matplotlib import rc
 from loguru import logger
 
 # local
-from recipes import op
+from motley.table import Table
 from pyxides.vectorize import repeat
+from obstools.image.registration import ImageRegister
+from scrawl.imagine import ImageDisplay, plot_image_grid
+from recipes.lists import cosort
+from recipes.string import most_similar
+from recipes.dicts import TreeLike, groupby
+from recipes.io import iter_files, show_tree
 
 # relative
 from .. import shocCampaign, shocHDU
-from . import FolderTree, logging
+from . import (APPERTURE_SYNONYMS, SUPPORTED_APERTURES, WELCOME_BANNER,
+               FolderTree, logging)
 from .calibrate import calibrate
 
 
+# setup logging for pipeline
+logging.config()
+
+#
+ImageRegister.refining = False
 
 # t0 = time.time()
 # TODO group by source
@@ -29,46 +52,104 @@ from .calibrate import calibrate
 rc('font', size=14)
 rc('axes', labelweight='bold')
 
+# Sample thumbnails plot config
+thumbnail_kws = dict(statistic='median',
+                     figsize=(9, 7.5),
+                     title_kws={'size': 'xx-small'})
+
+
 # ---------------------------------------------------------------------------- #
 
 
-def contains_fits(path, recurse=False):
-    glob = path.rglob if recurse else path.glob
-    return bool(next(glob('*.fits'), False))
+# def contains_fits(path, recurse=False):
+#     glob = path.rglob if recurse else path.glob
+#     return bool(next(glob('*.fits'), False))
 
 
-def identify(run):
-    # identify
-    # is_flat = np.array(run.calls('pointing_zenith'))
-    # run[is_flat].attrs.set(repeat(obstype='flat'))
+# def identify(run):
+#     # identify
+#     # is_flat = np.array(run.calls('pointing_zenith'))
+#     # run[is_flat].attrs.set(repeat(obstype='flat'))
 
-    g = run.guess_obstype()
+#     g = run.guess_obstype()
 
 
-# def get_sample_image(hdu)
-
-def reset_cache_paths(mapping):
+def enable_local_caching(mapping):
     for func, folder in mapping.items():
         cache = func.__cache__
-        cache.filename = folder / cache.path.name
+        cache.enable(folder / cache.path.name)
 
 
-def setup(root):
-    # setup results folder
-    paths = FolderTree(root)
-    if not paths.root.exists():
+def get_root(files_or_folder, _level=0):
+    files_or_folder = map(Path, files_or_folder)
+    folders = groupby(files_or_folder, Path.is_dir)
+    parent, *ambiguous = {*folders.get(True, ()),
+                          *map(Path.parent.fget, folders.get(False, ()))}
+    if not ambiguous:
+        return parent
+
+    # Files with multiple parents.
+    if _level < 2:
+        return get_root(ambiguous, _level + 1)
+
+    raise ValueError('Please provide an output folder for results '
+                     'eg: -o path/to/results. ')
+
+
+def resolve_output(output, root):
+    if Path(output).is_absolute():
+        return output
+    return (root / output).resolve()
+
+
+def resolve_aperture(_ctx, _param, value):
+    match = value.lower()
+    match = APPERTURE_SYNONYMS.get(match, match)
+    if match in SUPPORTED_APERTURES:
+        return match
+
+    match = most_similar(match, SUPPORTED_APERTURES)
+    if match:
+        logger.info('Interpreting aperture name {!r} as {!r}.', value, match)
+        return match
+
+    raise click.BadParameter(
+        f'{value!r}. Valid choices are: {SUPPORTED_APERTURES}')
+
+
+def check_target(run):
+    targets = set(run.attrs.target)
+    if invalid := targets.intersection({None, ''}):
+        raise ValueError(f'Invalid target {invalid.pop()!r}')
+
+    if len(targets) > 1:
+        raise NotImplementedError(
+            f'Targets are: {targets}.Running the pipeline for multiple targets'
+            f' simultaneously is currently not supported.'
+        )
+
+    return targets.pop()
+
+
+def setup(root, output):
+    """Setup results folder."""
+    root = Path(root)
+    if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
+
     #
+    paths = FolderTree(root, output)
     paths.create()
 
-    # setup logging for pipeline
-    logging.config(paths.logs / 'main.log')
+    # add log file sink
+    logger.add(paths.logs / 'main.log', level='DEBUG', format=logging.formatter,
+               colorize=False)
 
     # interactive gui save directory
     rc('savefig', directory=paths.plots)
 
     # update cache locations
-    reset_cache_paths({
+    enable_local_caching({
         shocHDU.get_sample_image: paths.output,
         shocHDU.detect: paths.output
     })
@@ -76,34 +157,103 @@ def setup(root):
     return paths
 
 
-def main(path, target=None):
+def welcome(banner):
+    def wrapper(func):
+        print(banner)
+        return func
+    return wrapper
+
+# CLI
+
+
+@welcome(WELCOME_BANNER)    # say hello
+@click.command()
+@click.argument('files_or_folder', nargs=-1, type=click.Path())
+# required=True)
+#
+@click.option('-o', '--output', type=click.Path(),
+              default='./.pyshoc', show_default=True,
+              help='Output folder for data products. Default creates the '
+                   '".pyshoc" folder under the root input folder.')
+#
+@click.option('-t', '--target',
+              help='Name of the target. Will be used to retrieve object '
+              'coordinates.')
+#
+@click.option('-tel', '--telescope',
+              help='Name of the telescope that the observations where done with'
+                   ' eg: "40in", "1.9m", "lesedi" etc. It is sometimes '
+                   'necessary to specify this if the fits header information is'
+                   ' missing or incorrect, but can otherwise be ignored.')
+#
+@click.option('--top', type=int, default=5,
+              help='Number of brightest sources to do photometry on.')
+#
+@click.option('-aps', '--apertures',
+              #   type=click.Choice(SUPPORTED_APERTURES, case_sensitive=False),
+              default='ragged', show_default=True,
+              callback=resolve_aperture,
+              help='The type(s) of apertures to use. If multiple'
+                   'types are specified, photometry will be done for each type'
+                   'concurrently.')
+#
+@click.option('--sub',  type=click.IntRange(),
+              help='For single file mode, the slice of data cube to consider. '
+              'Useful for debugging. Ignored in multi-file mode.')
+#
+# @click.option('--timestamps', type=click.Path(),
+#               help='Location of the gps timestamp file for observation trigger '
+#                    'time. Necessary for older SHOC data where this information '
+#                    'is not available in the fits headers. File should have one '
+#                    'timestamp per line in chronological order of the filenames.'
+#                    ' The default is to look for a file named `gps.sast` or '
+#                    '`gps.utc` in the processing root folder.')
+#
+@click.option('--overwrite/--xx', default=False,
+              help='Overwite pre-existing data products. Default is False => '
+              'Don\'t re-compute anything unless explicitly asked to. This is '
+              'safer and can save time on multiple re-runs of the pipeline.')
+#
+# @click.option('--gui')
+@click.version_option()
+def main(files_or_folder, output, target, telescope, top, apertures, sub,
+         overwrite):
+    """
+    Main entry point for pyshoc pipeline.
+    """
+    if not files_or_folder:
+        sys.exit('Please provide a folder or filename(s) for reduction.')
 
     # ------------------------------------------------------------------------ #
+    # resolve & check inputs
+    root = get_root(files_or_folder)
+    output = resolve_output(output, root)
+
     # setup
-    paths = setup(path)
-    target = target or paths.root.name
+    paths = setup(root, output)
+
+    #
+    single_file_mode = (len(files_or_folder) == 1 and
+                        root.exists() and
+                        root.is_file() and
+                        root.name.lower().endswith('fits'))
+    if not single_file_mode and sub:
+        logger.info('Ignoring sub {} for multi-file run.', sub)
 
     # -------------------------------------------------------------------------#
-    #
-
     try:
-        # pipeline main work
-        _main(paths, target)
+        # pipeline main routine
+        _main(paths, target, telescope, top, overwrite)
 
-    except Exception:
-        # catch errors so we can safely shut down the listeners
-        logger.exception('Exception during pipeline execution.')
-        # plot_diagnostics = False
-        # plot_lightcurves = False
-    else:
-        # Workers all done, listening can now stop.
-        # logger.info('Telling listener to stop ...')
-        # stop_logging_event.set()
-        # logListener.join()
-        pass
+    except Exception as err:
+        # catch errors so we can safely shut down any remaining processes
+        from better_exceptions import format_exception
+
+        logger.exception('Exception during pipeline execution.\n{}',
+                         '\n'.join(format_exception(*sys.exc_info())))
 
 
-def _main(paths, target):
+def _main(paths, target, telescope, top,  overwrite):
     from obstools.phot import PhotInterface
 
     # ------------------------------------------------------------------------ #
@@ -114,22 +264,24 @@ def _main(paths, target):
 
     # ------------------------------------------------------------------------ #
     # Load data
-    run = shocCampaign.load(paths.input, obstype='object')
-    run.attrs.set(repeat(telescope='74in',
+    run = shocCampaign.load(paths.root, obstype='object')
+    # update info if given
+    run.attrs.set(repeat(telescope=telescope,
                          target=target))
     # HACK
     # run['202130615*'].calls('header.remove', 'DATE-OBS')
 
-    #
+    # Print summary table
     daily = run.group_by('date')
-    logger.info('\n{:s}', daily.pformat(titled=repr))
+    logger.info('\n{:s}\n', daily.pformat(titled=repr))
 
-    # Sample thumbnails (before calibration)
-    thumbnail_kws = dict(statistic='median',
-                         figsize=(9, 7.5),
-                         title_kws={'size': 'xx-small'})
-    thumbs = run.thumbnails(**thumbnail_kws)
-    savefig(thumbs.fig, 'thumbs.png')
+    # write summary spreadsheet
+    run.tabulate.to_xlsx(paths.summary)
+    logger.info("The table above is available in spreadsheet format at: "
+                "'{!s:}'", paths.summary)
+
+    # sample images and header info
+    compute_preview_products(run, paths)
 
     # ------------------------------------------------------------------------ #
     # Calibrate
@@ -139,8 +291,13 @@ def _main(paths, target):
     gobj, mdark, mflat = calibrate(run, overwrite=False)
 
     # Sample thumbnails (after calibration)
-    thumbs = run.thumbnails(**thumbnail_kws)
-    savefig(thumbs.fig, 'thumbs-cal.png')
+    previous = get_data_products(run, paths)
+    if not previous['Images']['Overview'][1]:
+        thumbs = run.thumbnails(**thumbnail_kws)
+        savefig(thumbs.fig, paths.plots / 'thumbs-cal.png')
+
+    # have to ensure we have single target here
+    target = check_target(run)
 
     # Image Registration
     reg = run.coalign_dss(deblend=True)
@@ -158,19 +315,33 @@ def _main(paths, target):
     # )
 
     # %%
+    if not previous['Images']['Regions']:
+        ui = reg.plot_detections()
+        ui.save(filenames=[f'{hdu.file.stem}.regions.png' for hdu in run],
+                path=paths.plots)
 
-    phot = PhotInterface(run, reg, paths.phot)
+    # phot = PhotInterface(run, reg, paths.phot)
+    # ts = mv phot.ragged() phot.regions()
 
-    from scrawl.imagine import ImageDisplay
+    # Write data products spreadsheet
+    write_data_products_xlsx(run, paths)
+
+    logger.info('The following data products were created:\n{}',
+                show_tree(paths.output))
+
+
+def plot_detections(run, segments, images, loc, dilate=2):
 
     # plot ragged apertures
     # TODO: move to phot once caching works
-    dilate = 2
-    for im, seg, hdu in zip(thumbs.images, reg.detections[1:], run):
+
+    for im, seg, hdu in zip(images, segments, run):
         seg.dilate(dilate)
         img = ImageDisplay(im, cmap=cmr.voltage_r)
-        seg.show_contours(img.ax, cmap='hot', lw=1.5)
+        seg.show_contours(img.ax, cmap=cmr.pride, lw=1.5)
         seg.show_labels(img.ax, color='w', size='xx-small')
+        img.save(loc / f'{hdu.file.stem}.regions.png')
+
 
 def basename(path):
     return path.name.rsplit('.', 2)[0]
