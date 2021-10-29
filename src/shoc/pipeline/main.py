@@ -171,6 +171,159 @@ def _main(paths, target):
         img = ImageDisplay(im, cmap=cmr.voltage_r)
         seg.show_contours(img.ax, cmap='hot', lw=1.5)
         seg.show_labels(img.ax, color='w', size='xx-small')
-        img.save(paths.phot / f'{hdu.file.stem}-ragged.png')
 
-    ts = phot.ragged()
+def basename(path):
+    return path.name.rsplit('.', 2)[0]
+
+
+# def _gdp(hdu, paths):
+#     def _get(path, suffix):
+#         trial = path.with_suffix('.' + suffix.lstrip('.'))
+#         return trial if trial.exists() else None
+
+#     products = TreeLike()
+
+#     base = hdu.file.basename
+#     stem = hdu.file.stem
+#     products['FITS headers'] =   _get(paths.headers / stem, '.txt')
+#     products['Image Samples']  = _get(paths.image_samples / stem, '.png')
+
+#     lcx = ('txt', 'npy')
+
+#     individual = [_get(paths.phot / base, ext) for ext in lcx]
+#     combined = [_get(paths.phot, ext) for ext in lcx]
+
+#     products['Light Curves']['Raw'] = [individual, combined]
+
+
+def get_data_products(run, paths):
+
+    products = TreeLike()
+    timestamps = run.attrs('t.t0')
+    _, stems = cosort(timestamps, run.files.stems)
+    bases = sorted(repr(date).replace('-', '') for date in run.attrs.date)
+
+    def row_assign(filenames, reference=stems, empty=''):
+        incoming = {base: list(vals) for base, vals in
+                    itt.groupby(sorted(filenames), basename)}
+        for base in reference:
+            yield incoming.get(base, empty)
+
+        # return (incoming.get(base, ()) for base in basenames)
+
+    # ['Spectral Estimates', ]
+    # 'Periodogram','Spectrogram'
+    products['FITS']['files'] = run.files.paths
+    products['FITS']['headers'] = list(paths.headers.iterdir())
+
+    # Images
+    images = sorted(paths.image_samples.iterdir())
+    if images:
+        products['Images']['Samples'] = dict(zip(('start', 'mid', 'end'),
+                                                 zip(*row_assign(images))))
+
+    products['Images']['Source Regions'] = \
+        list(row_assign(paths.source_regions.iterdir()))
+
+    products['Images']['Overview'] = [
+        next(paths.plots.glob(f'{name}.png'), '')
+        for name in ('thumbs', 'thumbs-cal', 'mosaic')]
+    # [name] =
+
+    # Light curves
+    # cmb_txt = iter_files(paths.phot, 'txt')
+    individual = iter_files(paths.phot, '*.*.{txt,npy}', recurse=True)
+    combined = iter_files(paths.phot, '*.{txt,npy}')
+    products['Light Curves']['Raw'] = [
+        (*indiv, *cmb) for indiv, cmb in
+        zip(row_assign(individual, empty=['']),
+            row_assign(combined, bases))
+    ]
+
+    return products
+
+
+def write_data_products_xlsx(run, paths, filename=None):
+    def hyperlink_ext(path):
+        return f'=HYPERLINK("{path}", "{path.suffix[1:]}")'
+
+    def hyperlink_path(path):
+        return f'=HYPERLINK("{path}", "{path.name}")'
+
+    #
+    products = get_data_products(run, paths)
+    # duplicate Overview images so that they get merged below
+    products['Images']['Overview'] = [products['Images']['Overview']] * len(run)
+
+    # create table
+    tbl = Table.from_dict(products,
+                          title='Data Products',
+                          convert={Path: hyperlink_ext,
+                                   'files': hyperlink_path,
+                                   'Overview': hyperlink_path},
+                          split_nested={tuple, list},
+                          formatter=';;;[Blue]@')
+    # write
+    return tbl.to_xlsx(filename or paths.products,
+                       widths={'Overview': 4,
+                               'files': 23,
+                               'headers': 10,
+                               'Source Regions': 10,
+                               ...: 7},
+                       align={'files': '<',
+                              'Overview': dict(horizontal='center',
+                                               vertical='center',
+                                               text_rotation=90),
+                              ...: dict(horizontal='center',
+                                        vertical='center')},
+                       merge_unduplicate=('data', 'headers'))
+
+
+def intervals(hdu, n_intervals):
+    n = hdu.nframes
+    yield from mit.pairwise(range(0, n + 1, n // n_intervals))
+
+
+def get_sample_image(hdu, stat, min_depth, interval, save_as='png', path='.'):
+    image = hdu.get_sample_image(stat, min_depth, interval)
+    if save_as:
+        im = ImageDisplay(image)
+        i, j = interval
+        im.save(path / f'{hdu.file.stem}.{i}-{j}.{save_as}')
+        plt.close(im.figure)
+
+
+def get_image_samples(run, stat='median', min_depth=5, n_intervals=3,
+                      save_as='png', path='.'):
+
+    # sample = delayed(get_sample_image)
+    # with Parallel(n_jobs=1) as parallel:
+    # return parallel
+    return [
+        hdu.get_sample_image(stat, min_depth, (i, j), save_as, path)
+        for hdu in run
+        for i, j in intervals(hdu, n_intervals)
+    ]
+
+
+def compute_preview_products(run, paths):
+    # get results from previous run
+    previous = get_data_products(run, paths)
+
+    # write fits headers to text
+    if not previous['FITS']['headers']:
+        logger.info('Writing fits headers to text for {:d} files.', len(run))
+        for hdu in run:
+            hdu.header.totextfile(paths.headers / f'{hdu.file.stem}.txt')
+
+    # plot image samples
+    if not previous['Images']:
+        sample_images = get_image_samples(run, path=paths.image_samples)
+
+    # plot thumbnails for sample image from first portion of each data cube
+    if not previous['Images']['Overview'][0]:
+        portion = mit.chunked(sample_images, len(run))
+
+        thumbs = plot_image_grid(next(portion), titles=run.files.names,
+                                 title_kws=thumbnail_kws)
+        thumbs.fig.savefig(paths.plots / 'thumbs.png')

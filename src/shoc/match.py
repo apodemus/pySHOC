@@ -325,7 +325,7 @@ class MatchedObservations(LoggingMixin):
             ''')
 
         # get attribute table
-        tbl = tmp.tabulate(tmp, attrs,
+        tbl = tmp.tabulate(attrs,
                            title=title, title_align='<',
                            insert=insert,  # hlines=hlines,
                            row_nrs=False, totals=False,

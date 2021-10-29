@@ -14,12 +14,16 @@ from .. import make_banner
 BANNER_WIDTH = 120
 WELCOME_BANNER = make_banner('Photometry Pipeline', BANNER_WIDTH)
 
-
+# Folder structure for results
+OUTPUT_ROOT = '.pyshoc'
+SUMMARY_FILENAME = 'campaign.xlsx'
+PRODUCTS_FILENAME = 'data_products.xlsx'
 _folders = (
+    'headers',
     'logs',
     'plots',
-    # 'detection',
-    # 'samples',
+    'plots/image_samples',
+    'plots/source_regions',
     'phot'
 )
 
@@ -44,19 +48,30 @@ class PartialAttributeLookup:
 class FolderTree(PartialAttributeLookup):
     """Filesystem tree helper"""
 
-    def __init__(self, root, output=None, folders=_folders):
+    def __init__(self, root, output=None, folders=_folders,
+                 summary=SUMMARY_FILENAME, products=PRODUCTS_FILENAME):
         self.root = Path(root)
         if output is None:
-            output = self.root / '.pyshoc'
+            output = self.root / OUTPUT_ROOT
         self.output = output
 
         for folder in folders:
             path = output / folder
-            setattr(self, folder, path)
+            setattr(self, path.name, path)
+
+        # folders to create
+        self.folders = dict(vars(self))
+
+        # files
+        self.summary = self.output / summary
+        self.products = self.output / products
+
+    def __repr__(self):
+        return str(vars(self))
 
     def create(self):
-        for _, path in self.__dict__.items():
+        for _, path in self.folders.items():
             path.mkdir(exist_ok=True)
 
-    def folders(self):
-        return list(filter(Path.is_dir, self.__dict__.values()))
+    # def folders(self):
+    #     return list(filter(Path.is_dir, self.__dict__.values()))

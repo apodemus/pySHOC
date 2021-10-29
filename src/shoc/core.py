@@ -20,8 +20,8 @@ from astropy.coordinates import SkyCoord, EarthLocation
 
 # local
 import motley
-from motley.table import AttrTable
-from motley.utils import vstack_groups
+from motley.table import AttrTable, AttrColumn as Column
+from motley.utils import vstack
 from scrawl.imagine import plot_image_grid
 from pyxides import Groups, OfType
 from pyxides.vectorize import MethodVectorizer, repeat
@@ -1074,7 +1074,7 @@ class TableHelper(AttrTable):
             if key not in attrs:
                 continue
 
-            flg = flags[self.aliases[key]] = run.attrs(attr)
+            flg = flags[self.get_header(key)] = run.attrs(attr)
             for flag in set(flg):
                 if flag:
                     info = Trigger.FLAG_INFO[self.get_header(attr)]
@@ -1097,80 +1097,92 @@ class TableHelper(AttrTable):
             table._compact_table = table._get_compact_table()
         return table
 
+    def to_xlsx(self, path):
+        tabulate = AttrTable.from_columns({
+            'file.name':          Column('filename', align='<'),
+            'timing.t0.datetime': Column('Time', '[UTC]', fmt='YYYY-MM-DD HH:MM:SS'),
+            'timing.exp':         Column('Exposure', '[s]', fmt='0.???'),
+            'timing.duration':    Column(convert=lambda t: t.value / 86400,
+                                         fmt='[HH]"ʰ"MM"ᵐ"SS"ˢ"', unit='[hms]',
+                                         total=True),
+            'telescope':          ...,
+            'filters.name':       Column('Filter'),
+            'camera':             ...,
+            'readout.mode':       Column(convert=str),
+            # 'nframes':            Column('n', total=True),
+            # 'binning':            Column('bin', unit='y, x', header_level=1),
+            'binning.y':          ...,
+            'binning.x':          ...,
+
+        },
+            header_levels={'binning': 1},
+            show_groups=False,
+            title='Observational Setup'
+        )
+
+        tabulate.parent = self.parent
+        return tabulate.to_xlsx(path,
+                                align={'filename': '<',
+                                       'mode': '<',
+                                       'binning': '>',
+                                       ...: '^'},
+                                header_formatter=str.title,
+                                )
+                                #widths={'binning': 5})
+
+        # tabulate = AttrTable.from_spec({
+        #     'Filename':        'file.name',
+        #     'Time [UTC]':      'timing.t0.datetime:YYYY-MM-DD HH:MM:SS',
+        #     'Exp [s]':         'timing.exp',
+        #     'Duration [s]':    'timing.duration',
+        #     'camera':          '',
+        #     'telescope':       '',
+        #     'Filter':           'filters.name',
+        #     'binning.y':       '',
+        #     'binning.x':       '',
+        #     'Mode':            'readout.mode!s'
+        # },
+        #     converters={'timing.duration': lambda t: t.value / 86400},
+        #     header_levels={'binning', 1},
+        #     show_groups=False,
+        #     totals='timing.duration'
+        # )
+
 
 # ------------------------------------- ~ ------------------------------------ #
 
+
 class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
-    #
+
+    # Pretty repr and str
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
     # controls which attributes will be printed
-    tabulate = TableHelper(
-        # attrs =
-        # todo:
-        # {'file.stem' : Column('filename', unit='', fmt='', total=True),
-        # 'telescope' : Column('tel')
-        # 'camera':     Column(''),
-        # 'target':    Column(''),
-        # 'obstype':    Column(''),
-        # 'filters.A':     Column(''),
-        # 'filters.B':  Column(''),
-        # 'nframes':   Column('n', total=True),
-        # 'ishape':     Column(unit='y, x'),
-        # 'binning':    Column('bin'),
-        #  #  'readout.preAmpGain':     Column('preAmp'),
-        #  'readout.mode':  Column(''),
-        #  #  'readout.mode.frq':   Column(''),
-        #  #  'readout.mode.outAmp':    Column(''),
-        # 'timing.t0':     Column(fmt=op.attrgetter('iso'), unit='UTC'),
-        # 'timing.exp':    Column('tExp', fmt=str, unit='s'),
-        # 'timing.duration:    Column(fmt=hms, unit='hms', total=True)}
+    tabulate = TableHelper.from_columns(
+        {'file.stem':          Column('filename'),
+         'telescope':          Column('tel'),
+         'camera':             ...,
+         'target':             ...,
+         'obstype':            ...,
+         'filters.name':       Column('filter'),
+         'nframes':            Column('n', total=True),
+         'binning':            Column('bin', unit='y, x'),
+         'readout.mode':       ...,
+         'timing.t0':          Column(fmt=op.attrgetter('iso'), unit='UTC'),
+         'timing.exp':         Column('tExp', fmt=str, unit='s'),
+         'timing.duration':    Column(fmt=hms, unit='hms', total=True)
+         #   'ishape':     Column(unit='y, x'),
+         #   'readout.preAmpGain':     Column('preAmp', unit='y, x'),
+         #   'readout.mode':  ...,
+         #  'readout.mode.frq':   ...,
+         #  'readout.mode.outAmp':    ...,
+         #   'filters.B':          ...,
 
-        ['file.stem',
-         'telescope', 'camera',
-         'target', 'obstype',
-         'filters.A', 'filters.B',
-         'nframes', 'ishape', 'binning',
-         #  'readout.preAmpGain',
-         'readout.mode',
-         #  'readout.mode.frq',
-         #  'readout.mode.outAmp',
-
-         'timing.t0',
-         'timing.exp',
-         'timing.duration',
-         ],
-        aliases={
-            'file.stem': 'filename',
-            'telescope': 'tel',
-            # 'camera': 'camera',
-            'nframes': 'n',
-            'binning': 'bin',
-            # 'readout.mode.frq': 'mode',
-            'readout.preAmpGain': 'preAmp',  # 'γₚᵣₑ',
-            'timing.exp': 'tExp',
-            # 'timing.t0': 't0',
-            # 'timing.duration': 'duration'
-        },
-        formatters={
-            'duration': hms,
-            't0': op.attrgetter('iso'),
-            'tExp': str  # so that UnknownTime formats as ??
-        },
-        units={
-            # 'readout.preAmpGain': 'e⁻/ADU',
-            # 'readout.mode.frq': 'MHz',
-            # 'readout.mode': ''
-            'tExp': 's',
-            't0': 'UTC',
-            'ishape': 'y, x',
-            'duration': 'hms'
-        },
-
+         },
         compact=True,
         title_props=dict(txt=('underline', 'bold'), bg='b'),
         too_wide=False,
-        totals=['n', 'duration'])
+    )
 
     @classmethod
     def new_groups(cls, *keys, **kws):
@@ -1183,10 +1195,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     # @expose.args
     @classmethod
     def load_files(cls, filenames, *args, **kws):
-        run = super().load_files(filenames, *args, **kws)
-
-        # TODO: bork if empty
-
+        run = super().load_files(filenames, *args, allow_empty=False, **kws)
+        
+        # look for gps timesstamps if needed
         rolled = run.group_by('rollover.state')
         ok = rolled.pop(False)
         rolled = rolled.pop(True, ())
@@ -1203,9 +1214,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             gps = run.search_gps_file()
             if gps:
                 cls.logger.info(
-                    motley.stylize("Using gps timestamps from '{!r:|darkgreen,B}'"),
-                    gps.relative_to(gps.parent.parent),
-                )
+                    motley.stylize(
+                        "Using gps timestamps from '{!r:|darkgreen,B}'"),
+                    gps.relative_to(gps.parent.parent),)
                 run.provide_gps(gps)
 
         return run
@@ -1226,7 +1237,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         self[:] = self.__class__(hdus)
         return self
 
-    def thumbnails(self, statistic='mean', depth=10, subset=None,
+    def thumbnails(self, statistic='mean', depth=5, subset=None,
                    title='file.name', calibrated=False, figsize=None, **kws):
         """
         Display a sample image from each of the observations laid out in a grid.
@@ -1584,7 +1595,7 @@ class shocObsGroups(Groups):
         i = itt.count()
         return pformat(self, lhs=lambda s: f'{next(i):<{w}}: {s}', hang=True)
 
-    def get_tables(self, attrs=None, titled=True, **kws):
+    def tabulate(self, attrs=None, titled=True, **kws):
         """
         Get a dictionary of tables (`motley.table.Table` objects) for this
         grouping. This method assists pretty printing groups of observation
@@ -1598,15 +1609,16 @@ class shocObsGroups(Groups):
         -------
 
         """
-        return shocCampaign.tabulate(self, attrs, titled=titled,
-                                     filler_text='NO MATCH', **kws)
+        return shocCampaign.tabulate.get_tables(
+            self, attrs, titled=titled, filler_text='NO MATCH', **kws
+        )
 
     def pformat(self, titled=True, braces=False, vspace=1, **kws):
         """
         Run pprint on each group
         """
-        tables = self.get_tables(titled=titled, **kws)
-        return vstack_groups(tables, not bool(titled),  braces, vspace)
+        tables = self.tabulate(titled=titled, **kws)
+        return vstack.from_dict(tables, not bool(titled), braces, vspace)
 
     def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
         print(self.pformat(titled, braces, vspace, **kws))
@@ -1618,9 +1630,8 @@ class shocObsGroups(Groups):
     stack = MethodVectorizer('stack')  # , convert=shocCampaign
 
     def merge_combine(self, func=None, *args, **kws):
-        return (
+        return \
             self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
-        )
 
     def select_by(self, **kws):
         out = self.__class__()
