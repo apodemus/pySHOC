@@ -1,5 +1,5 @@
 """
-Pretty printing list of filenames as tree structures 
+Pretty printing list of filenames as tree structures.
 """
 
 # std
@@ -12,26 +12,28 @@ from recipes.dicts import AVDict
 from recipes.logging import LoggingMixin
 
 
-# from anytree.node.nodemixin import NodeMixin
-# from anytree import RenderTree
-# from collections import defaultdict
-# import itertools as itt
-
-
-# # module level logger
-# logger = get_module_logger()
-# logging.basicConfig()
-# logger.setLevel(logging.INFO)
-
 #                            prefix,    year,  month, date,  nr
 RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 
 # ---------------------------------------------------------------------------- #
+# class Node(bash.BraceExpressionNode):
+#     def __init__(self, name, parent=None, children=None, **kwargs):
+#         super().__init__(name, parent=parent, children=children, **kwargs)
 
+#         # tree from parts of filename  / from letters
+#         itr = iter(mo.groups() if (mo := RGX_FILENAME.match(name)) else name)
+#         self.get_prefix = lambda _: next(itr)
+
+# class Node(bash.BraceExpressionNode):
+#     def make_branch(self, words):
+#         for base, words in itt.groupby(filter(None, words), self.get_prefix):
+#             child = self.__class__(base, parent=self)
+#             child.make_branch((remove_prefix(w, base)
+#                                for w in filter(None, words)))
 
 def morph(dic, parent):
     for name, branch in dic.items():
-        morph(branch, bash.Node(name, parent))
+        morph(branch, bash.BraceExpressionNode(name, parent))
 
 
 def get_tree_ymd(names, depth=-1):
@@ -45,14 +47,12 @@ def get_tree_ymd(names, depth=-1):
         for part in parts:
             node = node[part]
 
-    root = bash.Node('')
+    root = bash.BraceExpressionNode('')
     morph(tree, root)
     root.collapse(depth)
     return root
 
 # ---------------------------------------------------------------------------- #
-
-# FIXME: ONLY WORKS WHEN WE HAVE UNIQUE FILENAMES???
 
 
 class TreeRepr(PrettyPrinter, LoggingMixin):

@@ -1,26 +1,33 @@
 """
-
+Functions for working with FITS headers
 """
 
-# import logging
+
+# std
 import re
+import warnings
 import itertools as itt
-import logging
 from collections import defaultdict
 
+# third-party
 import numpy as np
+from loguru import logger
 from astropy.io.fits import Header
+from astropy.io.fits.verify import VerifyWarning
 
+# local
+from motley.table import Table
+from recipes.sets import OrderedSet
+
+# relative
 from .convert_keywords import KEYWORDS as KWS_OLD_NEW
+
+
 # from .io import (ValidityTests as validity,
 #                  Conversion as convert,
 #                  InputCallbackLoop
 #                  )
-from recipes.logging import get_module_logger
-from motley.table import Table
 
-
-from loguru import logger
 
 HEADER_KEYS_MISSING_OLD = \
     [
@@ -61,9 +68,8 @@ HEADER_KEYS_MISSING_OLD = \
 
     ]
 
-KWS_REMAP = {}
-for old, new in KWS_OLD_NEW:
-    KWS_REMAP[old.replace('HIERARCH ', '')] = new
+KWS_REMAP = {old.replace('HIERARCH ', ''): new
+             for old, new in KWS_OLD_NEW}
 
 
 def get_new_key(old):
@@ -84,7 +90,6 @@ def header_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
     return Table(agg)
     # return Table(agg, order='r', minimalist=True,
     # width=[5] * 35, too_wide=False)
-
 
 def headers_intersect(run, merge_histories=False):
     """
@@ -107,11 +112,6 @@ def headers_intersect(run, merge_histories=False):
     if not hrest:
         return h0
 
-    from recipes.sets import OrderedSet
-    from astropy.io.fits.verify import VerifyWarning
-    from astropy.io.fits.header import Header
-    import warnings
-
     all_keys = OrderedSet(h0.keys())
     for h in hrest:
         all_keys &= OrderedSet(h.keys())
@@ -119,7 +119,7 @@ def headers_intersect(run, merge_histories=False):
     all_keys -= {'COMMENT', 'HISTORY', ''}
     out = Header()
     for key in all_keys:
-        vals = set(h[key] for h in headers)
+        vals = {h[key] for h in headers}
         if len(vals) == 1:
             # all values for this key are identical -- keep
             with warnings.catch_warnings():
@@ -161,10 +161,10 @@ def match_term(kw, header_keys):
     if np.isnan(f).all():
         # print(kw, 'no match')
         return
-    else:
-        i = np.nanargmax(f)
-        # print(kw, hk[i])
-        return header_keys[i]
+
+    i = np.nanargmax(f)
+    # print(kw, hk[i])
+    return header_keys[i]
 
 
 def get_header_info(do_update, from_terminal, header_for_defaults,
@@ -290,9 +290,7 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
 class shocHeader(Header):
     """Extend the pyfits.Header class for interactive user input"""
 
-    def __init__(self, cards=[], copy=False):
-        # Convert to new style keywords
-
+    def __init__(self, cards=(), copy=False):
         super().__init__(cards, copy)
 
     def has_old_keys(self):
@@ -309,13 +307,10 @@ class shocHeader(Header):
 
         for old, new in KWS_OLD_NEW:
             try:
-                if forward:
-                    self.rename_keyword(old, new)
-                else:
-                    self.rename_keyword(new, old)
+                self.rename_keyword(*(old, new)[::(-1, 1)[forward]])
             except ValueError as e:
                 logger.warning('Could not rename keyword {:s} due to the '
-                               'following exception \n%s' % (old, e))
+                               'following exception \n{}', old, e)
                 success = False
 
         return success
@@ -352,13 +347,12 @@ class shocHeader(Header):
     #
     #     return ron, sensitivity, saturation
 
-    def needs_update(self, info, verbose=False):
+    def needs_update(self, info):
         """check which keys actually need to be updated"""
         to_update = {}
         for key, val in info.items():
             if self.get(key, None) != val:
                 to_update[key] = val
             else:
-                if verbose:
-                    print("%s will not be updated" % key)
+                logger.debug('{!r} will not be updated', key)
         return to_update
