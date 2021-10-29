@@ -1,5 +1,5 @@
 """
-pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras
+pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 """
 
 
@@ -9,6 +9,10 @@ from importlib.metadata import version, PackageNotFoundError
 # third-party
 import yaml
 from astropy.io.fits.hdu.base import register_hdu
+
+# local
+from motley import banner, format, justify
+from recipes.misc import get_terminal_size
 
 # relative
 from .core import *
@@ -30,14 +34,16 @@ CONFIG = yaml.load((SRC_ROOT / 'config.yaml').read_text(),
 LOGO = (SRC_ROOT / 'banner/banner.txt').read_text()
 
 
-def make_banner(subtitle='', width=80):
-    from motley.box import TextBox, clear_box, underline
-
-    text = f'{subtitle}\nv{__version__}'
-    parts = ('',
-             clear_box(LOGO, width),
-             clear_box(text, width, '>'))
-    return TextBox(underline, '')('\n'.join(parts), width)
+def make_banner(subtitle='', width=None, **style):
+    width = int(width or get_terminal_size()[0])
+    subtext = format('{:|purple}\n{v{v:}:|k}', subtitle, v=__version__)
+    return banner(
+        '\n'.join(('',
+                   justify(LOGO, '^', width),
+                   justify(subtext, '>',  width))),
+        width,
+        **style
+        )
 
 
 # register HDU classes (order is important!)
@@ -45,4 +51,4 @@ register_hdu(shocHDU)
 
 
 # initialize calibration database
-calDB = CalDB('/media/Oceanus/work/Observing/data/SHOC/calibration/')
+calDB = CalDB(CONFIG['caldb'])
