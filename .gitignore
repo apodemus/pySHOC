@@ -106,3 +106,4 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
+src/shoc/pipeline/logging_test.py
