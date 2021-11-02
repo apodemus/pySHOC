@@ -10,6 +10,11 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 
 
 if __name__ == '__main__':
+    from shoc.pipeline import WELCOME_BANNER
+
+    # say hello
+    print(WELCOME_BANNER)
+
     from shoc.pipeline.main import main
 
     main.main()

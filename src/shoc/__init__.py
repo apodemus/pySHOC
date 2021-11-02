@@ -4,15 +4,15 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 
 
 # std
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 # third-party
 import yaml
 from astropy.io.fits.hdu.base import register_hdu
 
 # local
-from motley import banner, format, justify
 from recipes.misc import get_terminal_size
+from motley import banner, format, justify
 
 # relative
 from .core import *
@@ -37,13 +37,13 @@ LOGO = (SRC_ROOT / 'banner/banner.txt').read_text()
 def make_banner(subtitle='', width=None, **style):
     width = int(width or get_terminal_size()[0])
     subtext = format('{:|purple}\n{v{v:}:|k}', subtitle, v=__version__)
-    return banner(
-        '\n'.join(('',
-                   justify(LOGO, '^', width),
-                   justify(subtext, '>',  width))),
+    return banner('\n'.join(
+        ('', #justify(apply('Welcome to', 'purple'), '<', width),
+         justify(LOGO, '^', width),
+         justify(subtext, '>',  width))),
         width,
         **style
-        )
+    )
 
 
 # register HDU classes (order is important!)
