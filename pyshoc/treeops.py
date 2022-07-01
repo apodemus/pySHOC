@@ -55,15 +55,14 @@ def _rename(name):
 
 
 def get_object_name(obstype, objname):
-    if obstype == 'object':
-        if objname in ('', None):
-            # Ignore files that could not be id'd by source name
-            return
-        # get folder name
-        return _rename(objname)
-    else:
+    if obstype != 'object':
         # calibration data
         return obstype
+    if objname in ('', None):
+        # Ignore files that could not be id'd by source name
+        return
+    # get folder name
+    return _rename(objname)
 
 
 def make_tree(src, dest, grouping, naming, extensions='*'):
@@ -192,7 +191,7 @@ def partition_by_source(src, dest=None, extensions='*', move=True,
         root = get_common_parent(src.files.paths)
     else:
         raise TypeError('Invalid source')
-    
+
     # default destination same as source
     if dest is None:
         dest = root
@@ -243,7 +242,7 @@ def partition_by_source(src, dest=None, extensions='*', move=True,
             if folder.is_file():
                 continue
 
-            if len(list(folder.iterdir())) == 0:
+            if not list(folder.iterdir()):
                 folder.rmdir()
 
     return tree

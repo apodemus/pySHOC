@@ -109,7 +109,7 @@ class Trigger(object):
         # FIXME: it's confusing keeping the start time here AND in timing.t0
 
     def __str__(self):
-        return self.mode[:2] + '.'
+        return f'{self.mode[:2]}.'
 
     def __repr__(self):
         return f'{self.__class__}:{self.mode}'
@@ -463,31 +463,19 @@ class shocTimingBase(object):
         External Trigger (Old SHOC)
             '??'
         """
-        # FIXME: can you eliminate this function by making
-        #   t0 = UnknownTime()
-        if self.trigger.start is None:
-            import motley
-            return motley.red('??')
-        else:
+        if self.trigger.start is not None:
             return self.t0.iso
+        import motley
+        return motley.red('??')
 
-    def get_t0_kct(self):  # TODO: rename
+    def get_t0_kct(self):    # TODO: rename
         """
         Return the start time of the first frame in UTC and the cycle time
         (exposure + dead time) as TimeDelta object
         """
         # new / fixed data!  Rejoice!
         header = self.header
-        if self.trigger.is_gps():
-            # GPS triggered
-            t_start = self.trigger.start
-        else:
-            # internal triggered
-            t_start = header['DATE-OBS']
-            # NOTE: For new shoc data, DATE-OBS key is always present, and
-            # a more accurate time stamp than FRAME, so we always prefer to use
-            # that
-
+        t_start = self.trigger.start if self.trigger.is_gps() else header['DATE-OBS']
         # DATE-OBS
         # This keyword is confusing (UTC-OBS would be better), but since
         #  it is now in common  use, we (reluctantly) do the same.
@@ -633,7 +621,7 @@ class shocTimingBase(object):
         # header['HJD'] = (times.gjd[j], 'Geocentric Julian Date (TCG)')
         # header['LJD']      = ( times.ljd[j], 'Local Julian Date' )
 
-        if not ((self._hdu.coords is None) or (self.location is None)):
+        if self._hdu.coords is not None and self.location is not None:
             header['HJD'] = (self.hjd[j], 'Heliocentric Julian Date (TDB)')
             header['BJD'] = (self.bjd[j], 'Barycentric Julian Date (TDB)')
             header['AIRMASS'] = (self.airmass[j], 'Young (1994) model')
@@ -709,14 +697,13 @@ class shocTimingOld(shocTimingBase):
             t0 = Time(self.header['DATE'], **options) - delta
             #               or FRAME (equivalent for OLD SHOC data)
 
-        else:  # self.trigger.is_gps():
-            if self.trigger.start:
-                t0 = self.ut_date + self.trigger.start
-                t0 = Time(t0.isot, **options)
-            else:
-                raise NoGPSTime(
-                    'No GPS triggers available for %r. Please set '
-                    'self.trigger.start' % self._hdu.filepath.name)
+        elif self.trigger.start:
+            t0 = self.ut_date + self.trigger.start
+            t0 = Time(t0.isot, **options)
+        else:
+            raise NoGPSTime(
+                'No GPS triggers available for %r. Please set '
+                'self.trigger.start' % self._hdu.filepath.name)
 
         # stack_hdu.flush(output_verify='warn', verbose=1)
         logging.debug('%s : TRIGGER is %s. tmid = %s; KCT = %s sec',

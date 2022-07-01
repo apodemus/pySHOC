@@ -17,7 +17,7 @@ def tbl2tpl(tbl, i0, i1):
 
 
 path, _ = os.path.split(__file__)
-readNoiseTables = dict()
+readNoiseTables = {}
 for i in (1, 2):
     fn = '%s/data/SHOC%i.txt' % (path, i)
     tbl = Table.read(fn, format='ascii')

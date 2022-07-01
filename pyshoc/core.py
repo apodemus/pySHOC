@@ -107,14 +107,12 @@ def str2tup(keys):
 def hbrace(size, name=''):
     #
     if size < 3:
-        return '← ' + str(name) + '\n' * (int(size) // 2)
+        return f'← {str(name)}' + '\n' * (int(size) // 2)
 
     d, r = divmod(int(size) - 3, 2)
-    return '\n'.join(['⎫'] +
-                     ['⎪'] * d +
-                     ['⎬ %s' % str(name)] +
-                     ['⎪'] * (d + r) +
-                     ['⎭'])
+    return '\n'.join(
+        ((['⎫'] + ['⎪'] * d + [f'⎬ {str(name)}']) + ['⎪'] * (d + r) + ['⎭'])
+    )
 
 
 # def get_id(hdu):
@@ -154,9 +152,7 @@ class Date(datetime.date):
         return str(self)
 
     def __format__(self, spec):
-        if 'd' in spec:
-            return str(self).replace('-', '')
-        return super().__format__(spec)
+        return str(self).replace('-', '') if 'd' in spec else super().__format__(spec)
 
 # class yxTuple(tuple):
 #     def __init__(self, *args):
@@ -358,7 +354,7 @@ class shocHDU(HDUExtra):
         # self.fov = self.get_fov()
 
         # image binning
-        self.binning = Binning(header['%sBIN' % _] for _ in 'VH')
+        self.binning = Binning(header[f'{_}BIN'] for _ in 'VH')
 
         # sub-framing
         self.subrect = np.array(header['SUBRECT'].split(','), int)
@@ -430,9 +426,7 @@ class shocHDU(HDUExtra):
     @property
     def nframes(self):
         """Total number of images in observation"""
-        if self.ndim == 2:
-            return 1
-        return self.shape[0]  #
+        return 1 if self.ndim == 2 else self.shape[0]
 
     @lazyproperty
     def coords(self):
@@ -548,7 +542,7 @@ class shocHDU(HDUExtra):
         elif unit.startswith('deg'):
             factor = 1 / 60
         else:
-            raise ValueError('Unknown unit %s' % unit)
+            raise ValueError(f'Unknown unit {unit}')
 
         return np.multiply(fov, factor)
 
@@ -642,7 +636,7 @@ class shocHDU(HDUExtra):
         check for date-obs keyword to determine if header information needs
         updating
         """
-        return not ('date-obs' in self.header)
+        return 'date-obs' not in self.header
         # TODO: is this good enough???
 
     # image arithmetic
@@ -746,7 +740,7 @@ class shocNewHDU(shocHDU):
 
         # check if all the new keywords are present
         old, new = zip(*kw_old_to_new)
-        return all([kw in header for kw in new])
+        return all(kw in header for kw in new)
 
 
 class shocBiasHDU(shocHDU):
@@ -754,9 +748,7 @@ class shocBiasHDU(shocHDU):
 
     @classmethod
     def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False
-        return 'bias' in header.get('OBSTYPE', '')
+        return False if 'SERNO' not in header else 'bias' in header.get('OBSTYPE', '')
 
     def get_coords(self):
         return
@@ -781,9 +773,7 @@ class shocBiasHDU(shocHDU):
 class shocFlatHDU(shocBiasHDU):
     @classmethod
     def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False
-        return 'flat' in header.get('OBSTYPE', '')
+        return False if 'SERNO' not in header else 'flat' in header.get('OBSTYPE', '')
 
     def combine(self, func=median_scaled_median):
         # default combine algorithm first median scales each image,
@@ -794,19 +784,21 @@ class shocFlatHDU(shocBiasHDU):
 class shocMasterBias(shocBiasHDU):
     @classmethod
     def match_header(cls, header):
-        if super().match_header(header):
-            if header['NAXIS'] == 2 and header['MASTER']:
-                return True
-        return False
+        return bool(
+            super().match_header(header)
+            and header['NAXIS'] == 2
+            and header['MASTER']
+        )
 
 
 class shocMasterFlat(shocFlatHDU):
     @classmethod
     def match_header(cls, header):
-        if super().match_header(header):
-            if header['NAXIS'] == 2 and header['MASTER']:
-                return True
-        return False
+        return bool(
+            super().match_header(header)
+            and header['NAXIS'] == 2
+            and header['MASTER']
+        )
 
 
 class TableHelper(AttrTable):
@@ -1379,9 +1371,7 @@ class GroupTitle:
 
     # @staticmethod
     def format_key(self, keys):
-        if isinstance(keys, str):
-            return keys
-        return "; ".join(map(str, keys))
+        return keys if isinstance(keys, str) else "; ".join(map(str, keys))
 
     def __str__(self):
         return '\n' + overlay(codes.apply(self.s, self.props),
@@ -1389,9 +1379,7 @@ class GroupTitle:
 
 
 def make_title(keys):
-    if isinstance(keys, str):
-        return keys
-    return "; ".join(map(str, keys))
+    return keys if isinstance(keys, str) else "; ".join(map(str, keys))
 
 
 class shocObsGroups(Grouped):
@@ -1440,14 +1428,12 @@ class shocObsGroups(Grouped):
         if multiple:
             if self.group_id is not None:
                 keys, _ = self.group_id
-                key_types = dict()
-                for gid, grp in itt.groupby(keys, type):
-                    key_types[gid] = list(grp)
+                key_types = {gid: list(grp) for gid, grp in itt.groupby(keys, type)}
                 attrs_grouped_by = key_types.get(str, ())
                 attrs -= set(attrs_grouped_by)
 
             # check which columns are compactable
-            attrs_varies = set(key for key in attrs if self.varies_by(key))
+            attrs_varies = {key for key in attrs if self.varies_by(key)}
             compactable = attrs - attrs_varies
             attrs -= compactable
 
@@ -1473,7 +1459,7 @@ class shocObsGroups(Grouped):
         tables = {}
         empty = []
         footnotes = OrderedSet()
-        for i, (gid, run) in enumerate(self.items()):
+        for gid, run in self.items():
             if run is None:
                 empty.append(gid)
                 continue
@@ -1564,10 +1550,7 @@ class shocObsGroups(Grouped):
         out = self.__class__()
 
         for key, obj in self.items():
-            if obj is None:
-                out[key] = None
-            else:
-                out[key] = func(obj, *args, **kws)
+            out[key] = None if obj is None else func(obj, *args, **kws)
         return out
 
     # TODO: multiprocess!
@@ -1618,11 +1601,7 @@ class shocObsGroups(Grouped):
             if run is None:
                 continue
 
-            if co is None:
-                out[key] = None
-            else:
-                out[key] = func(run, co, *args, **kws)
-
+            out[key] = None if co is None else func(run, co, *args, **kws)
         return out
 
     def _co_map_func(self, other, name, *args, **kws):
@@ -1633,11 +1612,7 @@ class shocObsGroups(Grouped):
             if run is None:
                 continue
 
-            if co is None:
-                out[key] = None
-            else:
-                out[key] = getattr(run, name)(co, *args, **kws)
-
+            out[key] = None if co is None else getattr(run, name)(co, *args, **kws)
         return out
 
     def subtract(self, biases):
@@ -1763,9 +1738,9 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
 
     # get title
     lc = len(closest)
-    title = 'Matched Observations \nexact: {}'.format(group_id[:-lc])
+    title = f'Matched Observations \nexact: {group_id[:-lc]}'
     if lc:
-        title += ' \nclosest: {}'.format(group_id[-lc:])
+        title += f' \nclosest: {group_id[-lc:]}'
 
     # get attribute table
     tbl = get_table(tmp, attrs, hlines=hlines, title=title, title_align='<',
@@ -1787,35 +1762,9 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
     tbl.compact_items = dict(zip(np.take(group_id, unvarying),
                                  np.take(key, unvarying)))
 
-    # create delta table
-    if False:
-        import operator as op
-        import itertools as itt
-
-        from motley.table import Table
-        from motley import codes
-        from motley.utils import hstack, overlay, ConditionalFormatter
-
-        headers = list(map('Δ({})'.format, tmp.table.get_headers(closest)))
-        formatters = []
-        fmt_db = {'date': lambda d: d.days}
-        deltas0 = next(iter(deltas.values())).squeeze()
-        for d, w in zip(deltas0, threshold_warn):
-            fmt = ConditionalFormatter('yellow', op.gt,
-                                       type(d)(w.item()), fmt_db.get(kw))
-            formatters.append(fmt)
-        #
-        insert = {ln: [('\n', '>', 'underline')] + ([''] * (len(v) - 2))
-                  for ln, v in tbl.insert.items()}
-        formatters = formatters or None
-        headers = headers * (depth // len(closest))
-        d_tbl = Table(dtmp, col_headers=headers, formatters=formatters,
-                      insert=insert, hlines=hlines)
-        print(hstack((tbl, d_tbl)))
-    else:
-        print(tbl)
-        print()
-        return tbl
+    print(tbl)
+    print()
+    return tbl
 
 
 # class shocObsBase()

@@ -2,6 +2,7 @@
 
 """
 
+
 # import logging
 import re
 import itertools as itt
@@ -62,9 +63,7 @@ HEADER_KEYS_MISSING_OLD = \
 
     ]
 
-KWS_REMAP = {}
-for old, new in KWS_OLD_NEW:
-    KWS_REMAP[old.replace('HIERARCH ', '')] = new
+KWS_REMAP = {old.replace('HIERARCH ', ''): new for old, new in KWS_OLD_NEW}
 
 
 def get_new_key(old):
@@ -116,7 +115,7 @@ def headers_intersect(obs, merge_histories=False):
     all_keys -= {'COMMENT', 'HISTORY', ''}
     out = Header()
     for key in all_keys:
-        vals = set(h[key] for h in headers)
+        vals = {h[key] for h in headers}
         if len(vals) == 1:
             # all values for this key are identical -- keep
             with warnings.catch_warnings():
@@ -158,10 +157,9 @@ def match_term(kw, header_keys):
     if np.isnan(f).all():
         # print(kw, 'no match')
         return
-    else:
-        i = np.nanargmax(f)
-        # print(kw, hk[i])
-        return header_keys[i]
+    i = np.nanargmax(f)
+    # print(kw, hk[i])
+    return header_keys[i]
 
 
 def get_header_info(do_update, from_terminal, header_for_defaults,
@@ -233,12 +231,12 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
 
     # setup
     infoDict = {}
-    msg = ('\nPlease enter the following information about the observations '
-           'to populate the image header. If you enter nothing that item '
-           'will not be updated.')
     said = False
     if do_update:  # args.update_headers
         supplied_keys = from_terminal.__dict__.keys()
+        msg = ('\nPlease enter the following information about the observations '
+               'to populate the image header. If you enter nothing that item '
+               'will not be updated.')
         for term_key in supplied_keys:
             # match the terminal (argparse) input arguments with the keywords in
             # table above
@@ -355,7 +353,6 @@ class shocHeader(Header):
         for key, val in info.items():
             if self.get(key, None) != val:
                 to_update[key] = val
-            else:
-                if verbose:
-                    print("%s will not be updated" % key)
+            elif verbose:
+                print(f"{key} will not be updated")
         return to_update
