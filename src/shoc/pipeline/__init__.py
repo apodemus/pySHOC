@@ -7,7 +7,7 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 from pathlib import Path
 
 # local
-from recipes.oo import PartialAttributeLookup
+from recipes.oo import AttributeAutoComplete
 
 # relative
 from .. import make_banner
@@ -35,24 +35,27 @@ _folders = (
 )
 
 
-SUPPORTED_APERTURES = ['square',
-                       'ragged',
-                       'round',
-                       'circle',
-                       'ellipse',
-                       'optimal',
-                       # 'psf',
-                       # 'cog',
-                       ]
+SUPPORTED_APERTURES = [
+    'square',
+    'ragged',
+    'round',
+    'circle',
+    'ellipse',
+    'optimal',
+    # 'psf',
+    # 'cog',
+]
 APPERTURE_SYNONYMS = {'round': 'circle'}
 
 
-class FolderTree(PartialAttributeLookup):
+class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
 
     def __init__(self, root, output=None, folders=_folders,
                  summary=SUMMARY_FILENAME, products=PRODUCTS_FILENAME):
-        self.root = Path(root)
+        #
+        self.root = Path(root).resolve()
+        
         if output is None:
             output = self.root / OUTPUT_ROOT
         self.output = output

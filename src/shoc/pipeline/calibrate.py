@@ -16,7 +16,7 @@ from loguru import logger
 # local
 import motley
 from motley.table import Table
-from recipes.string import plural
+from recipes.string import pluralize
 from scrawl.imagine import ImageDisplay
 
 # relative
@@ -64,8 +64,7 @@ def split_cal(run, kind):
     if cal:
         need = set(run.missing(kind))
         gcal = cal.group_by(*MATCH[kind][0])
-        unneeded = set(gcal.keys()) - need
-        if unneeded:
+        if unneeded := set(gcal.keys()) - need:
             dropping = shocCampaign()
             for u in unneeded:
                 dropping.join(gcal.pop(u))
@@ -133,8 +132,8 @@ def find_cal(run, kind, path=None, ignore_masters=False):
             {:s}
             in database {!r:}.\
             '''),
-            motley.apply(plural(kind), COLOURS[kind]),
-            plural('setup', need),
+            motley.apply(pluralize(kind), COLOURS[kind]),
+            pluralize('setup', need),
             Table(need, col_headers=attx),
             str(calDB[kind])
         )
@@ -151,8 +150,8 @@ def find_cal(run, kind, path=None, ignore_masters=False):
 def compute_masters(stacks, kind, outpath=None, overwrite=False,
                     png=False, **kws):
 
-    logger.info('Computing master {:s} for {:d} stacks.',
-                plural(kind), len(stacks))
+    logger.opt(lazy=True).info('Computing master {0[0]:s} for {0[1]:d} stacks.',
+               lambda: (pluralize(kind), len(stacks)))
 
     # all the stacks we need are here: combine
     masters = stacks.merge_combine()  # get_combine_func(kind)

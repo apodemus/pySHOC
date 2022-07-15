@@ -10,7 +10,8 @@ import numpy as np
 
 # local
 import motley
-from motley.utils import Filler, GroupTitle, ConditionalFormatter
+from motley.utils import Filler, GroupTitle
+from motley.formatters import ConditionalFormatter
 from recipes.sets import OrderedSet
 from recipes.logging import LoggingMixin
 

@@ -8,7 +8,7 @@ import re
 # local
 from pyxides.pprint import PrettyPrinter
 from recipes import bash
-from recipes.dicts import AVDict
+from recipes.dicts import DictNode
 from recipes.logging import LoggingMixin
 
 
@@ -37,7 +37,7 @@ def morph(dic, parent):
 
 
 def get_tree_ymd(names, depth=-1):
-    tree = AVDict()
+    tree = DictNode()
     for file in names:
         mo = RGX_FILENAME.match(file)
         if mo is None:
