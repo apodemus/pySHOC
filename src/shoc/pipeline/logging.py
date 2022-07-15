@@ -5,8 +5,10 @@ Logging config for pyshoc pipeline.
 
 # std
 import sys
+import time
 import atexit
 import warnings
+from dataclasses import dataclass
 
 # third-party
 import better_exceptions as bx
@@ -35,32 +37,91 @@ level_formats = {level.name: motley.stylize(
 class RepeatMessageHandler:
     """
     A loguru sink that filters repeat log messages and instead emits a 
-    configurable summary message.
+    custom summary message.
     """
 
-    def __init__(self, target=sys.stderr, template=motley.stylize(
-            '{[Previous message repeats ×{repeats}]:|kB}\n')):
+    _keys = (
+        # 'file',
+        'function', 'line',
+        'message', 
+        'exception', 'extra'
+    )
+
+    def __init__(self,
+                 target=sys.stderr,
+                 template=motley.stylize(
+                     '{ ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}\n'),
+                 x='×',
+                 xn=' {x}{n:d}',
+                 buffer_size=12):
+        
         self._target = target
-        self._previous_args = None
         self._repeats = 0
+        self._repeating = None
         self._template = str(template)
+        self._x = str(x)
+        self._xn = str(xn)
+        self._memory = []
+        self.buffer_size = int(buffer_size)
+        self._timestamp = None
+        
         atexit.register(self._write_repeats)
 
     def write(self, message):
-        args = (message.record['message'], message.record['level'].no)
-        if self._previous_args == args:
-            self._repeats += 1
+        #
+        args = (message.record['level'].no, message.record['file'].path,
+                *(message.record[k] for k in self._keys))
+        if args in self._memory:  # if self._previous_args == args:
+            if self._repeats:  # multiple consecutive messages repeat
+                idx = self._memory.index(args)
+                if idx == 0:
+                    self._repeats += 1
+                    self._repeating = 0
+                elif idx == (self._repeating + 1):
+                    self._repeating = idx
+                else:
+                    # out of sequence, flush
+                    self._flush()
+            else:
+                # drop all previous unique messages
+                self._memory = self._memory[self._memory.index(args):]
+                self._repeating = 0
+                self._repeats += 1
+                self._timestamp = time.time()
+
             return
 
-        self._write_repeats()
+        # add to buffered memory
+        if self._repeats:
+            # done repeating, write summary of repeats, flush memory
+            self._flush()
+
+        self._memory.append(args)
+        if len(self._memory) > self.buffer_size:
+            self._memory.pop(0)
 
         self._target.write(message)
+
+    def _flush(self):
+        self._write_repeats()
+
+        self._memory = []
         self._repeats = 0
-        self._previous_args = args
+        self._repeating = None
 
     def _write_repeats(self):
-        if self._repeats > 0:
-            self._target.write(self._template.format(repeats=self._repeats))
+        if self._repeats == 0:
+            return
+
+        xn = ('' if self._repeats == 1 else
+              self._xn.format(x=self._x, n=self._repeats + 1))
+
+        # {i} message{s|i} repeat{s|~i}{xn}
+        i = len(self._memory) - 1
+        n_messages = f'{f"{i + 1} " if (many := i > 1) else ""}message{"s" * many}'
+        n_repeats = f'repeat{"s" * (not many)}{xn}'
+        t = hms(time.time() - self._timestamp, precision=3, short=True, unicode=True)
+        self._target.write(motley.format(self._template, **locals()))
 
 
 class TimeDeltaFormatter:
