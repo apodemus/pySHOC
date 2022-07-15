@@ -4,6 +4,7 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 
 
 # std
+from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 
 # third-party
@@ -36,9 +37,12 @@ LOGO = (SRC_ROOT / 'banner/banner.txt').read_text()
 
 def make_banner(subtitle='', width=None, **style):
     width = int(width or get_terminal_size()[0])
-    subtext = format('{:|purple}\n{v{v:}:|k}', subtitle, v=__version__)
+    subtext = format('{:|purple}\n{v:|k}', subtitle, v=__version__)
+    now = datetime.now()
+    now = f'{now.strftime("%d/%m/%Y %H:%M:%S")}.{now.microsecond / 1e5:.0f}'
     return banner('\n'.join(
-        ('', #justify(apply('Welcome to', 'purple'), '<', width),
+        (justify(format('{:|darkgreen}', now), '<', width),
+            # '', #justify(apply('Welcome to', 'purple'), '<', width),
          justify(LOGO, '^', width),
          justify(subtext, '>',  width))),
         width,

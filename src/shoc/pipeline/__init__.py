@@ -14,10 +14,12 @@ from .. import make_banner
 
 
 BANNER_WIDTH = None
-WELCOME_BANNER = make_banner('Photometry Pipeline', BANNER_WIDTH,
-                             fg=('Bold', 'blue'),
-                             linestyle=('-', 'B'),
-                             linecolor=['teal'])
+WELCOME_BANNER = make_banner(
+    'Photometry Pipeline', BANNER_WIDTH,
+    fg=('Bold', 'blue'),
+    linestyle=('-', 'B'),
+    linecolor=['teal']
+)
 
 # Folder structure for results
 OUTPUT_ROOT = '.pyshoc'
