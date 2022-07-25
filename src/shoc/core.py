@@ -1,12 +1,13 @@
-# __version__ = '3.14'
 
 
 # std
 import re
 import operator as op
 import warnings as wrn
+import textwrap as txw
 import itertools as itt
 from pathlib import Path
+from string import Template
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -16,31 +17,31 @@ from scipy import stats
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.io.fits.hdu import PrimaryHDU
-from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.coordinates import EarthLocation, SkyCoord
 
 # local
-import motley
-from motley.table import AttrTable, AttrColumn as Column
-from motley.utils import vstack
 from scrawl.imagine import plot_image_grid
 from pyxides import Groups, OfType
 from pyxides.vectorize import MethodVectorizer, repeat
+from motley.utils import ALIGNMENT_MAP_INV, vstack
+from motley.table import AttrTable, AttrColumn as Column
 from obstools.stats import median_scaled_median
-from obstools.utils import get_coords_named, convert_skycoords
-from obstools.campaign import FilenameHelper, PhotCampaign, HDUExtra
+from obstools.utils import convert_skycoords, get_coords_named
+from obstools.campaign import (HDUExtra, PhotCampaign,
+                               FilenameHelper as _FilenameHelper)
 from recipes import pprint
 from recipes.dicts import pformat
 from recipes.functionals import raises
 from recipes.introspect import get_caller_name
-from recipes.string import sub, remove_prefix, named_items, strings
+from recipes.string import named_items, remove_prefix, strings, sub
 
 # relative
 from .utils import str2tup
 from .printing import BraceContract
 from .readnoise import readNoiseTables
-from .timing import shocTiming, Trigger
+from .timing import Trigger, shocTiming
 from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
-from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
+from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
 
 # emit these warnings once only!
@@ -56,6 +57,8 @@ wrn.filterwarnings('once', 'Using telescope pointing coordinates')
 
 #            SHOC1, SHOC2
 SERIAL_NRS = [5982, 6448]
+SERVER_NAMES = {'SHOC2': 'shd',
+                'SHOC1': 'sha'}
 
 # ------------------------------ Telescope info ------------------------------ #
 
@@ -76,8 +79,12 @@ LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
              for tel, geo in TEL_GEO_LOC.items()}
 
 # names
-TEL_NAME_EQUIVALENT = {'74': 74, '1.9': 74,
-                       '40': 40, '1.0': 40, '1': 40}
+PREFER_METRIC_NAMES = True
+_74, _40 = ('1.9m', '1.0m') if PREFER_METRIC_NAMES else ('74in', '40in')
+TEL_NAME_EQUIVALENT = {'74': _74, '1.9': _74,
+                       '40': _40, '1.0': _40, '1': _40}
+
+
 KNOWN_TEL_NAMES = [*LOCATIONS, *TEL_NAME_EQUIVALENT]
 
 
@@ -109,6 +116,12 @@ REGEX_ROLLED = re.compile(r'\._X([0-9]+)')
 # ----------------------------- helper functions ----------------------------- #
 
 
+def hms_latex(x, precision=0):
+    return r'\hms{{{:02.0f}}}{{{:02.0f}}}{{{:04.1f}}}'.format(
+        *pprint.nrs.sexagesimal(x.value, precision=precision)
+    )
+
+
 def _3d(array):
     """Add axis in 0th position to make 3d"""
     if array.ndim == 2:
@@ -135,7 +148,7 @@ def get_tel(name):
     Returns
     -------
     str
-        Standardized telescope name
+        Standardized telescope name.
 
     Examples
     --------
@@ -160,11 +173,14 @@ def get_tel(name):
 
     # sanitize name:  strip "units" (in,m), lower case
     name = str(name).rstrip('inm ').lower()
+
     if name not in KNOWN_TEL_NAMES:
         raise ValueError(f'Telescope name {name!r} not recognised. Please '
                          f'use one of the following\n: {KNOWN_TEL_NAMES}')
+
     if name in TEL_NAME_EQUIVALENT:
-        return f'{TEL_NAME_EQUIVALENT[name]}in'
+        return TEL_NAME_EQUIVALENT[name]
+
     return name
 
 
@@ -409,16 +425,16 @@ class ReadoutMode:
     #             self.preAmpGain, self.frq, self.outAmp.mode)
 
 
-class RollOver():
+class RollOverState:
 
     nr = 0
     parent = None
 
     def __init__(self, hdu):
         # Check whether the filenames contain '._X' an indicator for whether the
-        # datacube reached the 2GB windows file size limit on the shoc server,
-        # and was consequently split into a sequence of fits cubes. The
-        # timestamps of these need special treatment
+        # datacube reached the 2GB windows file size limit on the old shoc
+        # server, and was consequently split into a sequence of fits cubes. The
+        # timestamps of these need special treatment.
 
         path = hdu.file.path
         if not path:
@@ -437,7 +453,7 @@ class RollOver():
         return bool(self)
 
 
-class shocFilenameHelper(FilenameHelper):
+class FilenameHelper(_FilenameHelper):
     @property
     def nr(self):
         """
@@ -461,7 +477,7 @@ class shocHDU(HDUExtra, Messenger):
 
     __shoc_hdu_types = {}
     filename_format = None
-    _FilenameHelperClass = shocFilenameHelper
+    _FilenameHelperClass = FilenameHelper
 
     @classmethod
     def match_header(cls, header):
@@ -616,9 +632,7 @@ class shocHDU(HDUExtra, Messenger):
             return
 
         year, month, day, *_ = tuple(self.t.t0.ymdhms)
-        shoc_server = {'SHOC2': 'shd',
-                       'SHOC1': 'sha'}[self.camera]
-        return Path(f'astro:/data/{self.telescope}/{shoc_server}/'
+        return Path(f'astro:/data/{self.telescope}/{SERVER_NAMES[self.camera]}/'
                     f'{year}/{month:0>2d}{day:0>2d}/'
                     f'{self.file.name}')
 
@@ -741,7 +755,7 @@ class shocHDU(HDUExtra, Messenger):
 
     @lazyproperty
     def rollover(self):
-        return RollOver(self)
+        return RollOverState(self)
 
     # ------------------------------------------------------------------------ #
 
@@ -876,7 +890,7 @@ class shocHDU(HDUExtra, Messenger):
 
         if not callable(func):
             raise TypeError(
-                f'Parameter `func` should be callable. Received {type(func)}'
+                f'Parameter `func` should be callable. Received {type(func)}.'
             )
 
         # check if single image
@@ -884,9 +898,11 @@ class shocHDU(HDUExtra, Messenger):
             return self
 
         # log some info
-        msg = f'{func.__name__} of {self.nframes} images from {self.file.name}'
-        msg = self.message(msg, sep='')
-        self.logger.info(remove_prefix(msg, self.__class__.__name__))
+        msg = self.message(
+            f'{func.__name__} of {self.nframes} images from {self.file.name}.',
+            sep='',
+        )
+        self.logger.opt(lazy=True).info('{}', lambda: remove_prefix(msg, self.__class__.__name__))
 
         # combine across images
         kws.setdefault('axis', 0)
@@ -935,7 +951,7 @@ class shocHDU(HDUExtra, Messenger):
             # get attribute values and replace unwnated characters for filename
             fmt = name_format.replace('{', '{0.')
             name = sub(fmt.format(self), {' ': '-', "'": '', ': ': ''})
-            return name + f'.{ext.lstrip(".")}'
+            return f"{name}.{ext.lstrip('.')}"
 
     # @expose.args()
     def save(self, filename=None, folder=None, name_format=None,
@@ -1088,7 +1104,7 @@ class TableHelper(AttrTable):
         # compacted `filter` displays 'A = ∅' which is not very clear. Go more
         # verbose again for clarity
         # HACK:
-        if table.compact_items:
+        if table.compact_items and table.compact != 'drop':
             replace = {'A': 'filter.A',
                        'B': 'filter.B'}
             table.compact_items = {replace.get(name, name): item
@@ -1096,6 +1112,144 @@ class TableHelper(AttrTable):
                                    }
             table._compact_table = table._get_compact_table()
         return table
+
+    def _latex_tabular_body(self):
+        # controls which attributes will be printed
+        tabulate = TableHelper.from_columns(
+            {
+                'timing.t0':       Column(fmt=op.attrgetter('iso'), unit='UTC'),
+                'telescope':       Column('Tel'),
+                'camera':          Column('Camera'),
+                'filters.name':    Column('Filter'),
+                'nframes':         Column('n', total=True),
+                'readout.mode':    Column('Readout Mode'),
+                'binning':         Column('Binning', unit='y, x'),
+                'timing.exp':      Column('$t_{\mathrm{exp}}$', fmt=str, unit='s'),
+                'timing.duration': Column('Duration', fmt=hms_latex, unit='hms',
+                                          total=True)
+            },
+            frame=False,
+            hlines=False,
+            col_head_props=None,
+            col_borders='& ',
+            compact=('drop' if len(self.parent) > 2 else False),
+            too_wide=False,
+            insert={
+                -2:                         r'\toprule',
+                0:                          r'\midrule',
+                (n := len(self.parent)):    r'\midrule',
+                n + 1:                      r'\bottomrule'
+            }
+        )
+
+        tabulate.parent = self.parent
+
+        tbl = tabulate(title=False, col_groups=None)
+        tbl.borders[-1] = r'\\'
+        tbl.pre_table[0, 0] = r'\#'  # FIXME `_nrs_header`. pre_table must die!!
+
+        footnotes = tbl.footnotes[:]
+        tbl.footnotes = []
+        return tbl, footnotes
+
+    def _to_latex_table(self, star='*', pos='ht!',
+                        options=R'\centering',
+                        caption=None, cap=None,
+                        label=None, env='tabular'):
+        
+        # options
+        star = '*' if star else ''
+        cap = f'[{{{cap!s}}}]' if cap else ''
+        caption = rf'\caption{cap}{{{caption}}}' if caption else ''
+        label = f'\\label{{{label}}}\n' if label else ''
+
+        #
+        tbl, _footnotes = self._latex_tabular_body()
+
+        # reformat footnotes
+        footnotes = [Rf'\hspace{{1eM}}{sym} {descr}'
+                     for (*_, sym), descr in np.char.split(_footnotes, ': ', 1)]
+        footnotes.extend(Rf'\hspace{{1eM}}{key}: {val}'
+                         for key, val in tbl.compact_items.items())
+        footnotes = '\n    '.join(footnotes)
+        
+        # get column spec
+        col_spec = ''.join(map(ALIGNMENT_MAP_INV.get, tbl.align[tbl._idx_shown]))
+        
+        return Template(txw.dedent(r'''
+            \begin{table$star}[$pos]
+                $options
+                $caption
+                \begin{$env}{$col_spec}
+                    $body
+                \end{$env}
+                $label
+                \footnotesize
+                \raggedright
+                $footnotes
+
+            \end{table$star}
+            ''')).substitute(locals(),
+                             target=self.parent[0].target,
+                             body=str(tbl).replace('\n', '\n    '))
+
+    def _to_latex_ctable(self, options='star, nosuper, notespar', pos='ht!', 
+                         caption=None, cap=None, label=None,
+                         ):
+
+        options = ',\n    '.join(
+            filter(None, (f'{options}',
+                          f'{pos     = !s}',
+                          f'caption = {{{caption!s}}}' if caption else '',
+                          f'cap     = {{{cap!s}}}' if cap else '',
+                          f'{label   = !s}' if label else ''))
+        )
+
+        tbl, _footnotes = self._latex_tabular_body()
+
+        nfootnotes = len(_footnotes) + len(tbl.compact_items)
+        post = (*(';' * (nfootnotes - 1)), '')
+        pairs = itt.chain(
+            ((sym, descr) for (*_, sym), descr in 
+                (np.char.split(_footnotes, ': ', 1) if _footnotes else ())),
+            (('', f'{key}: {val}') for key, val in tbl.compact_items.items())
+        )
+        nlt = ('\n' + ' ' * 4)
+        footnotes = ''.join(
+            (f'{nlt * bool(i)}\\tnote[{sym}]{{{descr}{post}}}'
+             for i, ((sym, descr), post) in enumerate(zip(pairs, post))
+             ))
+
+        col_spec = ''.join(map(ALIGNMENT_MAP_INV.get,  tbl.align[tbl._idx_shown]))
+        return Template(txw.dedent(r'''
+            \ctable[
+                $options,
+                % hack to move table into left margin
+                % doinside={\hspace*{-1.5cm}}
+            ]{
+                % column spec
+                $col_spec
+            }{
+                % footnotes
+                %\hspace*{-1.2cm}% also move footnotes to keep alignment consistent
+                $footnotes
+            }{
+                % tabular body
+                $body
+            }
+            ''')).substitute(locals(),
+                             target=self.parent[0].target,
+                             body=str(tbl).replace('\n', '\n    '),
+                             footnotes=footnotes)
+
+    def to_latex(self, style='table', **kws):
+        workers = {  # 'tabular': self._latex_tabular_body,
+            'table': self._to_latex_table,
+            'ctable': self._to_latex_ctable}
+        if style in workers:
+            return workers[style](**kws)
+
+        raise NotImplementedError
 
     def to_xlsx(self, path):
         tabulate = AttrTable.from_columns({
@@ -1128,7 +1282,7 @@ class TableHelper(AttrTable):
                                        ...: '^'},
                                 header_formatter=str.title,
                                 )
-                                #widths={'binning': 5})
+        # widths={'binning': 5})
 
         # tabulate = AttrTable.from_spec({
         #     'Filename':        'file.name',
@@ -1177,14 +1331,13 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          #  'readout.mode.frq':   ...,
          #  'readout.mode.outAmp':    ...,
          #   'filters.B':          ...,
-
          },
         compact=True,
         title_props=dict(txt=('underline', 'bold'), bg='b'),
         too_wide=False,
     )
 
-    @classmethod
+    @ classmethod
     def new_groups(cls, *keys, **kws):
         return shocObsGroups(cls, *keys, **kws)
 
@@ -1193,10 +1346,12 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #     shocHDU.data.get
 
     # @expose.args
-    @classmethod
-    def load_files(cls, filenames, *args, **kws):
-        run = super().load_files(filenames, *args, allow_empty=False, **kws)
-        
+    @ classmethod
+    def load(cls, files_or_dir, recurse=False, extensions=('fits', 'FITS'), **kws):
+
+        run = super().load(files_or_dir, recurse, extensions, allow_empty=False,
+                           **kws)
+
         # look for gps timesstamps if needed
         rolled = run.group_by('rollover.state')
         ok = rolled.pop(False)
@@ -1209,15 +1364,23 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                          f'wrong!!')
 
         # Check for external GPS timing file
-        need_gps = run.missing_gps()
-        if need_gps:
-            gps = run.search_gps_file()
-            if gps:
-                cls.logger.info(
-                    motley.stylize(
-                        "Using gps timestamps from '{!r:|darkgreen,B}'"),
-                    gps.relative_to(gps.parent.parent),)
-                run.provide_gps(gps)
+        if run.missing_gps() and (gps := run.search_gps_file()):
+            cls.logger.opt(colors=True).info(
+                "Using gps timestamps from <b><g>'{!s:}'</></>",
+                # motley.stylize(
+                #     "Using gps timestamps from '{!r:|darkgreen,B}'"),
+                gps.relative_to(gps.parent.parent)
+            )
+            run.provide_gps(gps)
+
+        # Switch naming convention for telscopes if desired
+        said = False
+        for hdu in run:
+            if hdu.telescope and (tel := get_tel(hdu.telescope)) != hdu.telescope:
+                if not said:
+                    cls.logger.info('Switching to metric names for telescopes.')
+                    said = True
+                hdu.telescope = tel
 
         return run
 
@@ -1332,7 +1495,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     def combine(self, func=None, args=(), **kws):
         """
         Combine each `shocHDU` in the campaign into a 2D image by calling `func`
-        on each data stack.  Can be used to compute image statistics or compute 
+        on each data stack.  Can be used to compute image statistics or compute
         master flat / dark image for calibration.
 
         Parameters
@@ -1550,8 +1713,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     def search_gps_file(self):
         # get common root folder
-        folder = self.files.common_root()
-        if folder:
+        if folder := self.files.common_root():
             gps = folder / 'gps.sast'
             if gps.exists():
                 return gps
@@ -1658,7 +1820,7 @@ class shocObsGroups(Groups):
             handle_missing(
                 f'Can\'t map method {name!r} over groups. Right group is '
                 f'missing values for the following '
-                + named_items('key', strings(missing), '\n'.join)
+                + named_items(strings(missing), 'key', fmt='\n'.join)
             )
 
         out = self.__class__()
