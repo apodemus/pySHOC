@@ -1,6 +1,7 @@
 
 
 # std
+from recipes.pprint.formatters import Decimal
 import re
 import operator as op
 import warnings as wrn
@@ -23,17 +24,20 @@ from astropy.coordinates import EarthLocation, SkyCoord
 from scrawl.imagine import plot_image_grid
 from pyxides import Groups, OfType
 from pyxides.vectorize import MethodVectorizer, repeat
+from motley.table import Table
 from motley.utils import ALIGNMENT_MAP_INV, vstack
-from motley.table import AttrTable, AttrColumn as Column
+from motley.table.attrs import AttrTable, AttrColumn as Column
 from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import (HDUExtra, PhotCampaign,
                                FilenameHelper as _FilenameHelper)
 from recipes import pprint
 from recipes.dicts import pformat
+from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.introspect import get_caller_name
-from recipes.string import named_items, remove_prefix, strings, sub
+from recipes.string import (named_items, remove_prefix, strings, sub,
+                            indent as indented)
 
 # relative
 from .utils import str2tup
@@ -1079,177 +1083,30 @@ def hms(t):
 
 class TableHelper(AttrTable):
 
-    def get_table(self, run, attrs=None, **kws):
-        # Add '*' flag to times that are gps triggered
-        flags = {}
-        postscript = []
-        attrs = attrs or self.attrs
-        for key, attr in [('timing.t0', 'timing.trigger.flag'),
-                          ('timing.exp', 'timing.trigger.loop_flag')]:
-            # key = 'timing.{}'
-            if key not in attrs:
-                continue
+    # def get_table(self, run, attrs=None, **kws):
+    #     #
+    #     self._foot_fmt = ' {flag}  {info}'
+    #     table = super().get_table(run, attrs, **kws)
 
-            flg = flags[self.get_header(key)] = run.attrs(attr)
-            for flag in set(flg):
-                if flag:
-                    info = Trigger.FLAG_INFO[self.get_header(attr)]
-                    postscript.append(f'{key}{flag}: {info[flag]}')
+    #     # HACK: compacted `filter` displays 'A = ∅' which is not very clear. Go more
+    #     # verbose again for clarity
+    #     if table.summary.items and table.summary.loc != -1:
+    #         replace = {'A': 'filter.A',
+    #                    'B': 'filter.B'}
+    #         table.summary.items = {replace.get(name, name): item
+    #                                for name, item in table.summary.items.items()}
+    #         table.inset = table.summary()
+    #     return table
 
-        # get table
-        postscript = '\n'.join(postscript)
-        table = super().get_table(run, attrs, flags=flags,
-                                  footnotes=postscript, **kws)
+    def to_latex(self, style='table', indent=2, **kws):
+        fname = f'_to_{style}'
+        if not hasattr(LatexWriter, fname):
+            raise NotImplementedError(fname)
 
-        # compacted `filter` displays 'A = ∅' which is not very clear. Go more
-        # verbose again for clarity
-        # HACK:
-        if table.compact_items and table.compact != 'drop':
-            replace = {'A': 'filter.A',
-                       'B': 'filter.B'}
-            table.compact_items = {replace.get(name, name): item
-                                   for name, item in table.compact_items.items()
-                                   }
-            table._compact_table = table._get_compact_table()
-        return table
-
-    def _latex_tabular_body(self):
-        # controls which attributes will be printed
-        tabulate = TableHelper.from_columns(
-            {
-                'timing.t0':       Column(fmt=op.attrgetter('iso'), unit='UTC'),
-                'telescope':       Column('Tel'),
-                'camera':          Column('Camera'),
-                'filters.name':    Column('Filter'),
-                'nframes':         Column('n', total=True),
-                'readout.mode':    Column('Readout Mode'),
-                'binning':         Column('Binning', unit='y, x'),
-                'timing.exp':      Column('$t_{\mathrm{exp}}$', fmt=str, unit='s'),
-                'timing.duration': Column('Duration', fmt=hms_latex, unit='hms',
-                                          total=True)
-            },
-            frame=False,
-            hlines=False,
-            col_head_props=None,
-            col_borders='& ',
-            compact=('drop' if len(self.parent) > 2 else False),
-            too_wide=False,
-            insert={
-                -2:                         r'\toprule',
-                0:                          r'\midrule',
-                (n := len(self.parent)):    r'\midrule',
-                n + 1:                      r'\bottomrule'
-            }
-        )
-
-        tabulate.parent = self.parent
-
-        tbl = tabulate(title=False, col_groups=None)
-        tbl.borders[-1] = r'\\'
-        tbl.pre_table[0, 0] = r'\#'  # FIXME `_nrs_header`. pre_table must die!!
-
-        footnotes = tbl.footnotes[:]
-        tbl.footnotes = []
-        return tbl, footnotes
-
-    def _to_latex_table(self, star='*', pos='ht!',
-                        options=R'\centering',
-                        caption=None, cap=None,
-                        label=None, env='tabular'):
-        
-        # options
-        star = '*' if star else ''
-        cap = f'[{{{cap!s}}}]' if cap else ''
-        caption = rf'\caption{cap}{{{caption}}}' if caption else ''
-        label = f'\\label{{{label}}}\n' if label else ''
-
-        #
-        tbl, _footnotes = self._latex_tabular_body()
-
-        # reformat footnotes
-        footnotes = [Rf'\hspace{{1eM}}{sym} {descr}'
-                     for (*_, sym), descr in np.char.split(_footnotes, ': ', 1)]
-        footnotes.extend(Rf'\hspace{{1eM}}{key}: {val}'
-                         for key, val in tbl.compact_items.items())
-        footnotes = '\n    '.join(footnotes)
-        
-        # get column spec
-        col_spec = ''.join(map(ALIGNMENT_MAP_INV.get, tbl.align[tbl._idx_shown]))
-        
-        return Template(txw.dedent(r'''
-            \begin{table$star}[$pos]
-                $options
-                $caption
-                \begin{$env}{$col_spec}
-                    $body
-                \end{$env}
-                $label
-                \footnotesize
-                \raggedright
-                $footnotes
-
-            \end{table$star}
-            ''')).substitute(locals(),
-                             target=self.parent[0].target,
-                             body=str(tbl).replace('\n', '\n    '))
-
-    def _to_latex_ctable(self, options='star, nosuper, notespar', pos='ht!', 
-                         caption=None, cap=None, label=None,
-                         ):
-
-        options = ',\n    '.join(
-            filter(None, (f'{options}',
-                          f'{pos     = !s}',
-                          f'caption = {{{caption!s}}}' if caption else '',
-                          f'cap     = {{{cap!s}}}' if cap else '',
-                          f'{label   = !s}' if label else ''))
-        )
-
-        tbl, _footnotes = self._latex_tabular_body()
-
-        nfootnotes = len(_footnotes) + len(tbl.compact_items)
-        post = (*(';' * (nfootnotes - 1)), '')
-        pairs = itt.chain(
-            ((sym, descr) for (*_, sym), descr in 
-                (np.char.split(_footnotes, ': ', 1) if _footnotes else ())),
-            (('', f'{key}: {val}') for key, val in tbl.compact_items.items())
-        )
-        nlt = ('\n' + ' ' * 4)
-        footnotes = ''.join(
-            (f'{nlt * bool(i)}\\tnote[{sym}]{{{descr}{post}}}'
-             for i, ((sym, descr), post) in enumerate(zip(pairs, post))
-             ))
-
-        col_spec = ''.join(map(ALIGNMENT_MAP_INV.get,  tbl.align[tbl._idx_shown]))
-        return Template(txw.dedent(r'''
-            \ctable[
-                $options,
-                % hack to move table into left margin
-                % doinside={\hspace*{-1.5cm}}
-            ]{
-                % column spec
-                $col_spec
-            }{
-                % footnotes
-                %\hspace*{-1.2cm}% also move footnotes to keep alignment consistent
-                $footnotes
-            }{
-                % tabular body
-                $body
-            }
-            ''')).substitute(locals(),
-                             target=self.parent[0].target,
-                             body=str(tbl).replace('\n', '\n    '),
-                             footnotes=footnotes)
-
-    def to_latex(self, style='table', **kws):
-        workers = {  # 'tabular': self._latex_tabular_body,
-            'table': self._to_latex_table,
-            'ctable': self._to_latex_ctable}
-        if style in workers:
-            return workers[style](**kws)
-
-        raise NotImplementedError
+        writer = LatexWriter(self.parent)
+        worker = getattr(writer, fname)
+        table = worker(**kws).replace('\n    ', f'\n{" " * indent}')
+        return '\n'.join(map(str.rstrip,  table.splitlines()))
 
     def to_xlsx(self, path):
         tabulate = AttrTable.from_columns({
@@ -1303,15 +1160,231 @@ class TableHelper(AttrTable):
         # )
 
 
+class LatexWriter:
+    def __init__(self, container):
+        self.parent = container
+
+    def _tabular_body(self,
+                      booktabs=True, unicodemath=False,
+                      flag_fmt='$\:^{{{flag}}}$',
+                      foot_fmt=R'\hspace{{1eM}}$^{{{flag}}}$\ {info}\\',
+                      summary_fmt=R'\hspace{{1eM}}{{{key} = {val}¿ [{unit}]?}}\\',
+                      timing_flags=None,
+                      **kws):
+
+        if timing_flags is None:
+            # †  ‡  §
+            if unicodemath:
+                timing_flags = {-1: '!',  # ⚠ not commonly available in all fonts
+                                0:  '↓',
+                                1:  '⟳'}
+            else:
+                timing_flags = {-1: '!',
+                                0:  '*',
+                                1:  '\dagger'}  # '
+
+        # change flags symbols temporarily
+        with temporary(Trigger, FLAG_SYMBOLS=timing_flags):
+            # controls which attributes will be printed
+            tabulate = TableHelper.from_columns({
+                # FIXME: these columns just change the titles from tabulate
+                'timing.t0':       Column('$t_0$', fmt='{.iso}'.format, unit='UTC',
+                                          flags=op.attrgetter('t.trigger.t0_flag')),
+                'telescope':       Column('Telescope'),
+                'camera':          Column('Camera'),
+                'filters.name':    Column('Filter'),
+                'nframes':         Column('n', total=True),
+                'readout.mode':    Column('Readout Mode'),
+                'binning':         Column('Binning', unit='y, x', align='^',
+                                          fmt=R'{0.y}\times{0.x}'),
+                'timing.exp':      Column('$t_{\mathrm{exp}}$', fmt=str, unit='s',
+                                          flags=op.attrgetter('t.trigger.texp_flag')),
+                'timing.duration': Column('Duration', fmt=hms_latex, unit='hh:mm:ss',
+                                          total=True)},
+                row_nrs=1,
+                frame=False,
+                hlines=False,
+                col_head_props=None,
+                borders={...: '& ', -1: r'\\'},
+                summary=dict(footer=True, n_cols=1, bullets='', align='<',
+                             pillars=['t0'], fmt=summary_fmt),
+                too_wide=False,
+                insert=({
+                    -2:                         R'\toprule',
+                    0:                          R'\midrule',
+                    (n := len(self.parent)):    R'\midrule',
+                    n + 1:                      R'\bottomrule'
+                } if booktabs else {}),
+                flag_fmt=flag_fmt,
+                footnotes=(footnotes := Trigger.get_flags()),
+                foot_fmt=foot_fmt
+            )
+            tabulate.parent = self.parent
+            with temporary(Table, _nrs_header='\#'):  # HACK for latex symbol
+                tbl = tabulate(title=False, col_groups=None, **kws)
+
+        # HAck out the footnotes for formatting downstream
+        footnotes = tbl.footnotes[:]
+        tbl.footnotes = []
+        return tbl, footnotes
+
+    def _tabular_colspec(self, tbl, indent=4):
+        col_spec = list(map(ALIGNMENT_MAP_INV.get, tbl.align[tbl._idx_shown]))
+        # letters = list(map(chr, range(65, 65 + len(col_spec))))
+        letters = [f'{i:c}' for i in range(65, 65 + len(col_spec))]
+        letters[0] = f'% {letters[0]}'
+        col_spec = Table([letters, col_spec],
+                         col_borders=[*['& '] * (len(letters) - 1), ''],
+                         frame=False)
+        # col_spec._idx_shown = tbl._idx_shown
+        widths = tbl.col_widths[tbl._idx_shown]
+        col_spec.col_widths = np.array([(l, w)[l < w]
+                                        for l, w in zip(map(len, letters), widths)])
+        col_spec.truncate_cells(widths)
+        letters, spec = indented(str(col_spec).rstrip(), indent).splitlines()
+        return '\n'.join((letters, spec.replace('&', ' ')))
+
+    def _to_table(self, star='*', pos='ht!',
+                  options=R'\centering',
+                  caption=None, cap=None,
+                  label=None, env='tabular',
+                  booktabs=True, unicodemath=False):
+        indent = 4
+        # options
+        star = '*' if star else ''
+        cap = f'[{{{cap!s}}}]' if cap else ''
+        caption = rf'\caption{cap}{{{caption}}}' if caption else ''
+        label = f'\\label{{{label}}}' if label else ''
+
+        #
+        tbl, footnotes = self._tabular_body(booktabs, unicodemath)
+
+        # get column spec
+        return Template(txw.dedent(R'''
+            \begin{table$star}[$pos]
+                $options
+                $caption
+                $label
+                %
+                \begin{$env}{%
+                $colspec
+                }
+                $body
+                \end{$env}
+
+                \footnotesize
+                \raggedright
+                $footnotes
+
+            \end{table$star}
+            ''')).substitute(
+            locals(),
+            colspec=self._tabular_colspec(tbl),
+            body=indented(str(tbl), indent),
+            footnotes=f'\n{" " * indent}'.join(np.char.strip(footnotes))
+        )
+
+    def _to_ctable(self, options='star, nosuper', pos='ht!',
+                   caption=None, cap=None, label=None,
+                   hspace_body='-1.5cm', hspace_footer='-1.2cm',
+                   booktabs=True, unicodemath=True):
+        indent = 4
+        options = f',\n{" " * indent}'.join(
+            filter(None, (f'{options}',
+                          f'{pos     = !s}',
+                          f'caption = {{{caption!s}}}' if caption else '',
+                          f'cap     = {{{cap!s}}}' if cap else '',
+                          f'{label   = !s}' if label else ''))
+        )
+
+        tbl, footnotes = self._tabular_body(
+            booktabs, unicodemath,
+            flag_fmt=R'\tmark[$\:{{{flag}}}$]',
+            foot_fmt=R'\tnote[$^{{{flag}}}\:$]{{{info}}}',
+            summary_fmt=R'\tnote[{{}}]{{{key} = {val}¿ {unit}?}}'
+        )
+
+        hack = '% ' if (len(tbl._idx_shown) < 7) else ''
+        return Template(txw.dedent(R'''
+            \ctable[
+                $options,
+                % hack to move table into left margin
+                ${hack}doinside= {\hspace*{$hspace_body}}
+            ]{
+                % column spec
+                $colspec
+            }{
+                % footnotes
+                % also move footnotes to keep alignment consistent
+                $hack\hspace*{$hspace_footer}
+                $footnotes
+            }{
+                % tabular body
+                $body
+            }
+            ''')).substitute(
+            locals(),
+            body=indented(tbl, indent),
+            colspec=self._tabular_colspec(tbl),
+            footnotes=f'\n{" " * indent}'.join(footnotes)
+        )
+
+    def _to_tabularray(self, options='',  # pos='ht!',
+                       caption=None, cap=None, label=None,
+                       hspace_body='-1.5cm', hspace_footer='-1.2cm',
+                       booktabs=True, unicodemath=True):
+
+        indent = 4  # since Template is hard coded indent 4
+        options = f',\n{" " * indent}'.join(
+            filter(None, (f'{options}',
+                          #   f'{pos     = !s}',
+                          f'caption = {{{caption!s}}}' if caption else '',
+                          f'entry   = {{{cap!s}}}' if cap else '',
+                          f'{label   = !s},' if label else ''))
+        )
+
+        tbl, footnotes = self._tabular_body(
+            booktabs, unicodemath,
+            flag_fmt=R'\TblrNote{{{flag}}}',
+            foot_fmt=R'note{{${{{flag}}}$}} = {{{info}}},',
+            summary_fmt=R'remark{{{key}}} = {{{val}{unit}}},'
+        )
+
+        return Template(txw.dedent(R'''
+            \begin{tblr}[
+                % outer spec
+                $options
+                % footnotes
+                % \hspace*{$hspace_footer}
+                $footnotes
+            ]{% inner spec
+                % Column headers (to appear on every page for page-split tables)
+                row{1-2} = {c, m, font=\bfseries},
+                rowhead = 2, 
+                % rowfoot = 1,
+                colspec={
+                $colspec
+                },
+            }
+            $body
+            \end{tblr}
+            ''')).substitute(
+            locals(),
+            colspec=self._tabular_colspec(tbl, indent),
+            body=indented(tbl, indent),
+            footnotes=f'\n{" " * indent}'.join(footnotes)
+        )
+
+
 # ------------------------------------- ~ ------------------------------------ #
 
 
 class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
-    # Pretty repr and str
+    # Pretty repr
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
-    # controls which attributes will be printed
+    # This controls which attributes will be tabulated for `pprint` method
     tabulate = TableHelper.from_columns(
         {'file.stem':          Column('filename'),
          'telescope':          Column('tel'),
@@ -1319,11 +1392,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          'target':             ...,
          'obstype':            ...,
          'filters.name':       Column('filter'),
-         'nframes':            Column('n', total=True),
-         'binning':            Column('bin', unit='y, x'),
+         'nframes':            Column('n', total=True,
+                                      fmt=Decimal(0, thousands=' ')),
+         'binning':            Column('bin', unit='y, x', align='^'),
          'readout.mode':       ...,
-         'timing.t0':          Column(fmt=op.attrgetter('iso'), unit='UTC'),
-         'timing.exp':         Column('tExp', fmt=str, unit='s'),
+         'timing.t0':          Column('t0', unit='UTC',
+                                      flags=op.attrgetter('t.trigger.t0_flag')),
+         'timing.exp':         Column('tExp', fmt=str, unit='s',
+                                      flags=op.attrgetter('t.trigger.texp_flag')),
          'timing.duration':    Column(fmt=hms, unit='hms', total=True)
          #   'ishape':     Column(unit='y, x'),
          #   'readout.preAmpGain':     Column('preAmp', unit='y, x'),
@@ -1332,12 +1408,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          #  'readout.mode.outAmp':    ...,
          #   'filters.B':          ...,
          },
-        compact=True,
-        title_props=dict(txt=('underline', 'bold'), bg='b'),
+        row_nrs=1,
+        summary=True,
+        title_props=dict(fg=('underline', 'bold'), bg='b'),
         too_wide=False,
+        footnotes=Trigger.get_flags()
     )
 
-    @ classmethod
+    @classmethod
     def new_groups(cls, *keys, **kws):
         return shocObsGroups(cls, *keys, **kws)
 
@@ -1346,7 +1424,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #     shocHDU.data.get
 
     # @expose.args
-    @ classmethod
+    @classmethod
     def load(cls, files_or_dir, recurse=False, extensions=('fits', 'FITS'), **kws):
 
         run = super().load(files_or_dir, recurse, extensions, allow_empty=False,
@@ -1665,8 +1743,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         for obs, cx in zip(self, cxx):
             i = coords.separation(cx).argmin()
             obj_coords = coords[i]
-            selected = self[cxx.separation(obj_coords).deg < tolerance]
-            if selected:
+            if selected := self[cxx.separation(obj_coords).deg < tolerance]:
                 selected.attrs.set(repeat(coords=obj_coords,
                                           target=names[i],
                                           obstype='object'))
@@ -1709,7 +1786,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         return missing
 
     def missing_gps(self):
-        return self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
+        return self.select_by(**{'t.trigger.t0_flag': bool}).sort_by('t.t0')
 
     def search_gps_file(self):
         # get common root folder
@@ -1722,7 +1799,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # read file with gps triggers
         path = Path(filename)
         names, times = np.loadtxt(str(filename), str, unpack=True)
-        need_gps = self.select_by(**{'t.trigger.flag': bool}).sort_by('t.t0')
+        need_gps = self.select_by(**{'t.trigger.t0_flag': bool}).sort_by('t.t0')
         assert need_gps == self[names].sort_by('t.t0')
 
         # assert len(times) == len(self)
@@ -1730,7 +1807,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         for obs, t0 in zip(need_gps, times):
             t = obs.t
             t.t0 = t.from_local(t0, tz)
-            t.trigger.flag = '*'
+            t.trigger._header_gps_info_missing['t0'] = False
 
         # print('TIMEDELTA')
         # print((Time(t0) - Time(need_gps.attrs('t.t0'))).to('s'))

@@ -20,6 +20,7 @@ from loguru import logger
 import motley
 from obstools.airmass import Young94, altitude
 from recipes.oo import Null
+from recipes.dicts import invert
 from recipes.logging import LoggingMixin
 
 
@@ -136,46 +137,45 @@ UnknownTime = _UnknownTime()
 # class Duration(float, HMSrepr):``
 #     pass
 
-class GPSTimeStampMissing:
-    def __str__(self):
-        return motley.red('\N{WARNING SIGN}')
-
-
-NO_GPS = GPSTimeStampMissing()
+# class GPSTimeStampMissing:
+#     def __str__(self):
+#         return Trigger.NO_GPS
+#
+#
+# NO_GPS = GPSTimeStampMissing()
 
 
 class Trigger:
     """
     Simple class representing the trigger mechanism that started the CCD
-    exposure sequence
+    exposure sequence.
     """
-
-    FLAG_INFO = {
-        'flag': {
-            '*':        'GPS Trigger',
-            NO_GPS:     'GPSSTART missing - timestamp may be inaccurate'
-        },
-        'loop_flag': {
-            '*':        'GPS Repeat'
-        }
+    FLAG_SYMBOLS = {
+        -1: motley.red('⚠'),  # '\N{WARNING SIGN}'
+        0: '↓',  # '\N{DOWNWARDS ARROW}'
+        1: '⥁'  # '\N{CLOCKWISE CLOSED CIRCLE ARROW}'
+        # '⟲' # '\N{ANTICLOCKWISE GAPPED CIRCLE ARROW}'
+        # '⟳' # '\N{CLOCKWISE GAPPED CIRCLE ARROW}'
     }
-    # SYMBOLS =     ''
-    #       loop = '⟲'
-    #       start = '↓'
+    FLAG_MEANING = {
+        -1: 'GPSSTART missing - timestamp may be inaccurate.',
+        0:  'GPS Triggered start.',
+        1:  'GPS Triggered every exposure.'
+    }
+
+    _flag_key_aliases = {'start': 't0',
+                         'loop': 'texp'}
+    _flag_key_aliases_inv = invert(_flag_key_aliases)
 
     def __init__(self, header):
         self.mode = header['trigger']
-
-        self.flag = '*' * int(self.is_gps)
-        if self.is_gps and ('GPSSTART' not in header):
-            self.flag = NO_GPS
-
-        self.loop_flag = ''
-        if self.is_gps_loop and ('GPS-INT' in header):
-            self.loop_flag = '*'
+        self._header_gps_info_missing = {
+            't0':   self.is_gps and ('GPSSTART' not in header),
+            'texp': self.is_gps_loop and ('GPS-INT' not in header)
+        }
 
     def __str__(self):
-        return self.mode[:2] + '.'
+        return f'{self.mode[:2]}.'
 
     def __repr__(self):
         # {self.__class__.__name__}:
@@ -210,6 +210,29 @@ class Trigger:
         ie. mode is 'External'
         """
         return self.is_gps and not self.is_gps_start
+
+    @property
+    def t0_flag(self):
+        return self.get_flag('t0')
+
+    @property
+    def texp_flag(self):
+        return self.get_flag('texp')
+
+    @classmethod
+    def get_flags(cls):
+        """GPS flags symbols and meaning"""
+        return dict(zip(cls.FLAG_SYMBOLS.values(), cls.FLAG_MEANING.values()))
+
+    def get_flag(self, which):
+        which = self._flag_key_aliases.get(which, which)
+        if self._header_gps_info_missing[which]:
+            return self.FLAG_SYMBOLS[-1]
+
+        if self.is_gps:
+            which = self._flag_key_aliases_inv.get(which, which)
+            return self.FLAG_SYMBOLS[list(self._flag_key_aliases).index(which)]
+        return ''
 
 
 class Time(time.Time):
@@ -274,9 +297,7 @@ class TimeDelta(time.TimeDelta):
     # _flag = ''
 
     def __new__(cls, val, **kws):
-        if val is UnknownTime:
-            return UnknownTime
-        return super().__new__(cls, val, **kws)
+        return val if val is UnknownTime else super().__new__(cls, val, **kws)
 
 #         # obj = super().__new__(cls, val, **kws)
 #         # print('NEW', cls, val.__class__, obj.__class__ )
@@ -545,7 +566,7 @@ class shocTiming(LoggingMixin):
         if hdu.rollover:  # FIXME: only for old data.
             # compute timestamp for files that rolled over 2Gb limit on old
             # server
-            logger.info('Computing timestamps for {:s}, rolled over from {:s}',
+            logger.info('Computing timestamps for {}, rolled over from {}.',
                         hdu.file.name, hdu.rollover.parent)
             from .core import shocHDU
 
@@ -601,7 +622,7 @@ class shocTiming(LoggingMixin):
 
     @property
     def t0_flagged(self):
-        return f'{self.t0.iso}{self.trigger.flag}'
+        return f'{self.t0.iso}{self.trigger.t0_flag}'
 
     @lazyproperty
     def expose(self):
@@ -611,16 +632,13 @@ class shocTiming(LoggingMixin):
         if self.trigger.is_gps_loop:
             # GPS triggered
             # self.t0_flag = '*'
-            delta = self.header.get('GPS-INT', None)
-            if delta:
+            if delta := self.header.get('GPS-INT', None):
                 return int(delta) / 1000 - self.dead
 
-        else:
-            # For TRIGGER 'Internal' or 'External Start' EXPOSURE stores the actual
-            # correct exposure time
-            exp = self.header.get('EXPOSURE', None)
-            if exp:
-                return exp
+        # For TRIGGER 'Internal' or 'External Start' EXPOSURE stores the actual
+        # correct exposure time
+        elif exp := self.header.get('EXPOSURE', None):
+            return exp
 
         return UnknownTime
 
@@ -674,10 +692,9 @@ class shocTiming(LoggingMixin):
     def check_info(self):
         # Need some info from the headers to compute the time stamps. check if
         # this is available
-        mia = [name for name, i in {'EXPOSURE': self.expose,
-                                    'DATE-OBS': self.t0}.items()
-               if not i]
-        if mia:
+        if mia := [name for name, i in {'EXPOSURE': self.expose,
+                                        'DATE-OBS': self.t0}.items()
+                   if not i]:
             plural = (len(mia) > 1)
             raise UnknownTimeException(
                 f'No timestamps available for {self.hdu.file.name}. '
