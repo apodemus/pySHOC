@@ -394,37 +394,37 @@ class shocTiming(LoggingMixin):
     ----------------------------------------
       TRIGGER: 'Internal':
         * DATE-OBS
-            - The time the user pushed start button (UTC)
+            - The time the user pushed start button (UTC).
         * FRAME
-            - Time at the **end** of the first exposure (file creation time)
+            - Time at the **end** of the first exposure (file creation time).
         * KCT
-            - Kinetic Cycle Time   (exposure time + dead time)
+            - Kinetic Cycle Time (exposure time + dead time).
             - **Not recorded** for single frame exposures:
                 ACQMODE == 'Single Shot'
         * EXPOSURE
-            - exposure time (sec)
+            - exposure time (sec).
 
       TRIGGER: 'External Start':
         * DATE-OBS
             - **NB** This is not the time stamp for the first image frame if the
-              observations are GPS triggered
+              observations are GPS triggered.
         * FRAME
-            - as above
+            - as above.
         * KCT
             - **not recorded**
         * EXPOSURE
-            - exposure time (sec)
+            - exposure time (sec).
         * GPSSTART
-            - GPS start time (UTC)
+            - GPS start time (UTC).
 
 
       TRIGGER: 'External':
         * GPSSTART, KCT, DATE-OBS, FRAME
-            - as above
+            - as above.
         * GPS-INT
-            - GPS trigger interval (milliseconds)
+            - GPS trigger interval (milliseconds).
         * EXPOSURE
-            - exposure time (sec)
+            - exposure time (sec).
 
     Older SHOC data (pre 2015)
     --------------------------
@@ -434,7 +434,7 @@ class shocTiming(LoggingMixin):
         * FRAME, DATE
            - Time at the **end** of the first exposure (file creation timestamp)
            - The time here is rounded to the nearest second of computer clock
-             ==> uncertainty of +- 0.5 sec (for absolute timing)
+             ==> uncertainty of +- 0.5 sec (for absolute timing).
         * KCT
             - Kinetic Cycle Time   (exposure time + dead time)
         * EXPOSURE
@@ -575,22 +575,17 @@ class shocTiming(LoggingMixin):
 
         # Timing keys in order of accuracy
         # if not GPS triggered skip GPSSTART key
-        offset = 0
-        # is_gps = self.trigger.is_gps()
         internal = self.trigger.is_internal  # int(not is_gps)
-        #self.t0_flag = '*' * int(is_gps)
         search_keys = ['GPSSTART', 'DATE-OBS', 'DATE', 'FRAME'][internal:]
-        for i, key in enumerate(search_keys):
-            if key in self.header:
-                return Time(self.header[key], **self.options) + offset
+        offsets = [0, 0, 1, 1]
+        return next((Time(self.header[key], **self.options) - offset * self.delta
+                     for key, offset in zip(search_keys, offsets)
+                     if key in self.header),
+                    UnknownTime)
 
-            # if self.trigger.is_gps:
-                # Time = InaccurateTimeStamp
-
-            if i > 1:
-                offset = -self.delta
-
-        return UnknownTime
+        # is_gps = self.trigger.is_gps()
+        # if self.trigger.is_gps:
+        # Time = InaccurateTimeStamp
 
         # NOTE:
         # For NEW (>2015) data, DATE-OBS key is always present, and a more
