@@ -24,14 +24,23 @@ def markup_to_list(tags):
     return tags.strip('<>').replace('><', ',')
 
 
-fmt = ('{elapsed:s|Bb}|{{{name}.{function}:|green}:{line:d|orange}: <52}|'
-       '{{level.name}: {message}:|{style}}'
-       # '{exception:?}',
-       )
-level_formats = {level.name: motley.stylize(
-    fmt, level=level, style=markup_to_list(level.color)
-) for level in logger._core.levels.values()
+fmt = ('{elapsed:s|Bb}|'
+       '{{{name}.{function}:s|green}:{line:d|orange}: <52}|'
+       '{{level.name}: {message}:|{style}}')
+level_formats = {
+    level.name: motley.stylize(fmt,
+                               level=level,
+                               style=markup_to_list(level.color))
+    for level in logger._core.levels.values()
 }
+
+
+# @dataclass
+# class ConditionalString:
+#     s: str = ''
+
+#     def __or__(self, n):
+#         return 's' if n > 1 else ''
 
 
 class RepeatMessageHandler:
@@ -43,7 +52,7 @@ class RepeatMessageHandler:
     _keys = (
         # 'file',
         'function', 'line',
-        'message', 
+        'message',
         'exception', 'extra'
     )
 
@@ -54,7 +63,7 @@ class RepeatMessageHandler:
                  x='×',
                  xn=' {x}{n:d}',
                  buffer_size=12):
-        
+
         self._target = target
         self._repeats = 0
         self._repeating = None
@@ -64,7 +73,7 @@ class RepeatMessageHandler:
         self._memory = []
         self.buffer_size = int(buffer_size)
         self._timestamp = None
-        
+
         atexit.register(self._write_repeats)
 
     def write(self, message):
@@ -113,8 +122,8 @@ class RepeatMessageHandler:
         if self._repeats == 0:
             return
 
-        xn = ('' if self._repeats == 1 else
-              self._xn.format(x=self._x, n=self._repeats + 1))
+        # xn = #('' if self._repeats == 1 else
+        xn = self._xn.format(x=self._x, n=self._repeats + 1)
 
         # {i} message{s|i} repeat{s|~i}{xn}
         i = len(self._memory) - 1
@@ -141,27 +150,22 @@ class TimeDeltaFormatter:
 
 
 def patch(record):
+    # dynamic formatting tweaks
     set_elapsed_time_hms(record)
     escape_module(record)
 
 
 def set_elapsed_time_hms(record):
+    # format elapsed time
     record['elapsed'] = TimeDeltaFormatter(record['elapsed'])
 
 
-# if is_interactive():
 def escape_module(record):
     """This prevents loguru from trying to parse <module> as an html tag."""
     if record['function'] == '<module>':
-        record['function'] = r'\<module>'
-# else:
-#     escape_module = noop
-
-# @ftl.lru_cache()
-# def stylize(format_string, level):
-#     return motley.format_partial(format_string,
-#                                  level=level,
-#                                  style=log_level_styles[level.name])
+        # '\N{SINGLE LEFT-POINTING ANGLE QUOTATION MARK}'
+        # '\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK}'
+        record['function'] = '‹module›'
 
 
 def formatter(record):
@@ -173,12 +177,14 @@ def formatter(record):
 
     format_string += '\n'
 
-    # If we format the message here, loguru will try format a second time, which
-    # is usually fine, except when the message contains braces (eg dict as str),
-    # in which case it fails.
+    # If we format the `message` here, loguru will try format a second time,
+    # which is usually fine, except when the message contains braces (eg dict as
+    # str), in which case it fails.
+    # FIXME: just escape the braces. Use color=False
     # record['message'] = '{message}'
-    # motley.format_partial(record['message']) # 
-    return motley.format(format_string, **{**record, 'message':'{message}'}) 
+    # motley.format_partial(record['message']) #
+
+    return motley.format(format_string, **{**record, 'message': '{message}'})
 
 
 def format_exception(exc_info=None):
@@ -211,7 +217,7 @@ def config():
 
     logger.configure(
         handlers=[
-            # console logger
+            # console handler
             dict(sink=RepeatMessageHandler(),
                  level='DEBUG',
                  catch=False,
@@ -219,7 +225,7 @@ def config():
                  format=formatter,
                  ),
 
-            # File logger
+            # File handler
             # dict(sink=path,
             #      # serialize= True
             #      level='DEBUG',
@@ -227,15 +233,16 @@ def config():
             #      colorize=False,
             #      ),
         ],
-        
+
         # "extra": {"user": "someone"}
         patcher=patch,
-        
+
         # disable logging for motley.formatter, since it is being used here to
-        # format the log messages and will thus recurse infinitely
-        activation=[('obstools', True),
+        # format the log messages and will thus recurse infinitely.
+        activation=[('pyshoc', True),
+                    ('obstools', True),
                     ('recipes', True),
                     ('motley.formatter', False)]
     )
-    
+
     return logger

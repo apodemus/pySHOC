@@ -107,3 +107,4 @@ lib/z.lib
 #################
 .ipynb_checkpoints/
 src/shoc/pipeline/logging_test.py
+tests/J0354.py

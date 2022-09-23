@@ -18,7 +18,7 @@ from motley.table import Table
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 from recipes import io
 from recipes.logging import LoggingMixin
-from recipes.string import numbered, plural
+from recipes.string import numbered, pluralize
 from recipes.dicts import AutoVivify, AttrDict
 
 # relative
@@ -141,7 +141,7 @@ class CalDB(DB, LoggingMixin):
                 shocCampaign.logger = self.logger
                 new = shocCampaign.load(new)
                 shocCampaign.logger = shocCampaign.Logger()
-                # logger.info('Loaded {:d} {:s}.', i, plural('file', new))
+                # logger.info('Loaded {:d} {:s}.', i, pluralize('file', new))
 
             close = True
 
@@ -198,7 +198,7 @@ class CalDB(DB, LoggingMixin):
         
         which = 'master' if master else 'raw'
         name = motley.apply(f'{which} {kind}', CONFIG['colors'][kind])
-        logger.info("Searching for {:s} files in database: '{!s}'",
+        logger.info("Searching for {:s} files in database:\n'{!s}'",
                     name, self[which][kind])
 
         if kind in self.db[which]:
@@ -236,7 +236,7 @@ class CalDB(DB, LoggingMixin):
             logger.info(
                 'No {:s} available in database for {:s} with '
                 'observational {:s}:\n{:s}',
-                name, numbered(not_found, 'file'), plural('setup', not_found),
+                name, numbered(not_found, 'file'), pluralize('setup', not_found),
                 Table(not_found, col_headers=attrs, nrs=True)
             )
         else:

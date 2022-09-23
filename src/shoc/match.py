@@ -334,7 +334,7 @@ class MatchedObservations(LoggingMixin):
 
         # filler lines
         Filler.make(tbl)
-        GroupTitle.width = tbl.get_width() - 1
+        GroupTitle.width = tbl.get_width() - 2
 
         # fix for final run null match
         if run is None:
@@ -344,8 +344,8 @@ class MatchedObservations(LoggingMixin):
         # highlight `other`
         tbl.highlight = highlight
 
-        # hack compact repr
-        tbl.compact_items = dict(zip(np.take(list(self.attrs), unvarying),
+        # hack summary repr
+        tbl.summary.items = dict(zip(np.take(list(self.attrs), unvarying),
                                      np.take(key, unvarying)))
 
         # create delta table
@@ -412,6 +412,6 @@ class MatchedObservations(LoggingMixin):
         insert = {ln: [('\n', '>', 'underline')] + ([''] * (len(v) - 2))
                   for ln, v in tbl.insert.items()}
         formatters = formatters or None
-        headers = headers * (depth // len(closest))
+        headers *= (depth // len(closest))
         return Table(dtmp, col_headers=headers, formatters=formatters,
                      insert=insert, hlines=hlines)

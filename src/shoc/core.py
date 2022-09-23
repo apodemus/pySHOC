@@ -67,16 +67,16 @@ SERVER_NAMES = {'SHOC2': 'shd',
 # ------------------------------ Telescope info ------------------------------ #
 
 # Field of view of telescopes in arcmin
-FOV = {'74in':     (1.29, 1.29),
-       '40in':     (2.85, 2.85),
+FOV = {'1.9m':     (1.29, 1.29),
+       '1.0m':     (2.85, 2.85),
        'lesedi': (5.7, 5.7)}
-FOVr = {'74':    (2.79, 2.79)}  # with focal reducer
+FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer
 # fov30 = (3.73, 3.73) # decommissioned
 # '30': fov30, '0.75': fov30, # decommissioned
 
 # Exact GPS locations of telescopes
-TEL_GEO_LOC = {'74in':   (20.81167,  -32.462167, 1822),
-               '40in':   (20.81,     -32.379667, 1810),
+TEL_GEO_LOC = {'1.9m':   (20.81167,  -32.462167, 1822),
+               '1.0m':   (20.81,     -32.379667, 1810),
                'lesedi': (20.8105,   -32.379667, 1811),
                'salt':   (20.810808, -32.375823, 1798)}
 LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
@@ -188,14 +188,14 @@ def get_tel(name):
     return name
 
 
-def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
+def get_fov(telescope, unit='arcmin', focal_reducer=False):
     """
     Get telescope field of view
 
     Parameters
     ----------
     telescope
-    with_focal_reducer
+    focal_reducer
     unit
 
     Returns
@@ -211,7 +211,7 @@ def get_fov(telescope, unit='arcmin', with_focal_reducer=False):
     """
 
     telescope = get_tel(telescope)
-    fov = (FOVr if with_focal_reducer else FOV).get(telescope)
+    fov = (FOV_REDUCED if focal_reducer else FOV)[telescope]
 
     # at this point we have the FoV in arcmin
     # resolve units
@@ -1235,13 +1235,15 @@ class LatexWriter:
         letters[0] = f'% {letters[0]}'
         col_spec = Table([letters, col_spec],
                          col_borders=[*['& '] * (len(letters) - 1), ''],
-                         frame=False)
+                         frame=False, too_wide=False)
         # col_spec._idx_shown = tbl._idx_shown
         widths = tbl.col_widths[tbl._idx_shown]
+        col_spec.max_width = 1000  # HACK since split is happening here... # FIXME
         col_spec.col_widths = np.array([(l, w)[l < w]
                                         for l, w in zip(map(len, letters), widths)])
         col_spec.truncate_cells(widths)
         letters, spec = indented(str(col_spec).rstrip(), indent).splitlines()
+
         return '\n'.join((letters, spec.replace('&', ' ')))
 
     def _to_table(self, star='*', pos='ht!',
@@ -1478,8 +1480,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         self[:] = self.__class__(hdus)
         return self
 
-    def thumbnails(self, statistic='mean', depth=5, subset=None,
-                   title='file.name', calibrated=False, figsize=None, **kws):
+    def thumbnails(self, statistic='mean', size=5, subset=None, depth=None,
+                   title='file.name', calibrated=False, **kws):
         """
         Display a sample image from each of the observations laid out in a grid.
         Image thumbnails are all the same size, even if they are shaped
@@ -1489,21 +1491,21 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         ----------
         statistic: str
             statistic for the sample
-        depth: int
-            number of images in each observation to combine
-        subset: int or tuple
-            index interval for subset of the full observation to draw from, by
-            default use (0, depth)
+        size: int
+            Number of images in each observation to combine.
+        subset: int or tuple or slice or ellipsis or None
+            Index interval for subset of the full observation to draw from, by
+            default use (0, size).
         title: str
-            key to attribute of item that will be used as title
+            Key mapping to attribute of item that will be used as title.
         calibrated: bool
-            calibrate the image if bias / flat field available
-        figsize:  tuple
-               size of the figure in inches
+            Calibrate the image if bias / flat field available.
+
+        Other keyword parameters are passed to `plot_image_grid`.
 
         Returns
         -------
-
+        ImageGrid
         """
 
         # get axes title strings
@@ -1520,10 +1522,15 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
         # get sample images
         if subset is None:
-            subset = (0, depth)
+            subset = (0, size)
 
         # get sample images
-        sample_images = self.calls(f'sampler.{statistic}', depth, subset)
+        if depth is None:
+            func, args = f'sampler.{statistic}', (size, subset)
+        else:
+            func, args = 'get_sample_image', (statistic, depth, subset)
+
+        sample_images = self.calls(func, *args)
 
         if calibrated:
             # print(list(map(np.mean, sample_images)))
@@ -1531,8 +1538,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                              zip(self, sample_images)]
             # print(list(map(np.mean, sample_images)))
 
-        return plot_image_grid(sample_images, titles=titles, figsize=figsize,
-                               **kws)
+        return plot_image_grid(sample_images, titles=titles, **kws)
 
     def guess_obstype(self, plot=False):
         """

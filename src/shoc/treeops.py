@@ -3,7 +3,7 @@ Operations on SHOC files residing in a nested directory structure (file system
 tree)
 """
 
-# std 
+# std
 import os
 import shutil
 import warnings
@@ -11,15 +11,15 @@ import itertools as itt
 from pathlib import Path
 from collections import defaultdict
 
-# third-party 
+# third-party
 import more_itertools as mit
 from astropy.coordinates.jparser import shorten
 
-# local 
+# local
 from recipes import io, pprint as ppr
 from recipes.decorators import raises
 
-# relative 
+# relative
 from .core import shocCampaign
 
 
@@ -42,29 +42,32 @@ def get_tree(root, extension=''):
         tree[file.parent.name].append(file)
     return tree
 
+
 def get_common_parent(paths):
     root = Path()
     for folders in itt.zip_longest(*(p.parts for p in paths)):
-        folders = set(folders) 
+        folders = set(folders)
         if len(folders) != 1:
             break
         root /= folders.pop()
     return root
+
 
 def _rename(name):
     return shorten(name).replace(' ', '_')
 
 
 def get_object_name(obstype, objname):
-    if obstype == 'object':
-        if objname in ('', None):
-            # Ignore files that could not be id'd by source name
-            return
-        # get folder name
-        return _rename(objname)
-    else:
+    if obstype != 'object':
         # calibration data
         return obstype
+    
+    if objname in ('', None):
+        # Ignore files that could not be id'd by source name
+        return
+    
+    # get folder name
+    return _rename(objname)
 
 
 def make_tree(src, dest, grouping, naming, extensions='*'):
@@ -74,7 +77,7 @@ def make_tree(src, dest, grouping, naming, extensions='*'):
         src = shocCampaign.load(src, recurse=True)
     elif not isinstance(src, shocCampaign):
         raise TypeError('Invalid source')
-    
+
     # make grouping
     partition = src.group_by(*grouping)
 
@@ -193,7 +196,7 @@ def partition_by_source(src, dest=None, extensions='*', move=True,
         root = get_common_parent(src.files.paths)
     else:
         raise TypeError('Invalid source')
-    
+
     # default destination same as source
     if dest is None:
         dest = root
