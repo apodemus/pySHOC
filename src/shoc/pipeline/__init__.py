@@ -7,6 +7,7 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 from pathlib import Path
 
 # local
+from recipes import dicts
 from recipes.oo import AttributeAutoComplete
 
 # relative
@@ -23,23 +24,24 @@ WELCOME_BANNER = make_banner(
 
 # Folder structure for results
 OUTPUT_ROOT = '.pyshoc'
-SUMMARY_FILENAME = 'campaign.xlsx'
-PRODUCTS_FILENAME = 'data_products.xlsx'
+SUMMARY_FILENAME = 'campaign-files.xlsx'
+PRODUCTS_FILENAME = 'data-products.xlsx'
+OBSLOG_FILENAME = 'observing-log.tex'
 _folders = (
     'headers',
     'logs',
     'plots',
-    'plots/image_samples',
-    'plots/source_regions',
-    'phot'
+    'plots/sample_images',
+    'phot',
+    'phot/source_regions',
+    '.cache'
 )
 
 
 SUPPORTED_APERTURES = [
     'square',
     'ragged',
-    'round',
-    'circle',
+    'round', 'circle',
     'ellipse',
     'optimal',
     # 'psf',
@@ -51,28 +53,37 @@ APPERTURE_SYNONYMS = {'round': 'circle'}
 class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
 
-    def __init__(self, root, output=None, folders=_folders,
-                 summary=SUMMARY_FILENAME, products=PRODUCTS_FILENAME):
+    def __init__(self,
+                 root, output=None, folders=_folders,
+                 obslog=OBSLOG_FILENAME,
+                 summary=SUMMARY_FILENAME,
+                 products=PRODUCTS_FILENAME):
         #
         self.root = Path(root).resolve()
-        
+
         if output is None:
             output = self.root / OUTPUT_ROOT
         self.output = output
 
         for folder in folders:
             path = output / folder
-            setattr(self, path.name, path)
+            setattr(self, path.name.strip('.'), path)
 
         # folders to create
         self.folders = dict(vars(self))
 
         # files
+        self.obslog = self.output / obslog
         self.summary = self.output / summary
         self.products = self.output / products
 
     def __repr__(self):
-        return str(vars(self))
+        return dicts.pformat(vars(self), rhs=lambda x: x.relative_to(self.root))
+
+    def _relative_to_root(self, path):
+        if path is self.root:
+            return str(path)
+        return f'$root/{path.relative_to(self.root)}'
 
     def create(self):
         for _, path in self.folders.items():
