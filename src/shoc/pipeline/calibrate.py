@@ -17,7 +17,7 @@ from loguru import logger
 import motley
 from motley.table import Table
 from recipes.string import pluralize
-from scrawl.imagine import ImageDisplay
+from scrawl.image import ImageDisplay
 
 # relative
 from .. import calDB, shocCampaign, MATCH, CONFIG
@@ -58,6 +58,17 @@ def split_cal(run, kind):
 
     # get calibrators in run
     grp = run.group_by('obstype')
+    if files := grp[None].join(grp['']).files.names:
+        nl = '\n    '
+        raise ValueError(textwrap.dedent(f'''\
+            Encountered invalid or missing `obstype` value in files:
+                {nl.join(files)}
+            Please specify the obstype by editing the fits headers directly on the HDU:
+                >>> run[0].header['obstype'] = 'object'
+            or for the entire run by doing:
+                >>> run.attrs.set(repeat(obstype='object'))
+            on the appropriate set of files.'''))
+
     cal = grp.pop(kind, shocCampaign())
 
     # drop unnecessary calibration stacks
@@ -151,7 +162,7 @@ def compute_masters(stacks, kind, outpath=None, overwrite=False,
                     png=False, **kws):
 
     logger.opt(lazy=True).info('Computing master {0[0]:s} for {0[1]:d} stacks.',
-               lambda: (pluralize(kind), len(stacks)))
+                               lambda: (pluralize(kind), len(stacks)))
 
     # all the stacks we need are here: combine
     masters = stacks.merge_combine()  # get_combine_func(kind)

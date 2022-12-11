@@ -1,5 +1,5 @@
 """
-Functions for time-stamping SHOC data and writing time stamps to FITS headers
+Functions for time-stamping SHOC data and writing time stamps to FITS headers.
 """
 
 
@@ -23,9 +23,6 @@ from recipes.oo import Null
 from recipes.dicts import invert
 from recipes.logging import LoggingMixin
 
-
-# from pathlib import Path
-# from warnings import warn
 # import spiceypy as spice
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
@@ -466,6 +463,10 @@ class shocTiming(LoggingMixin):
 
         return super().__new__(kls)
 
+    def __getnewargs__(self):
+        self.logger.trace('unpickling: {}', self)
+        return self.hdu, 
+    
     def __init__(self, hdu, **kws):
         """
         Create the timing interface for a shocHDU

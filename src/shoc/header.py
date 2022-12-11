@@ -236,12 +236,12 @@ def get_header_info(do_update, from_terminal, header_for_defaults,
 
     # setup
     infoDict = {}
-    msg = ('\nPlease enter the following information about the observations '
-           'to populate the image header. If you enter nothing that item '
-           'will not be updated.')
     said = False
     if do_update:  # args.update_headers
         supplied_keys = from_terminal.__dict__.keys()
+        msg = ('\nPlease enter the following information about the observations '
+               'to populate the image header. If you enter nothing that item '
+               'will not be updated.')
         for term_key in supplied_keys:
             # match the terminal (argparse) input arguments with the keywords in
             # table above

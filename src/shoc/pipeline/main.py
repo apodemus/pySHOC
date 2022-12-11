@@ -23,7 +23,7 @@ from mpl_multitab import MplMultiTab2D, QtWidgets
 from motley.table import Table
 from pyxides.vectorize import repeat
 from obstools.image.registration import ImageRegister
-from scrawl.imagine import ImageDisplay, plot_image_grid
+from scrawl.image import ImageDisplay, plot_image_grid
 from recipes import pprint as pp
 from recipes.lists import cosort
 from recipes.string import most_similar
@@ -604,7 +604,7 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
         # def plot_sample
         im = ImageDisplay(image)
         if detection is not False:
-            seg.show_contours(im.ax, cmap=cmr.pride, lw=1.5)
+            seg.show.contours(im.ax, cmap=cmr.pride, lw=1.5)
 
         # add to figure manager
         ui.add_tab('Sample Images', hdu.file.name, fig=im.figure)
@@ -647,7 +647,7 @@ def get_sample_images(run, paths,
             if i == 0 and seg:
                 logger.info(
                     'Source images:\n{}',
-                    seg.format_cutouts_console(
+                    seg.show.console.cutouts(
                         image,
                         extend=2,
                         title=hdu.file.name,

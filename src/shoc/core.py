@@ -1,7 +1,6 @@
 
 
 # std
-from recipes.pprint.formatters import Decimal
 import re
 import operator as op
 import warnings as wrn
@@ -17,11 +16,11 @@ import numpy as np
 from scipy import stats
 from astropy.time import Time
 from astropy.utils import lazyproperty
-from astropy.io.fits.hdu import PrimaryHDU
+from astropy.io import fits
 from astropy.coordinates import EarthLocation, SkyCoord
 
 # local
-from scrawl.imagine import plot_image_grid
+from scrawl.image import plot_image_grid
 from pyxides import Groups, OfType
 from pyxides.vectorize import MethodVectorizer, repeat
 from motley.table import Table
@@ -29,12 +28,13 @@ from motley.utils import ALIGNMENT_MAP_INV, vstack
 from motley.table.attrs import AttrTable, AttrColumn as Column
 from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
-from obstools.campaign import (HDUExtra, PhotCampaign,
+from obstools.campaign import (ImageHDU, PhotCampaign,
                                FilenameHelper as _FilenameHelper)
 from recipes import pprint
 from recipes.dicts import pformat
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
+from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
 from recipes.string import (named_items, remove_prefix, strings, sub,
                             indent as indented)
@@ -65,11 +65,13 @@ SERVER_NAMES = {'SHOC2': 'shd',
                 'SHOC1': 'sha'}
 
 # ------------------------------ Telescope info ------------------------------ #
+# TODO: data table in telinfo module:
+# from obstools.telinfo import TelInfo; TelInfo[1.9].fov
 
 # Field of view of telescopes in arcmin
 FOV = {'1.9m':     (1.29, 1.29),
        '1.0m':     (2.85, 2.85),
-       'lesedi': (5.7, 5.7)}
+       'lesedi':   (5.7, 5.7)}
 FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer
 # fov30 = (3.73, 3.73) # decommissioned
 # '30': fov30, '0.75': fov30, # decommissioned
@@ -83,19 +85,17 @@ LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
              for tel, geo in TEL_GEO_LOC.items()}
 
 # names
-PREFER_METRIC_NAMES = True
-_74, _40 = ('1.9m', '1.0m') if PREFER_METRIC_NAMES else ('74in', '40in')
+# PREFER_METRIC_NAMES = True
+_74, _40 = ('1.9m', '1.0m')  # if PREFER_METRIC_NAMES else ('74in', '40in')
 TEL_NAME_EQUIVALENT = {'74': _74, '1.9': _74,
                        '40': _40, '1.0': _40, '1': _40}
-
-
 KNOWN_TEL_NAMES = [*LOCATIONS, *TEL_NAME_EQUIVALENT]
 
 
 # ----------------------------- module constants ----------------------------- #
 
 CALIBRATION_NAMES = ('bias', 'flat', 'dark')
-OBSTYPE_EQUIVALENT = {'bias': 'dark',
+OBSTYPE_EQUIVALENT = {'bias':    'dark',
                       'skyflat': 'flat'}
 KNOWN_OBSTYPE = {*CALIBRATION_NAMES, *OBSTYPE_EQUIVALENT, 'object'}
 
@@ -121,7 +121,7 @@ REGEX_ROLLED = re.compile(r'\._X([0-9]+)')
 
 
 def hms_latex(x, precision=0):
-    return r'\hms{{{:02.0f}}}{{{:02.0f}}}{{{:04.1f}}}'.format(
+    return R'\hms{{{:02.0f}}}{{{:02.0f}}}{{{:04.1f}}}'.format(
         *pprint.nrs.sexagesimal(x.value, precision=precision)
     )
 
@@ -140,7 +140,7 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
     return func(*args, **kws)
 
 
-def get_tel(name):
+def get_tel(name, metric=True):
     """
     Get standardized telescope name from description.
 
@@ -157,15 +157,15 @@ def get_tel(name):
     Examples
     --------
     >>> get_tel(74)
-    '74in'
+    '1.9m'
     >>> get_tel(1.9)
-    '74in'
-    >>> get_tel('1.9 m')
+    '1.9m'
+    >>> get_tel('1.9 m', metric=False)
     '74in'
     >>> get_tel(1)
-    '40in'
+    '1.0m'
     >>> get_tel('40     in')
-    '40in'
+    '1.0m'
     >>> get_tel('LESEDI')
     'lesedi'
 
@@ -176,14 +176,14 @@ def get_tel(name):
     """
 
     # sanitize name:  strip "units" (in,m), lower case
-    name = str(name).rstrip('inm ').lower()
+    nr = str(name).rstrip('inm ').lower()
 
-    if name not in KNOWN_TEL_NAMES:
+    if nr not in KNOWN_TEL_NAMES:
         raise ValueError(f'Telescope name {name!r} not recognised. Please '
                          f'use one of the following\n: {KNOWN_TEL_NAMES}')
 
-    if name in TEL_NAME_EQUIVALENT:
-        return TEL_NAME_EQUIVALENT[name]
+    if nr in TEL_NAME_EQUIVALENT:
+        return TEL_NAME_EQUIVALENT[nr]
 
     return name
 
@@ -477,7 +477,7 @@ class Messenger:
 # ------------------------------ HDU Subclasses ------------------------------ #
 
 
-class shocHDU(HDUExtra, Messenger):
+class shocHDU(ImageHDU, Messenger):
 
     __shoc_hdu_types = {}
     filename_format = None
@@ -487,11 +487,11 @@ class shocHDU(HDUExtra, Messenger):
     def match_header(cls, header):
         return ('SERNO' in header)
 
+    def __getnewargs__(self):
+        self.logger.trace('unpickling: {}', self)
+        return (None, self.header, self.obstype)
+
     def __new__(cls, data, header, obstype=None, *args, **kws):
-        # Choose subtypes of `shocHDU` here - simpler than using `match_header`
-        # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
-        # hierarch keywords, so for SHOC we cannot tell if it's the old format
-        # header by checking those.
 
         # handle direct init here eg:   shocDarkHDU(data, header)
         if cls in cls.__shoc_hdu_types.values():
@@ -503,6 +503,9 @@ class shocHDU(HDUExtra, Messenger):
             obstype = header.get('OBSTYPE', '')
 
         # check if all the new keywords are present
+        # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
+        # hierarch keywords, so for SHOC we cannot tell if it's the old format
+        # header by checking those.
         if any(kw not in header for kw in HEADER_KEYS_MISSING_OLD):
             age = 'Old'
 
@@ -515,23 +518,23 @@ class shocHDU(HDUExtra, Messenger):
                 suffix = 'Master'
                 age = ''
 
-        #
+        # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         class_name = f'shoc{age}{kind}{suffix}'
-        cls.logger.debug(f'{obstype=}, {class_name=}')
+        cls.logger.trace(f'{class_name=}, {obstype=}')
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: {!r:}', obstype)
 
         # cls = cls.__shoc_hdu_types.get(class_name, cls)
-        # print(f'{class_name=}; {cls=}')
         return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
 
     def __init_subclass__(cls):
         cls.__shoc_hdu_types[cls.__name__] = cls
 
     def __init__(self, data=None, header=None, obstype=None, *args, **kws):
+
         # init PrimaryHDU
-        super().__init__(data=data, header=header, *args, **kws)
+        super().__init__(data, header, *args, **kws)
 
         #
         self.camera = f'SHOC{SERIAL_NRS.index(header["SERNO"]) + 1}'
@@ -1073,6 +1076,7 @@ class shocDarkMaster(shocMaster, shocDarkHDU):
 class shocFlatMaster(shocMaster, shocFlatHDU):
     pass
 
+
 # -------------------------- Pretty printing helpers ------------------------- #
 
 
@@ -1453,7 +1457,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             )
             run.provide_gps(gps)
 
-        # Switch naming convention for telscopes if desired
+        # Standardize naming convention for telscopes
         said = False
         for hdu in run:
             if hdu.telescope and (tel := get_tel(hdu.telescope)) != hdu.telescope:
@@ -1636,7 +1640,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if isinstance(other, shocCampaign) and len(other) == 1:
             other = other[0]
 
-        if not isinstance(other, PrimaryHDU):
+        if not isinstance(other, fits.PrimaryHDU):
             raise TypeError(f'Expected shocHDU, got {type(other)}')
 
         if len(other.shape) > 2:

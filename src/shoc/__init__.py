@@ -84,7 +84,7 @@ def over_starfield(text, width=None):
              '*': 10,
              '✷': 2,
              '☆': 1,}
-            #  '🪐': 1, # not monospace...
+            #  '🪐': 1, # NOTE: not monospace...
             #  '🌘': 1} 
 
     if width is None:
@@ -112,7 +112,7 @@ def make_banner(subtitle='', width=None, **style):
                           **locals(), version=__version__),
         ),
         width, **style
-    ).replace('🪐 ', '🪐')
+    ).replace('🪐 ', '🪐') # NOTE: not monospace...
 
 # register HDU classes (order is important!)
 register_hdu(shocHDU)
