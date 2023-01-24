@@ -94,6 +94,8 @@ class UnknownPointing(Exception):
 
 class _UnknownTime(Null):
 
+    # __array_interface__ = dict(shape=(1, ), typestr='O', version=3) 
+    
     def __str__(self):
         return motley.red('??')
 
@@ -104,6 +106,9 @@ class _UnknownTime(Null):
         return self
 
     def __sub__(self, _):
+        return self
+
+    def __rsub__(self, _):
         return self
 
     def __mul__(self, _):
@@ -362,7 +367,10 @@ class Date(time.Time):
     """
 
     def __repr__(self):
-        return self.strftime('%Y-%m-%d')
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error")
+            return self.strftime('%Y-%m-%d')
 
     def __format__(self, spec):
         if self.shape == () and ('d' in spec):
@@ -465,8 +473,8 @@ class shocTiming(LoggingMixin):
 
     def __getnewargs__(self):
         self.logger.trace('unpickling: {}', self)
-        return self.hdu, 
-    
+        return self.hdu,
+
     def __init__(self, hdu, **kws):
         """
         Create the timing interface for a shocHDU
@@ -623,7 +631,7 @@ class shocTiming(LoggingMixin):
     @lazyproperty
     def expose(self):
         """
-        Exposure time (integration time) for a single image
+        Exposure time (integration time) for a single image.
         """
         if self.trigger.is_gps_loop:
             # GPS triggered
@@ -637,6 +645,9 @@ class shocTiming(LoggingMixin):
             return exp
 
         return UnknownTime
+
+    exp = t_exp = exposure = expose
+    # """exposure time"""
 
     @lazyproperty
     def delta(self):
@@ -653,9 +664,6 @@ class shocTiming(LoggingMixin):
     #     """
     #     # TimeDelta has higher precision than Quantity
     #     return TimeDelta(self.interval, format='sec')
-
-    exp = t_exp = expose
-    """exposure time"""
 
     dead = DEAD_TIME
     """dead time (readout) between exposures in s"""

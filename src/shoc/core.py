@@ -265,6 +265,9 @@ class Binning:
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return (self.y == other.y) and (self.x == other.x)
+        elif isinstance(other, (tuple, list)):
+            return (self.y, self.x) == tuple(other)
+
         return False
 
     def __hash__(self):
@@ -469,10 +472,12 @@ class FilenameHelper(_FilenameHelper):
 
 class Messenger:
     # TODO: control through logger and Handlers etc
+    
     def message(self, message, sep='.'):
-        """Make a message tagged with class and function name"""
-        return (f'{self.__class__.__name__}{sep}{get_caller_name(2)} {Time.now()}: '
-                f'{message}')
+        """Make a message tagged with class and function name."""
+        return (f'{self.__class__.__name__}{sep}{get_caller_name(2)} '
+                f'{Time.now()}: {message}')
+
 
 # ------------------------------ HDU Subclasses ------------------------------ #
 
@@ -905,11 +910,8 @@ class shocHDU(ImageHDU, Messenger):
             return self
 
         # log some info
-        msg = self.message(
-            f'{func.__name__} of {self.nframes} images from {self.file.name}.',
-            sep='',
-        )
-        self.logger.opt(lazy=True).info('{}', lambda: remove_prefix(msg, self.__class__.__name__))
+        msg = f'{func.__name__} of {self.nframes} images from {self.file.name}.'
+        self.logger.info(msg)
 
         # combine across images
         kws.setdefault('axis', 0)
@@ -921,8 +923,7 @@ class shocHDU(ImageHDU, Messenger):
         # update header
         hdu.header['MASTER'] = True
         hdu.header['NCOMBINE'] = self.nframes
-        hdu.header.add_history(msg)
-
+        hdu.header.add_history(self.message(msg, sep=''))
         return hdu
 
     def subtract(self, hdu):
@@ -1036,7 +1037,7 @@ class shocDarkHDU(shocCalibrationHDU):
     # mean combining. In a nutshell, if all images are "clean", use mean
     # combining. If the images have mild to severe contamination by radiation
     # events such as cosmic rays, use the median or sigma clipping method."
-    # - Newberry
+    # - Newberry 91
 
     def __init__(self, data, header, obstype='dark', *args, **kws):
         super().__init__(data, header, obstype, *args, **kws)
@@ -1366,7 +1367,7 @@ class LatexWriter:
             ]{% inner spec
                 % Column headers (to appear on every page for page-split tables)
                 row{1-2} = {c, m, font=\bfseries},
-                rowhead = 2, 
+                rowhead = 2,
                 % rowfoot = 1,
                 colspec={
                 $colspec
@@ -1446,7 +1447,6 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
                 wrn.warn(f'Expected parent files {parent} to be loaded with '
                          f'this file. Timestamps for {hdu.file.name} will be '
                          f'wrong!!')
-
         # Check for external GPS timing file
         if run.missing_gps() and (gps := run.search_gps_file()):
             cls.logger.opt(colors=True).info(
@@ -1576,9 +1576,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False):
         from .match import MatchedObservations
 
-        return MatchedObservations(self, other)(
-            exact, closest, cutoffs, keep_nulls
-        )
+        return MatchedObservations(self, other)(exact, closest, cutoffs, keep_nulls)
 
     def combine(self, func=None, args=(), **kws):
         """
@@ -1872,15 +1870,13 @@ class shocObsGroups(Groups):
     def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
         print(self.pformat(titled, braces, vspace, **kws))
 
-    # def combine(self, func=None, args=(), **kws):
-    #     return self.calls.combine(func, args, **kws)
-
+    #
     combine = MethodVectorizer('combine')  # , convert=shocCampaign
     stack = MethodVectorizer('stack')  # , convert=shocCampaign
 
     def merge_combine(self, func=None, *args, **kws):
-        return \
-            self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
+        #
+        return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
     def select_by(self, **kws):
         out = self.__class__()

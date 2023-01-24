@@ -3,7 +3,7 @@
 # std
 import textwrap as txw
 import functools as ftl
-from collections import defaultdict, abc
+from collections import abc, defaultdict
 
 # third-party
 import numpy as np
@@ -12,6 +12,7 @@ import numpy as np
 import motley
 from motley.utils import Filler, GroupTitle
 from motley.formatters import ConditionalFormatter
+from recipes import op
 from recipes.sets import OrderedSet
 from recipes.logging import LoggingMixin
 
@@ -112,8 +113,8 @@ class MatchedObservations(LoggingMixin):
         Parameters
         ----------
         a, b: shocCampaign
-            `shocCampaign` instances from which observations will be picked to
-            match those in the other list
+            Observation runs from which matching files will be chosen to match
+            those in the other list.
         """
         data = dict(a=a, b=b)
         for k, v in data.items():
@@ -278,28 +279,30 @@ class MatchedObservations(LoggingMixin):
         g0, g1 = self.left, self.right
         tmp = g0.default_factory()
 
+        # set missing formatter
+        tmp.tabulate.formatters['timing.t0'] = op.AttrGetter('iso')
+
         # remove group-by keys that are same for all
         varies = [(g0.varies_by(key) | g1.varies_by(key)) for key in self.attrs]
         unvarying, = np.where(~np.array(varies))
         # use_key, = np.where(varies)
 
         # remove keys that runs are grouped into
-        attrs = OrderedSet(tmp.tabulate.attrs) - self.attrs
-        insert = defaultdict(list)
-        highlight = {}
-        # hlines = []
         n = 0
-        for i, key in enumerate(self.matches.keys()):
-            obs = g0[key]
-            other = g1[key]
-            use = varies[:len(key)]
-            display_keys = np.array(key, 'O')[use]
-            # headers = tmp.table.get_headers(np.array(group_id)[varies])
-            # info = dict(zip(headers, display_keys))
-
-            # insert group headers
-            group_header = GroupTitle(i, display_keys, group_header_style, '^')
-            insert[n].append((group_header, '<', 'underline'))
+        highlight = {}
+        insert = defaultdict(list)
+        head_keys = np.array([*g0.group_id[0]])
+        attrs = OrderedSet(tmp.tabulate.attrs) - self.attrs
+        for i, gid in enumerate(self.matches.keys()):
+            obs = g0[gid]
+            other = g1[gid]
+            use = varies[:len(gid)]
+            
+            # insert group header
+            head = [f'{key}={tmp.tabulate.formatters.get(key, str)(val)}'
+                    for key, val in zip(head_keys, np.array(gid, 'O')[use])]
+            head = GroupTitle(i, head, group_header_style, '^')
+            insert[n].append((head, '<', 'underline'))
 
             for j, (run, c) in enumerate([(other, no_match_style), (obs, '')]):
                 if run is None:
@@ -346,7 +349,7 @@ class MatchedObservations(LoggingMixin):
 
         # hack summary repr
         tbl.summary.items = dict(zip(np.take(list(self.attrs), unvarying),
-                                     np.take(key, unvarying)))
+                                     np.take(gid, unvarying)))
 
         # create delta table
         # if False:

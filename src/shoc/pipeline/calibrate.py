@@ -20,10 +20,10 @@ from recipes.string import pluralize
 from scrawl.image import ImageDisplay
 
 # relative
-from .. import calDB, shocCampaign, MATCH, CONFIG
+from .. import CONFIG, MATCH, calDB, shocCampaign
 
 
-COLOURS = CONFIG['colors']
+COLOURS = CONFIG.console.colors
 
 
 def calibrate(run, path=None, overwrite=False):
@@ -94,10 +94,6 @@ def find_cal(run, kind, path=None, ignore_masters=False):
     gcal = cal.group_by(*attx)
     need = set(run.required_calibration(kind))  # instrumental setups
 
-    # found_in_run = set(cal.attrs(*attx))
-    # found_db_master = found_db_raw = found_in_path = set()
-    # logger.info('Found {:d} calibration files in the run.', len(cal))
-
     # no calibration stacks in run. Look for pre-computed master images.
     masters = run.new_groups()
     masters.group_id = gid, {}
@@ -165,7 +161,7 @@ def compute_masters(stacks, kind, outpath=None, overwrite=False,
                                lambda: (pluralize(kind), len(stacks)))
 
     # all the stacks we need are here: combine
-    masters = stacks.merge_combine()  # get_combine_func(kind)
+    masters = stacks.merge_combine()
 
     # save fits
     masters.save(outpath or calDB.master[kind], overwrite=overwrite)

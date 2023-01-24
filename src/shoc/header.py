@@ -127,13 +127,11 @@ def headers_intersect(run, merge_histories=False):
                 # millions
                 warnings.filterwarnings('ignore', category=VerifyWarning)
                 out[get_new_key(key)] = vals.pop()
+        else:
+            logger.debug('Header key {} nonunique values: {}', key, list(vals))
 
     # merge comments / histories
-    merge_keys = ('COMMENT', )
-    if merge_histories:
-        merge_keys += ('HISTORY', )
-
-    for key in merge_keys:
+    for key in ('COMMENT', *(['HISTORY'] * merge_histories)):
         # each of these are list-like and thus not hashable.  Wrap in
         # tuple to make them hashable then merge.
         agg = OrderedSet()

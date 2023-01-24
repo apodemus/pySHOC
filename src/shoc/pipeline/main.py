@@ -14,15 +14,14 @@ import click
 import numpy as np
 import cmasher as cmr
 import more_itertools as mit
-import matplotlib.pyplot as plt
-from matplotlib import rc
 from loguru import logger
+from matplotlib import rcParams
 from mpl_multitab import MplMultiTab2D, QtWidgets
 
 # local
+import motley
 from motley.table import Table
 from pyxides.vectorize import repeat
-from obstools.image.registration import ImageRegister
 from scrawl.image import ImageDisplay, plot_image_grid
 from recipes import pprint as pp
 from recipes.lists import cosort
@@ -31,7 +30,7 @@ from recipes.dicts import DictNode, groupby
 from recipes.io import iter_files, show_tree
 
 # relative
-from .. import shocCampaign, shocHDU
+from .. import CONFIG, shocCampaign, shocHDU
 from ..core import get_tel
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree, logging
 from .calibrate import calibrate
@@ -62,15 +61,9 @@ ui = MplMultiTab2D(title='pySHOC Photometry Pipeline')
 
 # rc('savefig', directory=FIGPATH)
 # rc('text', usetex=False)
-rc('font', size=14)
-rc('axes', labelweight='bold')
-rc('image', cmap=cmr.voltage)
-
-
-# Sample thumbnails plot config
-thumbnail_kws = dict(figsize=(9, 7.5),
-                     title_kws={'size': 'xx-small'})
-
+rcParams.update({'font.size': 14,
+                 'axes.labelweight': 'bold',
+                 'image.cmap': CONFIG.plotting.cmap})
 
 # ---------------------------------------------------------------------------- #
 
@@ -90,12 +83,51 @@ thumbnail_kws = dict(figsize=(9, 7.5),
 
 def enable_local_caching(mapping):
     for func, filename in mapping.items():
-        cache = func.__cache__
-        cache.enable(filename)
+        func.__cache__.enable(filename)
+
+
+def check_files_exist(files_or_folder):
+    for path in files_or_folder:
+        if not Path(path).exists():
+            raise click.BadParameter(f'File does not exist: {path!s}')
+            # raise FileNotFoundError(path)
+
+
+def _resolve_files(files):
+    if not isinstance(files, str) and len(files) == 1:
+        files = files[0]
+
+    if not files:
+        return
+
+    if ',' in files:
+        files = list(map(Path, map(str.strip, files.split(','))))
+        check_files_exist(files)
+        return files
+
+    return list(iter_files(files))
+
+
+def resolve_files(ctx, param, files):
+
+    if files := _resolve_files(files):
+        return files
+
+    click.echo(f'Could not resolve any files for input {files}')
+    while True:
+        try:
+            return click.prompt(
+                'Please provide a folder or filename(s) for reduction',
+                value_proc=_resolve_files
+            )
+        except ValueError as err:
+            click.echo(str(err))
 
 
 def get_root(files_or_folder, _level=0):
-    files_or_folder = map(Path, files_or_folder)
+
+    files_or_folder = iter(files_or_folder)
+
     folders = groupby(files_or_folder, Path.is_dir)
     parent, *ambiguous = {*folders.get(True, ()),
                           *map(Path.parent.fget, folders.get(False, ()))}
@@ -107,12 +139,18 @@ def get_root(files_or_folder, _level=0):
     if _level < 2:
         return get_root(ambiguous, _level + 1)
 
-    raise ValueError('Please provide an output folder for results '
-                     'eg: -o path/to/results. ')
+    raise ValueError(
+        "Since the input files are from different system folders, I'm not "
+        'sure where to put the results directory (normally the default is the '
+        'input folder). Please provide an output folder for results '
+        'eg: -o /path/to/results'
+    )
 
 
 def resolve_output(output, root):
-    return output if Path(output).is_absolute() else (root / output).resolve()
+    out = o if (o := Path(output)).is_absolute() else (root / output).resolve()
+    logger.info('Output root: {}', out)
+    return out
 
 
 def resolve_aperture(_ctx, _param, value):
@@ -161,18 +199,19 @@ def check_required_info(run, telescope, target):
     # check if info required
     if telescope is None:  # default
         if None in set(run.attrs.telescope):
+            run.pprint()
             raise ValueError('Please provide telescope name, eg: -tel 74')
     else:
         info['telescope'] = telescope
 
     if target is None:
-        targets = set(run.attrs('target')) - {None}
+        targets = [*(set(run.attrs('target')) - {None})]
         if len(targets) > 1:
             raise ValueError(
                 f'Fits headers indicate multiple targets: {targets}. Only '
-                f'single target campaigns are currently supported by this '
-                f'pipeline. You can provide the target name eg: --target HU '
-                f'Aqr.'
+                'single target campaigns are currently supported by this data '
+                'reduction pipeline. If the fits headers are incorrect, you '
+                'may provide the target name eg: --target "HU Aqr".'
             )
 
         target, = targets
@@ -188,8 +227,9 @@ def check_required_info(run, telescope, target):
     return info
 
 
-def setup(root, output):
-    """Setup results folder."""
+def setup(root, output, use_cache):
+    """Setup results folder tree."""
+
     root = Path(root).resolve()
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
@@ -199,20 +239,25 @@ def setup(root, output):
     paths.create()
 
     # add log file sink
-    logger.add(paths.logs / 'main.log', level='DEBUG', format=logging.formatter,
-               colorize=False)
+    logger.add(paths.logs / 'main.log', level=CONFIG.logging.level.upper(),
+               format=logging.formatter, colorize=False)
 
-    # interactive gui save directory
-    rc('savefig', directory=paths.plots)
+    # matplotlib interactive gui save directory
+    rcParams['savefig.directory'] = paths.plots
 
     # update cache locations
     # shocHDU.get_sample_image.__cache__.disable()
     # shocHDU.detection.__call__.__cache__.disable()
-    enable_local_caching({
-        # get_hdu_image_products: paths.cache / 'image-samples.pkl'
-        shocHDU.get_sample_image:              paths.cache / 'sample-images.pkl',
-        shocHDU.detection._algorithm.__call__: paths.cache / 'source-regions.pkl'
-    })
+    if use_cache:
+        enable_local_caching({
+            # get_hdu_image_products: paths.cache / 'image-samples.pkl'
+            shocHDU.get_sample_image:              paths.cache / 'sample-images.pkl',
+            shocHDU.detection._algorithm.__call__: paths.cache / 'source-regions.pkl'
+        })
+
+    # set detection algorithm
+    if algorithm := CONFIG.detect.pop('algorithm', None):
+        shocHDU.detection.algorithm = algorithm
 
     return paths
 
@@ -220,8 +265,8 @@ def setup(root, output):
 # CLI
 # ---------------------------------------------------------------------------- #
 
-@click.command()
-@click.argument('files_or_folder', nargs=-1, type=click.Path())
+@click.command(context_settings=dict(help_option_names=['-h', '--help']))
+@click.argument('files_or_folder', nargs=-1, callback=resolve_files)
 # required=True)
 #
 @click.option('-o', '--output', type=click.Path(),
@@ -245,16 +290,17 @@ def setup(root, output):
                    'files are from multiple telescopes, update the headers '
                    'before running the pipeline.')
 #
-@click.option('--top', type=int, default=5,
+@click.option('-top', type=int, default=5,
               help='Number of brightest sources to do photometry on.')
 #
 @click.option('-aps', '--apertures',
-              metavar=f'[{"|".join(SUPPORTED_APERTURES)}]',
+              type=click.Choice(SUPPORTED_APERTURES, case_sensitive=False),
+              #   metavar=f'[{"|".join(SUPPORTED_APERTURES)}]',
               default='ragged', show_default=True,
               callback=resolve_aperture,
               help='The type(s) of apertures to use. If multiple '
-                   'types are specified, photometry will be done for each type '
-                   'concurrently. Abbreviated names are understood.')
+              'types are specified, photometry will be done for each type '
+              'concurrently. Abbreviated names are understood.')
 #
 @click.option('--sub', type=click.IntRange(),
               help='For single file mode, the slice of data cube to consider. '
@@ -269,16 +315,19 @@ def setup(root, output):
 #                    ' The default is to look for a file named `gps.sast` or '
 #                    '`gps.utc` in the processing root folder.')
 #
-@click.option('--overwrite/--xx', default=False,
+@click.option('-w', '--overwrite', flag_value=True,  default=False,
               help='Overwite pre-existing data products. Default is False => '
-              "Don't re-compute anything unless explicitly asked to. This "
-              'is safer and can save time on multiple re-runs of the '
-              'pipeline for the same data, but with a different kind of '
-              'aperture, etc.'
-              )
+                   "Don't re-compute anything unless explicitly asked to. This "
+                   'is safer and can save time on multiple re-runs of the '
+                   'pipeline for the same data, but with a different kind of '
+                   'aperture, etc.')
+#
+# @click.option('--cache/--no-cache', default=True,
+#               help='Enable/Disable caching.')
 #
 @click.option('--show/--no-show', default=True,
               help='Show figure windows.')
+#
 @click.version_option()
 def main(files_or_folder, output='./.pyshoc',
          target=None, telescope=None,
@@ -287,16 +336,18 @@ def main(files_or_folder, output='./.pyshoc',
     """
     Main entry point for pyshoc pipeline.
     """
-    if not files_or_folder:
-        sys.exit('Please provide a folder or filename(s) for reduction.')
 
     # ------------------------------------------------------------------------ #
     # resolve & check inputs
+    logger.section('Setup')
     root = get_root(files_or_folder)
     output = resolve_output(output, root)
+    logger.debug('--overwrite is {}', overwrite)
+    logger.info('Previous results will be {}.',
+                'overwritten' if overwrite else 'used if available')
 
     # setup
-    paths = setup(root, output)
+    paths = setup(root, output, not overwrite)
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and
@@ -320,7 +371,7 @@ def main(files_or_folder, output='./.pyshoc',
 
 
 def _main(paths, target, telescope, top, overwrite):
-    # 
+    #
     from obstools.phot import PhotInterface
 
     # ------------------------------------------------------------------------ #
@@ -348,7 +399,7 @@ def _main(paths, target, telescope, top, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Preview
-    logger.section('Preview')
+    logger.section('Overview')
 
     # Print summary table
     daily = run.group_by('date')
@@ -375,24 +426,24 @@ def _main(paths, target, telescope, top, overwrite):
     # ------------------------------------------------------------------------ #
     # Calibrate
     logger.section('Calibration')
-    
+
     # Compute/retrieve master dark/flat. Point science stacks to calibration
     # images.
-    gobj, mdark, mflat = calibrate(run, overwrite=False)
+    gobj, mdark, mflat = calibrate(run, overwrite=overwrite)
 
     # Sample images (after calibration)
     # thumbs = 'thumbnails-cal' not in map(op.attrgetter('stem'), products['Images']['Overview'])
     # thumbs = ''
     # if overwrite or not (paths.plots / 'thumbnails-cal.png').exists():
-    thumbs = 'thumbnails-cal.png'
-    sample_images_cal, segments = get_sample_images(run, paths, thumbs=thumbs)
+    # sample_images_cal, segments = \
+    get_sample_images(run, paths, thumbs=CONFIG.files.thumbs_cal, show_cutouts=False)
 
     # have to ensure we have single target here
     target = check_single_target(run)
 
     # Image Registration
     logger.section('Image Registration')
-    
+
     reg = run.coalign_dss(deblend=True, report=False)
     # source detections were reported above in `get_sample_images`
 
@@ -405,7 +456,7 @@ def _main(paths, target, telescope, top, overwrite):
                         # regions={'alpha': 0.35}, labels=False
                         )
     ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
-    savefig(mosaic.fig, 'mosaic.png', bbox_inches='tight')
+    savefig(mosaic.fig, CONFIG.files.mosaic, bbox_inches='tight')
 
     # txt, arrows = mos.mark_target(
     #     run[0].target,
@@ -430,13 +481,10 @@ def _main(paths, target, telescope, top, overwrite):
     logger.info('The following data products were created:\n{}',
                 show_tree(paths.output))
 
-    
     logger.section('Source Tracking')
-    
-    
+
     # logger.section('Photometry')
-    
-    
+
     # Launch the GUI
     ui.show()
     sys.exit(app.exec_())
@@ -496,8 +544,7 @@ def get_previous_data_products(run, paths):
     products['Images']['Samples'] = list(
         row_assign(run, sorted(paths.sample_images.iterdir())))
 
-    products['Images']['Source Regions'] = \
-        list(row_assign(run, paths.source_regions.iterdir()))
+    products['Images']['Source Regions'] = list(row_assign(run, paths.source_regions.iterdir()))
 
     products['Images']['Overview'] = [
         file for name in ('thumbnails', 'thumbnails-cal', 'mosaic')
@@ -536,7 +583,10 @@ class _show_products:
             return str(files)
 
         if isinstance(files, Path):
-            return str(files.relative_to(self.root))
+            if (s := str(files)).startswith(str(self.root)):
+                return str(files.relative_to(self.root))
+            else:
+                return s
 
         return files
 
@@ -598,7 +648,7 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
             detection = {}
 
         # Source detection.  reporting happens in `get_sample_images`
-        seg = hdu.detect(**detection, report=False)
+        seg = hdu.detect(**{**detection, 'report': False})
 
     if save_as:
         # def plot_sample
@@ -615,10 +665,10 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
 
 
 def get_sample_images(run, paths,
-                      stat='median', min_depth=5, n_intervals=1,
-                      detection=True,
-                      save_as='png',
-                      thumbs='thumbnails.png', overwrite=True):
+                      stat='median', min_depth=5, n_intervals=1, 
+                      detection=True, show_cutouts=True,
+                      save_as='png', thumbs=CONFIG.files.thumbs,
+                      overwrite=True):
 
     # sample = delayed(get_sample_image)
     # with Parallel(n_jobs=1) as parallel:
@@ -644,51 +694,57 @@ def get_sample_images(run, paths,
             samples[hdu.file.name].append(image)
             segments[hdu.file.name].append(seg)
 
-            if i == 0 and seg:
-                logger.info(
+            if show_cutouts and i == 0 and seg:
+                logger.opt(lazy=True).info(
                     'Source images:\n{}',
-                    seg.show.console.cutouts(
+                    lambda: seg.show.console.format_cutouts(
                         image,
                         extend=2,
-                        title=hdu.file.name,
+                        title=motley.format('Source image cutouts: '
+                                            '{hdu.file.name:|c}', hdu=hdu),
+                        title_align='<',
                         title_props=('B', '_'),
                         statistics=('flux', 'com', 'areas', 'roundness'))
                 )
 
     # plot thumbnails for sample image from first portion of each data cube
     if thumbs:
-        if not Path(thumbs).is_absolute():
+        if not (thumbs := Path(thumbs)).is_absolute():
             thumbs = paths.plots / thumbs
 
         # portion = mit.chunked(sample_images, len(run))
         image_grid = plot_image_grid(next(zip(*samples.values())),
                                      titles=run.files.names,
-                                     **thumbnail_kws)
-        ui.add_tab('Overview', thumbs.name, fig=image_grid.fig)
-        image_grid.fig.savefig(thumbs)  # image_grid.save ??
+                                     **CONFIG.plotting.thumbnails)
+        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
+        image_grid.figure.savefig(thumbs)  # image_grid.save ??
 
     return samples, segments
 
 
-def compute_preview_products(run, paths, overwrite):
+def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
     # get results from previous run
     products = get_previous_data_products(run, paths)
 
     # write fits headers to text
     # if not products['FITS']['headers']:
+
+    showfile = str
+    if str(paths.headers).startswith(str(paths.root)):
+        def showfile(h): return h.relative_to(paths.root)
+
     for hdu, headfile in itt.zip_longest(run, products['FITS']['headers']):
         if not headfile:
             headfile = paths.headers / f'{hdu.file.stem}.txt'
-            logger.info('Writing fits header to text at {}.',
-                        headfile.relative_to(paths.root))
+
+            logger.info('Writing fits header to text at {}.', showfile(headfile))
             hdu.header.totextfile(headfile)
 
     # thumbs = ''
     # if overwrite or not products['Images']['Overview']:
-    thumbs = 'thumbsnails.png'
 
     get_sample_images(run, paths, n_intervals=1,
-                      detection=False,
+                      detection=CONFIG.detect,
                       thumbs=thumbs, overwrite=overwrite)
 
     products['Images']['Samples'] = list(

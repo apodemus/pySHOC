@@ -5,8 +5,8 @@
 dev
 src/shoc/pipeline/new.py
 src/shoc/pipeline/parse.py
-src/shoc/banner/_banner.txt
-src/shoc/banner/*asciigram.txt
+src/shoc/pipeline/banner/_banner.txt
+src/shoc/pipeline/banner/*asciigram.txt
 
 
 

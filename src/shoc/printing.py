@@ -31,6 +31,7 @@ RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 #             child.make_branch((remove_prefix(w, base)
 #                                for w in filter(None, words)))
 
+
 def morph(dic, parent):
     for name, branch in dic.items():
         morph(branch, bash.BraceExpressionNode(name, parent))
@@ -42,6 +43,7 @@ def get_tree_ymd(names, depth=-1):
         mo = RGX_FILENAME.match(file)
         if mo is None:
             raise ValueError('Filename does not have YYYYMMDD.nnn pattern')
+
         parts = mo.groups()
         node = tree
         for part in parts:
@@ -68,8 +70,8 @@ class TreeRepr(PrettyPrinter, LoggingMixin):
             return get_tree_ymd(run.files.names, depth)
         except ValueError as err:
             self.logger.debug(
-                'Failed to get filename tree with YYYYMMDD.nnn pattern.\n$=%s\n'
-                'Building tree letter by letter', err
+                'Failed to get filename tree with YYYYMMDD.nnn pattern. '
+                'Building tree letter by letter'
             )
 
         # fully general partitioning of filenames

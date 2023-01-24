@@ -132,8 +132,9 @@ class CalDB(DB, LoggingMixin):
             close = False
         else:
             if not kind:
-                raise ValueError('Require `kind` to be given if no `new` '
-                                 'observations (shocCampaign) is provided.')
+                raise ValueError('Require `kind` parameter to be given if no `new` '
+                                 'observations (shocCampaign object) are '
+                                 'provided.')
 
             # look for new files
             new = self.get_new_files(kind, master)
@@ -194,10 +195,10 @@ class CalDB(DB, LoggingMixin):
         shocObsGroups
             The matched and grouped `shocCampaign`s.
         """
-        from .import CONFIG
-        
+        from . import CONFIG
+
         which = 'master' if master else 'raw'
-        name = motley.apply(f'{which} {kind}', CONFIG['colors'][kind])
+        name = motley.apply(f'{which} {kind}', CONFIG.console.colors[kind])
         logger.info("Searching for {:s} files in database:\n'{!s}'",
                     name, self[which][kind])
 
@@ -227,10 +228,14 @@ class CalDB(DB, LoggingMixin):
             i += 1
             logger.enable('obstools.campaign')
 
-            # set telescope from db folder path for flats
+            # set telescope / filter from db folder path for flats
             if kind == 'flat':
-                cal.attrs.set(telescope=mock.attrs('telescope'))
+                cal.attrs.set(telescope=mock.attrs.telescope,
+                              filters=mock.attrs.filters)
                 assert None not in cal.attrs.telescope
+
+        if n := sum(map(len, grp.values())):
+            logger.info('Found {:d} {:s} matching files in database.', n, name)
 
         if not_found:
             logger.info(
@@ -239,8 +244,5 @@ class CalDB(DB, LoggingMixin):
                 name, numbered(not_found, 'file'), pluralize('setup', not_found),
                 Table(not_found, col_headers=attrs, nrs=True)
             )
-        else:
-            logger.info('Found {:d} {:s} files.', sum(map(len, grp.values())),
-                        name)
 
         return grp

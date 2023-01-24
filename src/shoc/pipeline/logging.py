@@ -14,7 +14,11 @@ from loguru import logger
 
 # local
 import motley
+from recipes.misc import get_terminal_size
 from recipes.logging import RepeatMessageHandler, TimeDeltaFormatter
+
+# relative
+from .. import CONFIG
 
 
 # ---------------------------------------------------------------------------- #
@@ -38,18 +42,16 @@ def markup_to_list(tags):
     return tags.strip('<>').replace('><', ',')
 
 
-fmt = ('{elapsed:s|Bb}|'
-       '{{{name}.{function}:s|green}:{line:d|orange}: <52}|'
-       '{{level.name}: {message}:|{style}}')
 level_formats = {
-    level.name: motley.stylize(fmt,
+    level.name: motley.stylize(CONFIG.logging.format,
                                level=level,
                                style=markup_to_list(level.color))
     for level in logger._core.levels.values()
 }
 
 # custom level for sectioning
-level_formats['SECTION']= '\n{{level.name}: {message}\n:|B_}'
+level_formats['SECTION']= '\n'.join((CONFIG.logging.section, 
+                                     '━' * get_terminal_size()[0]))
 logger.level('SECTION', no=15)
 Logger = type(logger)
 Logger.section = partialmethod(Logger.log, 'SECTION')

@@ -11,22 +11,15 @@ from recipes import dicts
 from recipes.oo import AttributeAutoComplete
 
 # relative
-from .. import make_banner
+from .. import CONFIG
+from .banner import make_banner
 
 
-BANNER_WIDTH = None
-WELCOME_BANNER = make_banner(
-    'Photometry Pipeline', BANNER_WIDTH,
-    fg=('Bold', 'blue'),
-    linestyle=('-', 'B'),
-    linecolor=['teal']
-)
+WELCOME_BANNER = ''
+if CONFIG.console.banner.pop('show'):
+    WELCOME_BANNER = make_banner(**CONFIG.console.banner)
 
 # Folder structure for results
-OUTPUT_ROOT = '.pyshoc'
-SUMMARY_FILENAME = 'campaign-files.xlsx'
-PRODUCTS_FILENAME = 'data-products.xlsx'
-OBSLOG_FILENAME = 'observing-log.tex'
 _folders = (
     'headers',
     'logs',
@@ -36,7 +29,6 @@ _folders = (
     'phot/source_regions',
     '.cache'
 )
-
 
 SUPPORTED_APERTURES = [
     'square',
@@ -55,14 +47,14 @@ class FolderTree(AttributeAutoComplete):
 
     def __init__(self,
                  root, output=None, folders=_folders,
-                 obslog=OBSLOG_FILENAME,
-                 summary=SUMMARY_FILENAME,
-                 products=PRODUCTS_FILENAME):
+                 obslog=CONFIG.files.obslog,
+                 summary=CONFIG.files.summary,
+                 products=CONFIG.files.products):
         #
         self.root = Path(root).resolve()
 
         if output is None:
-            output = self.root / OUTPUT_ROOT
+            output = self.root / CONFIG.files.output_root
         self.output = output
 
         for folder in folders:
