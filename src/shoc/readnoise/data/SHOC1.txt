@@ -1,5 +1,5 @@
 # ClockFreq Mode PreAmpGain BitDepth Sensitivity ReadNoise ReadTime Saturation BaseLevel
-# (MHz)          (ADU / e)  (bits)   (e / ADU)   (e)       (μs)     (ADU)      (ADU)
+# (MHz)          (e / ADU)  (bits)   (e / ADU)   (e)       (μs)     (ADU)      (ADU)
 10          EM   2.4        14       24.35       60.14     0.1      5907       403
 10          EM   4.9        14       11.57       51.14     0.1      12431      390
 5           EM   1.0        14       52.4        82.27     5        2745       355
