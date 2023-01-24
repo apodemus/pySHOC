@@ -26,6 +26,7 @@ from pyxides.vectorize import MethodVectorizer, repeat
 from motley.table import Table
 from motley.utils import ALIGNMENT_MAP_INV, vstack
 from motley.table.attrs import AttrTable, AttrColumn as Column
+from obstools.image.noise import StdDev
 from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import (ImageHDU, PhotCampaign,
@@ -896,7 +897,7 @@ class shocHDU(ImageHDU, Messenger):
     # ------------------------------------------------------------------------ #
     # image arithmetic
 
-    def combine(self, func=None, args=(), **kws):
+    def combine(self, func=None, sigma_func=None, args=(), **kws):
         """
         Combine images in the stack by applying the function `func` along the
         0th dimension.
@@ -928,7 +929,19 @@ class shocHDU(ImageHDU, Messenger):
         # combine across images
         kws.setdefault('axis', 0)
         # TODO: self.calibrated ???
-        hdu = shocHDU(func(self.data, *args, **kws), self.header)
+        combined = func(self.data, *args, **kws)
+
+        hdu = shocHDU(combined, self.header)
+
+        if sigma_func is None:
+            if func is np.mean:
+                # hdu.noise_model valid
+                pass
+            elif func is np.median:
+                # std = self.noise_model.std_of_median(self.data)
+                hdu.noise_model = StdDev(self.noise_model.std_of_median(self.data))
+            else:
+                raise ValueError('Please provide function to compute uncertainty.')
 
         # FIXME: MasterHDU not used here :(((
 

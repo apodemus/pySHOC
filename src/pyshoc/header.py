@@ -317,7 +317,7 @@ class shocHeader(Header):
     #     """
     #     Readout noise, sensitivity, saturation as taken from ReadNoiseTable
     #     """
-    #     from shoc import readNoiseTable
+    #     from pyshoc import readNoiseTable
     #     return readNoiseTable.get_readnoise(self)
     #
     # def get_readnoise_dict(self, with_comments=False):

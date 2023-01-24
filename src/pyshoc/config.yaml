@@ -32,7 +32,7 @@ logging:
         {{{name}.{function}:s|green}:{line:d|orange}: <52}|
         {{level.name}: {message}:|{style}}
     section:
-        "\n\n{{level.name}: {message}:|B,darkslategray}"
+        "\n\n{{level.name}: {message}:|B,k}"
 
 # # ---------------------------------------------------------------------------- #
 # caching:
@@ -58,7 +58,7 @@ detect: &source_detection
 
 # ---------------------------------------------------------------------------- #
 # plotting
-plot: &plotting
+plotting: &plotting
     cmap:       cmr.voltage
 
     # Sample thumbnails plot config

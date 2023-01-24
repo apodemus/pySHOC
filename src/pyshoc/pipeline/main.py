@@ -436,7 +436,7 @@ def _main(paths, target, telescope, top, overwrite):
     # thumbs = ''
     # if overwrite or not (paths.plots / 'thumbnails-cal.png').exists():
     # sample_images_cal, segments = \
-    get_sample_images(run, paths, thumbs=CONFIG.files.thumbs_cal, show_cutouts=False)
+    get_sample_images(run, paths, thumbs=CONFIG.files.thumbs_cal)
 
     # have to ensure we have single target here
     target = check_single_target(run)
@@ -486,7 +486,11 @@ def _main(paths, target, telescope, top, overwrite):
     # logger.section('Photometry')
 
     # Launch the GUI
-    ui.show()
+    # ui.show()
+    
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/shoc/pipeline/main.py':490")
+    
     sys.exit(app.exec_())
 
 

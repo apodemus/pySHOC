@@ -3,10 +3,10 @@
 ###################################
 # old code
 dev
-src/shoc/pipeline/new.py
-src/shoc/pipeline/parse.py
-src/shoc/pipeline/banner/_banner.txt
-src/shoc/pipeline/banner/*asciigram.txt
+src/pyshoc/pipeline/new.py
+src/pyshoc/pipeline/parse.py
+src/pyshoc/pipeline/banner/_banner.txt
+src/pyshoc/pipeline/banner/*asciigram.txt
 
 
 
@@ -106,5 +106,5 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
-src/shoc/pipeline/logging_test.py
+src/pyshoc/pipeline/logging_test.py
 tests/J0354.py

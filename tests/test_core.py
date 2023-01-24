@@ -16,11 +16,11 @@ import numpy as np
 
 # local
 from recipes.testing import Expected, Throws, expected, mock, logger
-from shoc.header import Header
-from shoc.core import (shocCampaign, shocHDU, shocDarkHDU, shocFlatHDU,
+from pyshoc.header import Header
+from pyshoc.core import (shocCampaign, shocHDU, shocDarkHDU, shocFlatHDU,
                        shocDarkMaster, shocFlatMaster,
                        shocOldDarkHDU, shocOldFlatHDU)
-from shoc.timing import UnknownTimeException
+from pyshoc.timing import UnknownTimeException
 
 logger.setLevel(10)
 # TODO: old + new data all modes!!!
@@ -238,7 +238,7 @@ class TestCampaign:
     @pytest.mark.skip()
     def test_masters(self, run):
         from obstools.stats import median_scaled_median
-        from shoc import MATCH_FLATS, MATCH_DARKS, repeat
+        from pyshoc import MATCH_FLATS, MATCH_DARKS, repeat
 
         is_flat = np.array(run.calls('pointing_zenith'))
         run[is_flat].attrs.set(repeat(obstype='flat'))

@@ -79,7 +79,7 @@ def over_starfield(text, width=None, stars=None):
 
 
 def make_banner(format, subtitle='', width=None, **style):
-    from shoc import __version__
+    from pyshoc import __version__
 
     width = int(width or get_terminal_size()[0])
 
