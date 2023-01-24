@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 # third-party
 import numpy as np
 from scipy import stats
+from astropy.io import fits
 from astropy.time import Time
 from astropy.utils import lazyproperty
-from astropy.io import fits
 from astropy.coordinates import EarthLocation, SkyCoord
 
 # local
@@ -73,8 +73,15 @@ FOV = {'1.9m':     (1.29, 1.29),
        '1.0m':     (2.85, 2.85),
        'lesedi':   (5.7, 5.7)}
 FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer
-# fov30 = (3.73, 3.73) # decommissioned
-# '30': fov30, '0.75': fov30, # decommissioned
+
+# Diffraction limits for shoc in pixels assuming
+# green light:  λ = 5e-7
+PIXEL_SIZE = 13e-6  # m
+# FRATIOS = {'1.9m': 4.85 }
+DIFF_LIMS = {'1.9m':   1.22 * 5e-7 * 4.85 / PIXEL_SIZE}
+#    '1.0m':  ,
+#    'lesedi':,
+#    'salt':  }
 
 # Exact GPS locations of telescopes
 TEL_GEO_LOC = {'1.9m':   (20.81167,  -32.462167, 1822),
@@ -472,7 +479,7 @@ class FilenameHelper(_FilenameHelper):
 
 class Messenger:
     # TODO: control through logger and Handlers etc
-    
+
     def message(self, message, sep='.'):
         """Make a message tagged with class and function name."""
         return (f'{self.__class__.__name__}{sep}{get_caller_name(2)} '
@@ -638,6 +645,11 @@ class shocHDU(ImageHDU, Messenger):
         trg = self.header['OBJECT'] = str(name)
         if ot != trg:
             del self.coords
+
+    @property
+    def diffraction_limit(self):
+        # diffraction limit 1.9m
+        return DIFF_LIMS.get(self.telescope, None)
 
     def get_server_path(self):
         if None in (self.file.path, self.telescope):
@@ -1898,10 +1910,9 @@ class shocObsGroups(Groups):
 
     def _comap_method(self, other, name, handle_missing=raises(ValueError),
                       *args, **kws):
-        missing = set(self.keys()) - set(other.keys())
-        if missing:
+        if missing := set(self.keys()) - set(other.keys()):
             handle_missing(
-                f'Can\'t map method {name!r} over groups. Right group is '
+                f"Can't map method {name!r} over groups. Right group is "
                 f'missing values for the following '
                 + named_items(strings(missing), 'key', fmt='\n'.join)
             )
@@ -1949,14 +1960,15 @@ class shocObsGroups(Groups):
 
         darks = darks or {}
         flats = flats or {}
+
         for key, run in self.items():
             if run is None:
                 continue
 
-            bias = darks.get(key, keep)
+            dark = darks.get(key, keep)
             flat = flats.get(key, keep)
             for hdu in run:
-                hdu.set_calibrators(bias, flat)
+                hdu.set_calibrators(dark, flat)
 
     def save(self, folder=None, name_format=None, overwrite=False):
         # since this calls `save` on polymorphic class HDU / Campaign and 'save'
