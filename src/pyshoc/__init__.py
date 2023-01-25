@@ -2,7 +2,6 @@
 pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 """
 
-
 # std
 from importlib.metadata import PackageNotFoundError, version
 

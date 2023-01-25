@@ -256,7 +256,7 @@ def setup(root, output, use_cache):
         })
 
     # set detection algorithm
-    if algorithm := CONFIG.detect.pop('algorithm', None):
+    if algorithm := CONFIG.detection.pop('algorithm', None):
         shocHDU.detection.algorithm = algorithm
 
     return paths
@@ -372,7 +372,7 @@ def main(files_or_folder, output='./.pyshoc',
 
 def _main(paths, target, telescope, top, overwrite):
     #
-    from obstools.phot import PhotInterface
+    # from obstools.phot import PhotInterface
 
     # ------------------------------------------------------------------------ #
     # This is needed because rcParams['savefig.directory'] doesn't work for
@@ -444,7 +444,9 @@ def _main(paths, target, telescope, top, overwrite):
     # Image Registration
     logger.section('Image Registration')
 
-    reg = run.coalign_dss(deblend=True, report=False)
+    reg = run.coalign_survey(**CONFIG.register,
+                             **{**CONFIG.detection, 'report': False})
+    # deblend=True
     # source detections were reported above in `get_sample_images`
 
     # if not any(products['Images']['Source Regions']):
@@ -452,9 +454,7 @@ def _main(paths, target, telescope, top, overwrite):
     #     ui.save(filenames=[f'{hdu.file.stem}.regions.png' for hdu in run],
     #             path=paths.plots)
 
-    mosaic = reg.mosaic(cmap=cmr.chroma,
-                        # regions={'alpha': 0.35}, labels=False
-                        )
+    mosaic = reg.mosaic(CONFIG.plotting.mosaic)
     ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
     savefig(mosaic.fig, CONFIG.files.mosaic, bbox_inches='tight')
 
@@ -486,12 +486,12 @@ def _main(paths, target, telescope, top, overwrite):
     # logger.section('Photometry')
 
     # Launch the GUI
-    # ui.show()
-    
+    ui.show()
+
     from IPython import embed
     embed(header="Embedded interpreter at 'src/shoc/pipeline/main.py':490")
-    
-    sys.exit(app.exec_())
+
+    # sys.exit(app.exec_())
 
 
 # ---------------------------------------------------------------------------- #
@@ -526,7 +526,7 @@ def row_assign(run, filenames, reference=None, empty=''):
                 itt.groupby(sorted(mit.collapse(filenames)), basename)}
 
     if reference is None:
-        _, reference = cosort(run.attrs('t.t0'), run.files.stems)
+        _, reference = cosort(run.attrs('t.t0'), run.files.basenames)
 
     for base in reference:
         yield incoming.get(base, empty)
@@ -551,8 +551,8 @@ def get_previous_data_products(run, paths):
     products['Images']['Source Regions'] = list(row_assign(run, paths.source_regions.iterdir()))
 
     products['Images']['Overview'] = [
-        file for name in ('thumbnails', 'thumbnails-cal', 'mosaic')
-        if (file := paths.plots / f'{name}.png').exists()
+        file for name in (CONFIG.files.thumbs, CONFIG.files.thumbs_cal, CONFIG.files.mosaic)
+        if (file := paths.plots / name).exists()
     ]
     # [name] =
 
@@ -610,7 +610,10 @@ def write_data_products_xlsx(run, paths, filename=None):
     products = get_previous_data_products(run, paths)
     # duplicate Overview images so that they get merged below
     products['Images']['Overview'] = [products['Images']['Overview']] * len(run)
-
+    
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':613")
+    
     # create table
     tbl = Table.from_dict(products,
                           title='Data Products',
@@ -649,7 +652,7 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
     seg = None
     if detection:
         if detection is True:
-            detection = {}
+            detection = CONFIG.detection
 
         # Source detection.  reporting happens in `get_sample_images`
         seg = hdu.detect(**{**detection, 'report': False})
@@ -658,7 +661,8 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
         # def plot_sample
         im = ImageDisplay(image)
         if detection is not False:
-            seg.show.contours(im.ax, cmap=cmr.pride, lw=1.5)
+            seg.show.contours(im.ax, **CONFIG.plotting.segments.contours)
+            seg.show.labels(im.ax, **CONFIG.plotting.segments.labels)
 
         # add to figure manager
         ui.add_tab('Sample Images', hdu.file.name, fig=im.figure)
@@ -669,9 +673,12 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
 
 
 def get_sample_images(run, paths,
-                      stat='median', min_depth=5, n_intervals=1, 
+                      stat=CONFIG.samples.stat, 
+                      min_depth=CONFIG.samples.min_depth,
+                      n_intervals=CONFIG.samples.n_intervals,
                       detection=True, show_cutouts=True,
-                      save_as='png', thumbs=CONFIG.files.thumbs,
+                      save_as=CONFIG.samples.save_as, 
+                      thumbs=CONFIG.files.thumbs,
                       overwrite=True):
 
     # sample = delayed(get_sample_image)
@@ -683,6 +690,9 @@ def get_sample_images(run, paths,
     if save_as:
         _j_k = '.{j}-{k}' if n_intervals > 1 else ''
         filename_template = f'{{hdu.file.stem}}{_j_k}.{{save_as}}'
+
+    if detection:
+        logger.section('Source Detection')
 
     samples = defaultdict(list)
     segments = defaultdict(list)
@@ -747,8 +757,9 @@ def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
     # thumbs = ''
     # if overwrite or not products['Images']['Overview']:
 
-    get_sample_images(run, paths, n_intervals=1,
-                      detection=CONFIG.detect,
+    get_sample_images(run, paths,
+                      **CONFIG.samples,
+                      detection=CONFIG.detection,
                       thumbs=thumbs, overwrite=overwrite)
 
     products['Images']['Samples'] = list(

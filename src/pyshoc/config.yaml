@@ -31,47 +31,46 @@ logging:
         {elapsed:s|Bb}|
         {{{name}.{function}:s|green}:{line:d|orange}: <52}|
         {{level.name}: {message}:|{style}}
-    section:
-        "\n\n{{level.name}: {message}:|B,k}"
+    section: |
+
+        {0:━<{width}}
+        {{level.name}: {message}:|B,teal}
+        {0:━<{width}}
 
 # # ---------------------------------------------------------------------------- #
 # caching:
 #     regions:   
 
 # ---------------------------------------------------------------------------- #
-# source detection
-detect: &source_detection
-    algorithm:      sigma_threshold
-    npixels:        7
-    edge_cutoff:    3
-    monolithic:     False
-    dilate:         0
-    deblend:        False
-    report:
-        cutouts: True
-
-# aliases
-# detection:          *source_detection #
-# source_find:        *source_detection #
-# source_detection:   *source_detection #
-
-
-# ---------------------------------------------------------------------------- #
 # plotting
 plotting: &plotting
     cmap:       cmr.voltage
+
+    # samples:
+    segments:
+        contours: 
+            cmap:   cmr.pride
+            lw:     1.5
+
+        labels:
+            offset: [4, 4]
+            size:   10
+            color:  w
+            emboss: [1, k]
 
     # Sample thumbnails plot config
     thumbnails:
         # name: thumbnails.png
         figsize: [9, 7.5]
-        title: 
-            size: xx-small
+        title_kws:
+            color:      w
+            size:       xx-small
+            fontweight: bold
 
     mosaic:
         # name: mosaic.png
         cmap:   cmr.chroma
-    
+        alpha:  0.35
 
 # aliases
 # plots: *plotting
@@ -90,3 +89,43 @@ files: &filenames
     mosaic:         mosaic.png
 # aliases
 # filenames: *filenames
+
+
+# ---------------------------------------------------------------------------- #
+# sampled image stats
+samples:
+    stat:           median
+    min_depth:      5           # seconds
+    n_intervals:    1
+    save_as:        png
+    
+
+# ---------------------------------------------------------------------------- #
+# source detection
+detection: &source_detection
+    algorithm:      sigma_threshold
+    npixels:        5
+    edge_cutoff:    3
+    monolithic:     False
+    roundness:      !!python/tuple [0.5, 1.5]
+    dilate:         0
+    deblend:        True
+    report:
+        cutouts: True
+
+# aliases
+detect:          *source_detection #
+# source_find:        *source_detection #
+# source_detection:   *source_detection #
+
+# ---------------------------------------------------------------------------- #
+# image registration 
+register:
+    survey:         dss
+    fov_stretch:    1.5
+    plot:           False
+    fit_angle:      True
+    # sigma_fallback: 10
+
+# ---------------------------------------------------------------------------- #
+# source tracking 

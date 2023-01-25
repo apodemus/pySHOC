@@ -50,8 +50,8 @@ level_formats = {
 }
 
 # custom level for sectioning
-level_formats['SECTION']= '\n'.join((CONFIG.logging.section, 
-                                     '━' * get_terminal_size()[0]))
+level_formats['SECTION'] = motley.stylize(CONFIG.logging.section, '',
+                                          width=get_terminal_size()[0])
 logger.level('SECTION', no=15)
 Logger = type(logger)
 Logger.section = partialmethod(Logger.log, 'SECTION')
@@ -103,6 +103,7 @@ def format_exception(exc_info=None):
 
 # ---------------------------------------------------------------------------- #
 # Configure log sinks
+
 
 def config():
     # logger config
