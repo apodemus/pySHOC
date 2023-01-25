@@ -300,7 +300,7 @@ class MatchedObservations(LoggingMixin):
             
             # insert group header
             head = [f'{key}={tmp.tabulate.formatters.get(key, str)(val)}'
-                    for key, val in zip(head_keys, np.array(gid, 'O')[use])]
+                    for key, val in np.array((head_keys, gid), 'O').T[use]]
             head = GroupTitle(i, head, group_header_style, '^')
             insert[n].append((head, '<', 'underline'))
 
