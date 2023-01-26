@@ -45,11 +45,7 @@ APPERTURE_SYNONYMS = {'round': 'circle'}
 class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
 
-    def __init__(self,
-                 root, output=None, folders=_folders,
-                 obslog=CONFIG.files.obslog,
-                 summary=CONFIG.files.summary,
-                 products=CONFIG.files.products):
+    def __init__(self, root, output=None, folders=_folders, **output_files):
         #
         self.root = Path(root).resolve()
 
@@ -59,23 +55,22 @@ class FolderTree(AttributeAutoComplete):
 
         for folder in folders:
             path = output / folder
-            setattr(self, path.name.strip('.'), path)
+            setattr(self, path.name.lstrip('.'), path)
 
         # folders to create
         self.folders = dict(vars(self))
 
         # files
-        self.obslog = self.output / obslog
-        self.summary = self.output / summary
-        self.products = self.output / products
+        for alias, filename in output_files.items():
+            setattr(self, alias,  self.output / filename)
 
     def __repr__(self):
-        return dicts.pformat(vars(self), rhs=lambda x: x.relative_to(self.root))
+        return dicts.pformat(vars(self), rhs=self._relative_to_root)
 
     def _relative_to_root(self, path):
-        if path is self.root:
-            return str(path)
-        return f'$root/{path.relative_to(self.root)}'
+        return str(path.relative_to(self.root)
+                   if self.root in path.parents
+                   else path)
 
     def create(self):
         for _, path in self.folders.items():

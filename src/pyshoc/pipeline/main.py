@@ -40,9 +40,8 @@ from .calibrate import calibrate
 # setup logging for pipeline
 logging.config()
 
-# ---------------------------------------------------------------------------- #
-#
-# ImageRegister.refining = False
+
+CONSOLE_CUTOUTS_TITLE = motley.stylize(CONFIG.console.cutouts.pop('title'))
 
 # ---------------------------------------------------------------------------- #
 
@@ -235,7 +234,11 @@ def setup(root, output, use_cache):
         raise NotADirectoryError(str(root))
 
     #
-    paths = FolderTree(root, output)
+    paths = FolderTree(root, output,
+                       obslog=CONFIG.files.obslog,
+                       summary=CONFIG.files.summary,
+                       products=CONFIG.files.products,
+                       reg_params=CONFIG.files.reg_params)
     paths.create()
 
     # add log file sink
@@ -587,11 +590,9 @@ class _show_products:
             return str(files)
 
         if isinstance(files, Path):
-            if (s := str(files)).startswith(str(self.root)):
-                return str(files.relative_to(self.root))
-            else:
-                return s
-
+            return str(files.relative_to(self.root)
+                       if self.root in files.parents
+                       else files)
         return files
 
 
