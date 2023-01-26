@@ -611,10 +611,7 @@ def write_data_products_xlsx(run, paths, filename=None):
     products = get_previous_data_products(run, paths)
     # duplicate Overview images so that they get merged below
     products['Images']['Overview'] = [products['Images']['Overview']] * len(run)
-    
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':613")
-    
+
     # create table
     tbl = Table.from_dict(products,
                           title='Data Products',
@@ -674,11 +671,11 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
 
 
 def get_sample_images(run, paths,
-                      stat=CONFIG.samples.stat, 
+                      stat=CONFIG.samples.stat,
                       min_depth=CONFIG.samples.min_depth,
                       n_intervals=CONFIG.samples.n_intervals,
                       detection=True, show_cutouts=True,
-                      save_as=CONFIG.samples.save_as, 
+                      save_as=CONFIG.samples.save_as,
                       thumbs=CONFIG.files.thumbs,
                       overwrite=True):
 
@@ -713,13 +710,8 @@ def get_sample_images(run, paths,
                 logger.opt(lazy=True).info(
                     'Source images:\n{}',
                     lambda: seg.show.console.format_cutouts(
-                        image,
-                        extend=2,
-                        title=motley.format('Source image cutouts: '
-                                            '{hdu.file.name:|c}', hdu=hdu),
-                        title_align='<',
-                        title_props=('B', '_'),
-                        statistics=('flux', 'com', 'areas', 'roundness'))
+                        image, title=CONSOLE_CUTOUTS_TITLE.format(hdu=hdu),
+                        **CONFIG.console.cutouts)
                 )
 
     # plot thumbnails for sample image from first portion of each data cube

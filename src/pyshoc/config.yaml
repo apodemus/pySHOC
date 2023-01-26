@@ -15,13 +15,20 @@ console:
             {{version:|Bk}: >{width}}
         subtitle:   Photometry Pipeline
         fg:         [bold, blue]
-        linestyle:  ['-', 'bold']
+        linestyle:  [-, bold]
         linecolor:  teal
         width:      Null
 
     colors:
         flat: cornflowerblue
         dark: tan
+
+    cutouts: 
+        title:          "Source image cutouts: {hdu.file.name:|c}"
+        title_align:    <
+        title_props:    [B, _]
+        extend:         2
+        statistics:     [com, flux, areas, roundness]
 
 # ---------------------------------------------------------------------------- #
 # logging
@@ -86,6 +93,7 @@ files: &filenames
     obslog:         observing-log.tex
     thumbs:         thumbnails.png
     thumbs_cal:     thumbnails-cal.png
+    reg_params:     reg-params.npy
     mosaic:         mosaic.png
 # aliases
 # filenames: *filenames
@@ -107,7 +115,7 @@ detection: &source_detection
     npixels:        5
     edge_cutoff:    3
     monolithic:     False
-    roundness:      !!python/tuple [0.5, 1.5]
+    roundness:      !!python/tuple [0.25, 1.75]
     dilate:         0
     deblend:        True
     report:
