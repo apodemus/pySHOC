@@ -27,7 +27,7 @@ console:
         title:          "Source image cutouts: {hdu.file.name:|c}"
         title_align:    <
         title_props:    [B, _]
-        extend:         2
+        extend:         3
         statistics:     [com, flux, areas, roundness]
 
 # ---------------------------------------------------------------------------- #
@@ -93,6 +93,7 @@ files: &filenames
     obslog:         observing-log.tex
     thumbs:         thumbnails.png
     thumbs_cal:     thumbnails-cal.png
+    reg:            reg.pkl
     reg_params:     reg-params.npy
     mosaic:         mosaic.png
 # aliases
@@ -103,8 +104,9 @@ files: &filenames
 # sampled image stats
 samples:
     stat:           median
-    min_depth:      5           # seconds
+    min_depth:      10          # minimun simulated integration time (seconds)
     n_intervals:    1
+    subset:         Null        # eg: median sample from first 1000
     save_as:        png
     
 
@@ -114,9 +116,10 @@ detection: &source_detection
     algorithm:      sigma_threshold
     npixels:        5
     edge_cutoff:    3
+    edge_fraction:  0.5
     monolithic:     False
-    roundness:      !!python/tuple [0.25, 1.75]
-    dilate:         0
+    roundness:      Null    # !!python/tuple [0.5, 1.75]
+    dilate:         2
     deblend:        True
     report:
         cutouts: True
@@ -130,10 +133,12 @@ detect:          *source_detection #
 # image registration 
 register:
     survey:         dss
-    fov_stretch:    1.5
+    fov_stretch:    1.65
     plot:           False
     fit_angle:      True
     # sigma_fallback: 10
 
 # ---------------------------------------------------------------------------- #
 # source tracking 
+tracking:
+    # com

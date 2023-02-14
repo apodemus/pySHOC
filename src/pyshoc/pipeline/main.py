@@ -238,6 +238,7 @@ def setup(root, output, use_cache):
                        obslog=CONFIG.files.obslog,
                        summary=CONFIG.files.summary,
                        products=CONFIG.files.products,
+                       reg=CONFIG.files.reg,
                        reg_params=CONFIG.files.reg_params)
     paths.create()
 
@@ -670,20 +671,20 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
     return image, seg
 
 
-def get_sample_images(run, paths,
-                      stat=CONFIG.samples.stat,
-                      min_depth=CONFIG.samples.min_depth,
-                      n_intervals=CONFIG.samples.n_intervals,
-                      detection=True, show_cutouts=True,
-                      save_as=CONFIG.samples.save_as,
-                      thumbs=CONFIG.files.thumbs,
-                      overwrite=True):
+def get_sample_images(run, paths, detection=True, show_cutouts=True,
+                      thumbs=CONFIG.files.thumbs, overwrite=True):
 
     # sample = delayed(get_sample_image)
     # with Parallel(n_jobs=1) as parallel:
     # return parallel
 
-    # stat='median', min_depth=5, n_intervals=3,
+    # Get params from config
+    stat = CONFIG.samples.stat
+    min_depth = CONFIG.samples.min_depth
+    n_intervals = CONFIG.samples.n_intervals
+    subset = CONFIG.samples.subset
+    save_as = CONFIG.samples.save_as
+
     filename_template = ''
     if save_as:
         _j_k = '.{j}-{k}' if n_intervals > 1 else ''
@@ -751,8 +752,7 @@ def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
     # if overwrite or not products['Images']['Overview']:
 
     get_sample_images(run, paths,
-                      **CONFIG.samples,
-                      detection=CONFIG.detection,
+                      detection=False,
                       thumbs=thumbs, overwrite=overwrite)
 
     products['Images']['Samples'] = list(
