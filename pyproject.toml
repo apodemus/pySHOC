@@ -1,24 +1,27 @@
 [project]
-name = "{name}"
-description = "{description}"
+name = "pyshoc"
+description = "Tools for data analysis and reduction of data from the Sutherland High Speed Optical Cameras (SHOC). 📷🔭"
 authors = [
     {name = "Hannes Breytenbach", email = "hannes@saao.ac.za"}
 ]
 dynamic = ["version", "readme"]
 license = {text = "MIT"}
-requires-python = ">={py_min_version}"
+requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Education",
-    "Programming Language :: Python :: {py_min_version}",
+    "Programming Language :: Python :: 3.8",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
 
+[project.scripts]
+pyshoc = "pyshoc.pipeline.run:main"
+
 [project.urls]
-"Homepage" = "{url}"
-"Bug Tracker" = "{url}/issues"
+"Homepage" = "https://github.com/astromancer/pyshoc"
+"Bug Tracker" = "https://github.com/astromancer/pyshoc/issues"
 
 [project.optional-dependencies]
 tests = ["pytest"]
@@ -32,16 +35,18 @@ requires = [
     "six"
 ]
 
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+pyshoc = ["*.yaml"]
+
 [tool.setuptools.dynamic]
 readme = {file = "README.md", content-type = "text/markdown"}
-version = {attr = "{name}._version.version"}
+version = {attr = "pyshoc._version.version"}
 
 [tool.setuptools_scm]
-write_to = "src/{name}/_version.py"
+write_to = "src/pyshoc/_version.py"
 
 [tool.tox]
 legacy_tox_ini = """

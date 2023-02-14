@@ -4,18 +4,13 @@
 Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 """
 
-# This just runs the `main` function from `pyshoc.pipeline.main` in the event
-# that the pipeline is invoked via
-# >>> python shoc/pipeline /path/to/data
-
+# This will print the welcome banner and run the `main` function from
+# `pyshoc.pipeline.main` in the event that the pipeline is invoked via
+# >>> python pyshoc/pipeline /path/to/data
 
 if __name__ == '__main__':
-    from pyshoc.pipeline import WELCOME_BANNER
+    # This will print the banner
+    from pyshoc.pipeline.run import main
 
-    # say hello
-    print(WELCOME_BANNER)
-
-#
-    from pyshoc.pipeline.main import main
-
-    main.main()
+    # run the pipeline
+    main()

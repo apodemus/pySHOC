@@ -15,6 +15,8 @@ from .. import CONFIG
 from .banner import make_banner
 
 
+
+# ---------------------------------------------------------------------------- #
 WELCOME_BANNER = ''
 if CONFIG.console.banner.pop('show'):
     WELCOME_BANNER = make_banner(**CONFIG.console.banner)
@@ -41,6 +43,7 @@ SUPPORTED_APERTURES = [
 ]
 APPERTURE_SYNONYMS = {'round': 'circle'}
 
+# ---------------------------------------------------------------------------- #
 
 class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
