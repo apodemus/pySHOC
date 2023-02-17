@@ -12,22 +12,20 @@ from collections import defaultdict
 # third-party
 import click
 import numpy as np
-import cmasher as cmr
 import more_itertools as mit
 from loguru import logger
 from matplotlib import rcParams
-from mpl_multitab import MplMultiTab2D, QtWidgets
+from mpl_multitab import MplMultiTab, QtWidgets
 
 # local
 import motley
 from motley.table import Table
 from pyxides.vectorize import repeat
+from obstools.modelling import int2tup
 from scrawl.image import ImageDisplay, plot_image_grid
-from recipes import pprint as pp
-from recipes.lists import cosort
 from recipes.string import most_similar
 from recipes.dicts import DictNode, groupby
-from recipes.io import iter_files, show_tree
+from recipes import cosort, io, pprint as pp
 
 # relative
 from .. import CONFIG, shocCampaign, shocHDU
@@ -47,7 +45,7 @@ CONSOLE_CUTOUTS_TITLE = motley.stylize(CONFIG.console.cutouts.pop('title'))
 
 # GUI
 app = QtWidgets.QApplication(sys.argv)
-ui = MplMultiTab2D(title='pySHOC Photometry Pipeline')
+ui = MplMultiTab(title='pySHOC Photometry Pipeline GUI', pos='N')
 
 
 # t0 = time.time()
@@ -104,7 +102,7 @@ def _resolve_files(files):
         check_files_exist(files)
         return files
 
-    return list(iter_files(files))
+    return list(io.iter_files(files))
 
 
 def resolve_files(ctx, param, files):
@@ -561,9 +559,9 @@ def get_previous_data_products(run, paths):
     # [name] =
 
     # Light curves
-    # cmb_txt = iter_files(paths.phot, 'txt')
-    individual = iter_files(paths.phot, '*.*.{txt,npy}', recurse=True)
-    combined = iter_files(paths.phot, '*.{txt,npy}')
+    # cmb_txt = io.iter_files(paths.phot, 'txt')
+    individual = io.iter_files(paths.phot, '*.*.{txt,npy}', recurse=True)
+    combined = io.iter_files(paths.phot, '*.{txt,npy}')
     products['Light Curves']['Raw'] = [
         (*indiv, *cmb) for indiv, cmb in
         zip(row_assign(run, individual, empty=['']),
@@ -637,8 +635,12 @@ def write_data_products_xlsx(run, paths, filename=None):
                        merge_unduplicate=('data', 'headers'))
 
 
-def intervals(hdu, n_intervals):
+def get_intervals(hdu, subset, n_intervals):
     n = hdu.nframes
+    if subset:
+        yield slice(*int2tup(subset)).indices(n)[:2]
+        return
+
     yield from mit.pairwise(range(0, n + 1, n // n_intervals))
 
 
@@ -656,6 +658,7 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
         # Source detection.  reporting happens in `get_sample_images`
         seg = hdu.detect(**{**detection, 'report': False})
 
+    fig = None
     if save_as:
         # def plot_sample
         im = ImageDisplay(image)
@@ -663,12 +666,11 @@ def get_hdu_image_products(hdu, sampling, detection, save_as):
             seg.show.contours(im.ax, **CONFIG.plotting.segments.contours)
             seg.show.labels(im.ax, **CONFIG.plotting.segments.labels)
 
-        # add to figure manager
-        ui.add_tab('Sample Images', hdu.file.name, fig=im.figure)
+        #
         im.save(save_as)  # ['image-regions']
-        # plt.close(im.figure)
+        fig = im.figure
 
-    return image, seg
+    return image, seg, fig
 
 
 def get_sample_images(run, paths, detection=True, show_cutouts=True,
@@ -687,7 +689,7 @@ def get_sample_images(run, paths, detection=True, show_cutouts=True,
 
     filename_template = ''
     if save_as:
-        _j_k = '.{j}-{k}' if n_intervals > 1 else ''
+        _j_k = '.{j}-{k}' if (n_intervals > 1) or subset else ''
         filename_template = f'{{hdu.file.stem}}{_j_k}.{{save_as}}'
 
     if detection:
@@ -695,17 +697,21 @@ def get_sample_images(run, paths, detection=True, show_cutouts=True,
 
     samples = defaultdict(list)
     segments = defaultdict(list)
+    figures = DictNode()
     for hdu in run:
-        for i, (j, k) in enumerate(intervals(hdu, n_intervals)):
+        for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
             filename = paths.sample_images / filename_template.format(**locals())
             if filename.exists() and not overwrite:
                 filename = ''
 
-            image, seg = get_hdu_image_products(
+            image, seg, fig = get_hdu_image_products(
                 hdu, (stat, min_depth, (j, k)), detection, filename
             )
             samples[hdu.file.name].append(image)
             segments[hdu.file.name].append(seg)
+            if fig:
+                year, day = str(hdu.t.date_for_filename).split('-', 1)
+                figures[year][day][hdu.file.nr] = fig
 
             if show_cutouts and i == 0 and seg:
                 logger.opt(lazy=True).info(
@@ -715,6 +721,10 @@ def get_sample_images(run, paths, detection=True, show_cutouts=True,
                         **CONFIG.console.cutouts)
                 )
 
+    # add figures to ui
+    if figures:
+        ui.add_group('Sources', figures)
+    
     # plot thumbnails for sample image from first portion of each data cube
     if thumbs:
         if not (thumbs := Path(thumbs)).is_absolute():
