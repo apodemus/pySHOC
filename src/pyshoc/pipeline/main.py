@@ -21,8 +21,9 @@ from mpl_multitab import MplMultiTab, QtWidgets
 import motley
 from motley.table import Table
 from pyxides.vectorize import repeat
+from scrawl.image import plot_image_grid
+from obstools.image import SkyImage
 from obstools.modelling import int2tup
-from scrawl.image import ImageDisplay, plot_image_grid
 from recipes.string import most_similar
 from recipes.dicts import DictNode, groupby
 from recipes import cosort, io, pprint as pp
@@ -247,6 +248,10 @@ def setup(root, output, use_cache):
     # matplotlib interactive gui save directory
     rcParams['savefig.directory'] = paths.plots
 
+    # set detection algorithm
+    if algorithm := CONFIG.detection.pop('algorithm', None):
+        shocHDU.detection.algorithm = algorithm
+
     # update cache locations
     # shocHDU.get_sample_image.__cache__.disable()
     # shocHDU.detection.__call__.__cache__.disable()
@@ -256,10 +261,6 @@ def setup(root, output, use_cache):
             shocHDU.get_sample_image:              paths.cache / 'sample-images.pkl',
             shocHDU.detection._algorithm.__call__: paths.cache / 'source-regions.pkl'
         })
-
-    # set detection algorithm
-    if algorithm := CONFIG.detection.pop('algorithm', None):
-        shocHDU.detection.algorithm = algorithm
 
     return paths
 
@@ -434,29 +435,46 @@ def _main(paths, target, telescope, top, overwrite):
     gobj, mdark, mflat = calibrate(run, overwrite=overwrite)
 
     # Sample images (after calibration)
-    # thumbs = 'thumbnails-cal' not in map(op.attrgetter('stem'), products['Images']['Overview'])
-    # thumbs = ''
-    # if overwrite or not (paths.plots / 'thumbnails-cal.png').exists():
+    # if overwrite or CONFIG.files.thumbs_cal.exists():
     # sample_images_cal, segments = \
-    get_sample_images(run, paths, thumbs=CONFIG.files.thumbs_cal)
+    samples_cal = get_sample_images(run, paths)
+    show_sample_images(run, paths, samples_cal, None, CONFIG.files.thumbs_cal,
+                       overwrite)
 
     # have to ensure we have single target here
     target = check_single_target(run)
 
     # Image Registration
     logger.section('Image Registration')
+    # #
+    if False:  # paths.reg.exists() and not overwrite:
+        logger.info('Loading image register from file: {}.', paths.reg)
+        reg = io.deserialize(paths.reg)
+        reg.params = np.load(paths.reg_params)
+    else:
+        # align
+        # note: source detections were reported above in `get_sample_images`
+        reg = run.coalign_survey(**CONFIG.register,
+                                 **{**CONFIG.detection, 'report': False})
 
-    reg = run.coalign_survey(**CONFIG.register,
-                             **{**CONFIG.detection, 'report': False})
-    # deblend=True
-    # source detections were reported above in `get_sample_images`
+        # save
+        logger.info('Saving image register at: {}.', paths.reg)
+        reg.params = np.load(paths.reg_params)
+        io.serialize(paths.reg, reg)
+        # np.save(paths.reg_params, reg.params)
+
+    # from IPython import embed
+    # embed(header="Embedded interpreter at 'src/shoc/pipeline/main.py':490")
 
     # if not any(products['Images']['Source Regions']):
     #     ui = reg.plot_detections()
     #     ui.save(filenames=[f'{hdu.file.stem}.regions.png' for hdu in run],
     #             path=paths.plots)
 
-    mosaic = reg.mosaic(CONFIG.plotting.mosaic)
+    # reg.plot_clusters(nrs=True)
+
+    # mosaic
+    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
     ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
     savefig(mosaic.fig, CONFIG.files.mosaic, bbox_inches='tight')
 
@@ -481,18 +499,28 @@ def _main(paths, target, telescope, top, overwrite):
     write_data_products_xlsx(run, paths)
 
     logger.info('The following data products were created:\n{}',
-                show_tree(paths.output))
+                io.show_tree(paths.output))
 
-    logger.section('Source Tracking')
+    # logger.section('Source Tracking')
+    # logger.section('Quick Phot')
+
+    # for hdu, (img, labels) in zip(run, itt.islice(zip(reg, reg.labels_per_image), 1, None)):
+    #     # back transform to image coords
+    #     coords = (reg.xy[sorted(labels)] - reg.params[1, :2]) / reg.rscale[1]
+
+    #     tracker = SourceTracker(coords, img.seg.circularize().dilate(2))
+    #     tracker.init_memory(hdu.nframes, DATAPATH / 'shoc/phot/' / hdu.file.stem, overwrite=True)
+    #
+    # tracker.run(hdu.calibrated)
 
     # logger.section('Photometry')
 
     # Launch the GUI
     ui.show()
+    app.exec_()
 
     from IPython import embed
-    embed(header="Embedded interpreter at 'src/shoc/pipeline/main.py':490")
-
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':517")
     # sys.exit(app.exec_())
 
 
@@ -645,99 +673,111 @@ def get_intervals(hdu, subset, n_intervals):
 
 
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
-def get_hdu_image_products(hdu, sampling, detection, save_as):
+def plot_image(fig, *indices, image, save_as=None, overwrite=False):
 
-    # NOTE: caching disabled for line below in `setup`
-    image = hdu.get_sample_image(*sampling)
+    # image = samples[indices]
+    art = image.plot(regions=CONFIG.plotting.segments.contours,
+                     labels=CONFIG.plotting.segments.labels)
 
-    seg = None
-    if detection:
-        if detection is True:
-            detection = CONFIG.detection
-
-        # Source detection.  reporting happens in `get_sample_images`
-        seg = hdu.detect(**{**detection, 'report': False})
-
-    fig = None
     if save_as:
-        # def plot_sample
-        im = ImageDisplay(image)
-        if detection is not False:
-            seg.show.contours(im.ax, **CONFIG.plotting.segments.contours)
-            seg.show.labels(im.ax, **CONFIG.plotting.segments.labels)
 
-        #
-        im.save(save_as)  # ['image-regions']
-        fig = im.figure
-
-    return image, seg, fig
+        art.image.save(save_as)  # ['image-regions']
+    # return im.figure
 
 
-def get_sample_images(run, paths, detection=True, show_cutouts=True,
-                      thumbs=CONFIG.files.thumbs, overwrite=True):
+def _get_hdu_samples(hdu, detection, show_cutouts):
+
+    stat = CONFIG.samples.stat
+    min_depth = CONFIG.samples.min_depth
+    n_intervals = CONFIG.samples.n_intervals
+    subset = CONFIG.samples.subset
+
+    samples = defaultdict(list)
+    for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
+        # Source detection. Reporting happens below.
+        # NOTE: caching enabled for line below in `setup`
+        image = SkyImage.from_hdu(hdu, stat, min_depth, (j, k),
+                                  **{**detection, 'report': False})
+
+        if show_cutouts and i == 0 and image.seg:
+            logger.opt(lazy=True).info(
+                'Source images:\n{}',
+                lambda: image.seg.show.console.format_cutouts(
+                    image, title=CONSOLE_CUTOUTS_TITLE.format(hdu=hdu),
+                    **CONFIG.console.cutouts)
+            )
+
+        yield (j, k), image
+
+
+def get_sample_images(run, paths, detection=True, overwrite=False, show_cutouts=False):
 
     # sample = delayed(get_sample_image)
     # with Parallel(n_jobs=1) as parallel:
     # return parallel
 
     # Get params from config
-    stat = CONFIG.samples.stat
-    min_depth = CONFIG.samples.min_depth
-    n_intervals = CONFIG.samples.n_intervals
-    subset = CONFIG.samples.subset
-    save_as = CONFIG.samples.save_as
-
-    filename_template = ''
-    if save_as:
-        _j_k = '.{j}-{k}' if (n_intervals > 1) or subset else ''
-        filename_template = f'{{hdu.file.stem}}{_j_k}.{{save_as}}'
-
+    detection = detection or {}
     if detection:
         logger.section('Source Detection')
 
-    samples = defaultdict(list)
-    segments = defaultdict(list)
-    figures = DictNode()
+        if detection is True:
+            detection = CONFIG.detection
+
+    samples = defaultdict(dict)
     for hdu in run:
-        for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
-            filename = paths.sample_images / filename_template.format(**locals())
-            if filename.exists() and not overwrite:
-                filename = ''
+        for interval, image in _get_hdu_samples(
+                hdu, detection, show_cutouts):
+            samples[hdu.file.name][interval] = image
 
-            image, seg, fig = get_hdu_image_products(
-                hdu, (stat, min_depth, (j, k)), detection, filename
-            )
-            samples[hdu.file.name].append(image)
-            segments[hdu.file.name].append(seg)
-            if fig:
-                year, day = str(hdu.t.date_for_filename).split('-', 1)
-                figures[year][day][hdu.file.nr] = fig
+    return samples
 
-            if show_cutouts and i == 0 and seg:
-                logger.opt(lazy=True).info(
-                    'Source images:\n{}',
-                    lambda: seg.show.console.format_cutouts(
-                        image, title=CONSOLE_CUTOUTS_TITLE.format(hdu=hdu),
-                        **CONFIG.console.cutouts)
-                )
 
-    # add figures to ui
-    if figures:
-        ui.add_group('Sources', figures)
-    
+def show_sample_images(run, paths, samples, ui=None, thumbs=CONFIG.files.thumbs,
+                       overwrite=True):
+
+    if ui:
+        _show_sample_images(run, samples, ui)
+
     # plot thumbnails for sample image from first portion of each data cube
     if thumbs:
         if not (thumbs := Path(thumbs)).is_absolute():
             thumbs = paths.plots / thumbs
 
         # portion = mit.chunked(sample_images, len(run))
-        image_grid = plot_image_grid(next(zip(*samples.values())),
+        filenames, images = zip(*next(zip(*map(dict.items, samples.values()))))
+
+        # filenames, images = zip(*(map(dict.items, samples.values())))
+        image_grid = plot_image_grid(images,
                                      titles=run.files.names,
                                      **CONFIG.plotting.thumbnails)
-        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
         image_grid.figure.savefig(thumbs)  # image_grid.save ??
 
-    return samples, segments
+        if ui:
+            ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
+
+
+def _show_sample_images(run, samples, ui):
+    n_intervals = CONFIG.samples.n_intervals
+    subset = CONFIG.samples.subset
+
+    filename_template = ''
+    if save_as := CONFIG.samples.save_as:
+        _j_k = '.{j}-{k}' if (n_intervals > 1) or subset else ''
+        filename_template = f'{{hdu.file.stem}}{_j_k}.{save_as}'
+
+    for hdu in run:
+        images = samples[hdu.file.name]
+        # grouping
+        year, day = str(hdu.t.date_for_filename).split('-', 1)
+
+        for (j, k), image in images.items():
+            # add tab to ui
+            key = [year, day, hdu.file.nr,
+                   *([_j_k.format(j=j, k=k)] if (n_intervals > 1) else [])]
+
+            ui.add_tab('Sources', *key,
+                       callback=ftl.partial(plot_image, image, filename))
 
 
 def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
@@ -760,10 +800,8 @@ def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
 
     # thumbs = ''
     # if overwrite or not products['Images']['Overview']:
-
-    get_sample_images(run, paths,
-                      detection=False,
-                      thumbs=thumbs, overwrite=overwrite)
+    samples = get_sample_images(run, paths, detection=False)
+    show_sample_images(run, paths, samples, thumbs=thumbs, overwrite=overwrite)
 
     products['Images']['Samples'] = list(
         row_assign(run, sorted(paths.sample_images.iterdir())))
@@ -775,3 +813,5 @@ def compute_preview_products(run, paths, overwrite, thumbs=CONFIG.files.thumbs):
     #     sample_images = products['Images']['Samples']
     #     from IPython import embed
     #     embed(header="Embedded interpreter at 'src/shoc/pipeline/main.py':641")
+
+# %%
