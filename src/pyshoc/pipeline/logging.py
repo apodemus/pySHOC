@@ -4,12 +4,10 @@ Logging config for pyshoc pipeline.
 
 
 # std
-import sys
 import warnings
 from functools import partialmethod
 
 # third-party
-import better_exceptions as bx
 from loguru import logger
 
 # local
@@ -82,10 +80,6 @@ def escape_module(record):
 def formatter(record):
     # {time:YYYY-MM-DD HH:mm:ss zz}
     format_string = level_formats[record['level'].name]
-    if record['exception']:
-        format_string += '\n{exception}'
-        # record['exception'] = format_exception(record['exception'])
-
     format_string += '\n'
 
     # If we format the `message` here, loguru will try format a second time,
@@ -97,9 +91,6 @@ def formatter(record):
 
     return motley.format(format_string, **{**record, 'message': '{message}'})
 
-
-def format_exception(exc_info=None):
-    return '\n'.join(bx.format_exception(*(exc_info or sys.exc_info())))
 
 # ---------------------------------------------------------------------------- #
 # Configure log sinks
