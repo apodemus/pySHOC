@@ -49,6 +49,11 @@ logging:
 #     regions:   
 
 # ---------------------------------------------------------------------------- #
+# GUI
+gui: 
+    title: pySHOC Photometry Pipeline GUI
+    pos : N
+
 # plotting
 plotting: &plotting
     cmap:       cmr.voltage
@@ -85,7 +90,7 @@ plotting: &plotting
 
 
 # ---------------------------------------------------------------------------- #
-# Data products
+# Data product filenames
 files: &filenames
     output_root:    .pyshoc
     summary:        campaign-files.xlsx
