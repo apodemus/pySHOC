@@ -22,6 +22,7 @@ console:
     colors:
         flat: cornflowerblue
         dark: tan
+        
 
     cutouts: 
         title:          "Source image cutouts: {hdu.file.name:|c}"
@@ -93,14 +94,14 @@ plotting: &plotting
 # Data product filenames
 files: &filenames
     output_root:    .pyshoc
-    summary:        campaign-files.xlsx
-    products:       data-products.xlsx
-    obslog:         observing-log.tex
-    thumbs:         thumbnails.png
-    thumbs_cal:     thumbnails-cal.png
-    reg:            reg.pkl
-    reg_params:     reg-params.npy
-    mosaic:         mosaic.png
+    summary:        info/campaign-files.xlsx
+    products:       info/data-products.xlsx
+    obslog:         info/observing-log.tex
+    reg:            info/reg.pkl
+    reg_params:     info/reg-params.npy
+    thumbs:         plots/thumbnails.png
+    thumbs_cal:     plots/thumbnails-cal.png
+    mosaic:         plots/mosaic.png
 # aliases
 # filenames: *filenames
 

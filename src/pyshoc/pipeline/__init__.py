@@ -15,20 +15,32 @@ from .. import CONFIG
 from .banner import make_banner
 
 
-
 # ---------------------------------------------------------------------------- #
 WELCOME_BANNER = ''
 if CONFIG.console.banner.pop('show'):
     WELCOME_BANNER = make_banner(**CONFIG.console.banner)
 
 # Folder structure for results
+# cfg = CONFIG.files.copy()
+# cfg.pop('output_root')
+# cfg.freeze()
+# _files = {}
+# for key, rpath in cfg.items():
+#     _files[rpath.parent].append(rpath.name)
+
+_file_struct = {
+    'plots': ('thumbs', 'thumbs_cal', 'mosaic'),
+    'info': ('summary', 'products', 'obslog'),
+}
+
+
 _folders = (
-    'headers',
-    'logs',
+    'info',
+    'info/headers',
+    'info/logs',
     'plots',
     'plots/sample_images',
     'phot',
-    'phot/source_regions',
     '.cache'
 )
 
@@ -44,6 +56,7 @@ SUPPORTED_APERTURES = [
 APPERTURE_SYNONYMS = {'round': 'circle'}
 
 # ---------------------------------------------------------------------------- #
+
 
 class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
