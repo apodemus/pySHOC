@@ -20,29 +20,6 @@ WELCOME_BANNER = ''
 if CONFIG.console.banner.pop('show'):
     WELCOME_BANNER = make_banner(**CONFIG.console.banner)
 
-# Folder structure for results
-# cfg = CONFIG.files.copy()
-# cfg.pop('output_root')
-# cfg.freeze()
-# _files = {}
-# for key, rpath in cfg.items():
-#     _files[rpath.parent].append(rpath.name)
-
-_file_struct = {
-    'plots': ('thumbs', 'thumbs_cal', 'mosaic'),
-    'info': ('summary', 'products', 'obslog'),
-}
-
-
-_folders = (
-    'info',
-    'info/headers',
-    'info/logs',
-    'plots',
-    'plots/sample_images',
-    'phot',
-    '.cache'
-)
 
 SUPPORTED_APERTURES = [
     'square',
@@ -61,7 +38,7 @@ APPERTURE_SYNONYMS = {'round': 'circle'}
 class FolderTree(AttributeAutoComplete):
     """Filesystem tree helper"""
 
-    def __init__(self, root, output=None, folders=_folders, **output_files):
+    def __init__(self, root, output=None, folders=CONFIG.folders, **output_files):
         #
         self.root = Path(root).resolve()
 

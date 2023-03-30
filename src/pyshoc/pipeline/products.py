@@ -20,30 +20,13 @@ from .utils import get_file_age, human_time
 
 
 # ---------------------------------------------------------------------------- #
-TABLE_STYLE = dict(title_props={'bg': 'darkgreen',
-                                'fg': ('lightgrey', 'B', '_')},
-                   col_head_props={'bg': 'lightgreen',
-                                   'fg': ('darkslategrey', 'B')})
-
-
-# ---------------------------------------------------------------------------- #
-def _match(run, filenames, reference, empty):
-
-    incoming = {stem: list(vals) for stem, vals in
-                itt.groupby(sorted(mit.collapse(filenames)), Path.stem.fget)}
-
-    if reference is None:
-        _, reference = cosort(run.attrs('t.t0'), run.files.stems)
-
-    for base in reference:
-        yield incoming.get(base, empty)
-
-
-def match(run, filenames, reference=None, empty=''):
-    if isinstance(filenames, Path) and filenames.is_dir():
-        filenames = filenames.iterdir()
-
-    return list(_match(run, filenames, reference, empty))
+# Internal naming convention for data products. User can
+# change actual locations of output data products in config.yaml
+_file_struct = {
+    'plots': ('thumbs', 'thumbs_cal', 'mosaic'),
+    'info': ('summary', 'products', 'obslog'),
+    'reg': ('registry', 'params', 'drizzle')
+}
 
 
 # ---------------------------------------------------------------------------- #
@@ -53,11 +36,11 @@ class Node(DictNode, vdict):
 
 def get_previous(run, paths):
 
-    cfg = CONFIG.files
+    files = CONFIG.files
     overview = Node()
     for key, items in _file_struct.items():
         for item in items:
-            path = paths.output / cfg[item]
+            path = paths.output / files[item]
             overview[key][path.name] = get_file_age(path)
 
     overview.freeze()
@@ -90,7 +73,7 @@ def get_previous(run, paths):
             formatter=human_time,
             order='c',
             align={'Age': '>'},
-            **TABLE_STYLE,
+            **CONFIG.console.products,
         ),
         lambda: Table.from_dict(
             hdu_products,
@@ -102,13 +85,37 @@ def get_previous(run, paths):
             col_sort=('*.txt', 'flux.dat', 'flux-std.dat', 'snr.dat',
                       'centroids.dat', 'coords-std.dat', '*.png').index,
             formatter=human_time,
-            **TABLE_STYLE,
+            **CONFIG.console.products,
         )
     )
 
     return overview, hdu_products
 
+
 # ---------------------------------------------------------------------------- #
+
+
+def match(run, filenames, reference=None, empty=''):
+    if isinstance(filenames, Path) and filenames.is_dir():
+        filenames = filenames.iterdir()
+
+    return list(_match(run, filenames, reference, empty))
+
+
+def _match(run, filenames, reference, empty):
+
+    incoming = {stem: list(vals) for stem, vals in
+                itt.groupby(sorted(mit.collapse(filenames)), Path.stem.fget)}
+
+    if reference is None:
+        _, reference = cosort(run.attrs('t.t0'), run.files.stems)
+
+    for base in reference:
+        yield incoming.get(base, empty)
+
+
+# ---------------------------------------------------------------------------- #
+
 
 def hyperlink_ext(path):
     return f'=HYPERLINK("{path}", "{path.suffix[1:]}")'
@@ -120,7 +127,7 @@ def hyperlink_path(path):
 
 def write_xlsx(run, paths, filename=None):
 
-    overview, products = get_previous(run, paths)
+    overview, _products = get_previous(run, paths)
 
     #
     out = DictNode()
@@ -172,4 +179,3 @@ def write_xlsx(run, paths, filename=None):
                               ...: dict(horizontal='center',
                                         vertical='center')},
                        merge_unduplicate=('data', 'headers'))
-

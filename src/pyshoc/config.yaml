@@ -4,7 +4,21 @@
 caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
 
 # ---------------------------------------------------------------------------- #
-# console
+# logging
+logging:
+    level: debug
+    format: >-
+        {elapsed:s|Bb}|
+        {{{name}.{function}:s|green}:{line:d|orange}: <52}|
+        {{level.name}: {message}:|{style}}
+    section: |
+
+        {0:━<{width}}
+        {{level.name}: {message}:|B,teal}
+        {0:━<{width}}
+
+# ---------------------------------------------------------------------------- #
+# console info styling
 console:
     banner:
         show:       True
@@ -27,23 +41,19 @@ console:
     cutouts: 
         title:          "Source image cutouts: {hdu.file.name:|c}"
         title_align:    <
-        title_props:    [B, _]
+        title_style:    [B, _]
         extend:         3
         statistics:     [com, flux, areas, roundness]
 
-# ---------------------------------------------------------------------------- #
-# logging
-logging:
-    level: debug
-    format: >-
-        {elapsed:s|Bb}|
-        {{{name}.{function}:s|green}:{line:d|orange}: <52}|
-        {{level.name}: {message}:|{style}}
-    section: |
+    products:
+        title_style:
+            bg:     darkgreen
+            fg:     [lightgrey, B, _]
+        header_style:
+            bg:     lightgreen
+            fg:     [darkslategrey, B]
 
-        {0:━<{width}}
-        {{level.name}: {message}:|B,teal}
-        {0:━<{width}}
+
 
 # # ---------------------------------------------------------------------------- #
 # caching:
@@ -91,17 +101,37 @@ plotting: &plotting
 
 
 # ---------------------------------------------------------------------------- #
+# Folder structure for results
+folders:
+    # root 
+    output_root:    .pyshoc
+    info:           info
+    logs:           info/logs
+    headers:        info/headers
+    plots:          plots
+    sample_images:  plots/sample_images
+    registry:       reg
+    phot:           phot
+    cache:          .cache
+
 # Data product filenames
 files: &filenames
-    output_root:    .pyshoc
+    # campaign info
     summary:        info/campaign-files.xlsx
     products:       info/data-products.xlsx
     obslog:         info/observing-log.tex
-    reg:            info/reg.pkl
-    reg_params:     info/reg-params.npy
+    
+    # image registration (wcs)
+    registry: &reg  reg/registry.pkl
+    reg_params:     reg/params.npy
+    drizzle:        reg/drizzle.fits
+    reg: *reg       # alias
+
+    # image plots
     thumbs:         plots/thumbnails.png
     thumbs_cal:     plots/thumbnails-cal.png
     mosaic:         plots/mosaic.png
+
 # aliases
 # filenames: *filenames
 

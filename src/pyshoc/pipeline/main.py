@@ -387,7 +387,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     target = check_single_target(run)
 
     # Image Registration
-    logger.section('Image Registration')
+    logger.section('Image Registration (WCS)')
     #
     if do_reg := (overwrite or not paths.reg.exists()):
         # Sample images (after calibration)
@@ -396,6 +396,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         logger.info('Loading image register from file: {}.', paths.reg)
         reg = io.deserialize(paths.reg)
         reg.params = np.load(paths.reg_params)
+        # retrieve samples from register
         samples_cal = {
             fn: {('', ''): im}
             for fn, im in zip(run.files.names, list(reg)[1:])
@@ -421,17 +422,18 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # reg.plot_clusters(nrs=True)
 
     # mosaic
-    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
-    ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
-    mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
+    if plot:
+        mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
+        ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
+        mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
 
-    # txt, arrows = mos.mark_target(
-    #     run[0].target,
-    #     arrow_head_distance=2.,
-    #     arrow_size=10,
-    #     arrow_offset=(1.2, -1.2),
-    #     text_offset=(4, 5), size=12, fontweight='bold'
-    # )
+        # txt, arrows = mos.mark_target(
+        #     run[0].target,
+        #     arrow_head_distance=2.,
+        #     arrow_size=10,
+        #     arrow_offset=(1.2, -1.2),
+        #     text_offset=(4, 5), size=12, fontweight='bold'
+        # )
 
     # %%
     # if not products['Images']['Source Regions']:
@@ -455,8 +457,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
         # back transform to image coords
         coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-        
-        
+
         tracker = SourceTracker(coords, img.seg.circularize().dilate(2))
         tracker.init_memory(hdu.nframes, paths.phot / hdu.file.stem,
                             overwrite=overwrite)
