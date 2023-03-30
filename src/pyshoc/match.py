@@ -237,7 +237,7 @@ class MatchedObservations(LoggingMixin):
 
     def tabulate(self,
                  title='Matched Observations',
-                 title_props=('g', 'bold'),
+                 title_style=('g', 'bold'),
                  group_header_style=('g', 'bold'),
                  g1_style='c',
                  no_match_style='r',
@@ -259,7 +259,7 @@ class MatchedObservations(LoggingMixin):
         ----------
         title : str, optional
             [description], by default 'Matched Observations'
-        title_props : tuple, optional
+        title_style : tuple, optional
             [description], by default ('g', 'bold')
         group_header_style : str, optional
             [description], by default 'bold'
@@ -320,7 +320,7 @@ class MatchedObservations(LoggingMixin):
             # hlines.append(n - 1)
 
         # get title
-        colour = ftl.partial(motley.apply, txt=title_props)
+        colour = ftl.partial(motley.apply, txt=title_style)
 
         title = txw.dedent(f'''\
             {colour(title)}
@@ -333,7 +333,7 @@ class MatchedObservations(LoggingMixin):
                            title=title, title_align='<',
                            insert=insert,  # hlines=hlines,
                            row_nrs=False, totals=False,
-                           title_props='underline')
+                           title_style='underline')
 
         # filler lines
         Filler.make(tbl)
@@ -361,23 +361,23 @@ class MatchedObservations(LoggingMixin):
         # print()
         return tbl
 
-    def pformat(self, title='Matched Observations', title_props=('g', 'bold'),
+    def pformat(self, title='Matched Observations', title_style=('g', 'bold'),
                 group_header_style='bold', g1_style='c', no_match_style='r',
                 **kws):
         """
         Pretty format the resulting matches in a table.
         """
-        return str(self.tabulate(title, title_props,
+        return str(self.tabulate(title, title_style,
                                  group_header_style, g1_style, no_match_style,
                                  **kws))
 
-    def pprint(self, title='Matched Observations', title_props=('g', 'bold'),
+    def pprint(self, title='Matched Observations', title_style=('g', 'bold'),
                group_header_style='bold', g1_style='c', no_match_style='r',
                **kws):
         """
         Pretty print the resulting matches in a table.
         """
-        print(self.pformat(title, title_props,
+        print(self.pformat(title, title_style,
                            group_header_style, g1_style, no_match_style,
                            **kws))
 

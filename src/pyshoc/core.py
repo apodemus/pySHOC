@@ -1234,7 +1234,7 @@ class LatexWriter:
                 row_nrs=1,
                 frame=False,
                 hlines=False,
-                col_head_props=None,
+                col_head_style=None,
                 borders={...: '& ', -1: r'\\'},
                 summary=dict(footer=True, n_cols=1, bullets='', align='<',
                              pillars=['t0'], fmt=summary_fmt),
@@ -1442,7 +1442,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          },
         row_nrs=1,
         summary=True,
-        title_props=dict(fg=('underline', 'bold'), bg='b'),
+        title_style=dict(fg=('underline', 'bold'), bg='b'),
         too_wide=False,
         footnotes=Trigger.get_flags()
     )
