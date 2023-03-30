@@ -1,4 +1,8 @@
 
+# std
+import time
+
+# local
 from recipes.pprint.nrs import TIME_DIVISORS, ymdhms
 
 

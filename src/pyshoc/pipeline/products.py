@@ -81,7 +81,7 @@ def get_previous(run, paths):
     # op.index()
 
     logger.opt(lazy=True).debug(
-        'Found previous data products: \n{}\n{}',
+        'Found previous data products: \n{}\n{}\n',
         lambda: Table.from_dict(
             overview,
             convert_keys='/'.join,

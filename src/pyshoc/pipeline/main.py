@@ -5,6 +5,8 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 
 # std
 import sys
+import atexit
+import itertools as itt
 from pathlib import Path
 from collections import defaultdict
 
@@ -26,9 +28,8 @@ from recipes.decorators.reporting import trace
 
 # relative
 from .. import CONFIG, shocCampaign
-from . import logging
+from . import logging, products
 from .calibrate import calibrate
-from . import products
 
 
 # ---------------------------------------------------------------------------- #
@@ -127,19 +128,17 @@ def check_required_info(run, telescope, target):
 def compute_preview(run, paths, ui, overwrite,
                     thumbs=CONFIG.files.thumbs, show_cutouts=False):
     # get results from previous run
-    overview, products = products.get_previous(run, paths)
-
-    # write fits headers to text
-    # if not products['FITS']['headers']:
+    overview, data_products = products.get_previous(run, paths)
 
     showfile = str
     if str(paths.headers).startswith(str(paths.root)):
         def showfile(h): return h.relative_to(paths.root)
 
+    # write fits headers to text
     for hdu in run:
         stem = hdu.file.stem
         txtfile = f'{stem}.txt'
-        headfile = products[stem]['info/headers'].get(txtfile, '')
+        headfile = data_products[stem]['info/headers'].get(txtfile, '')
         if not headfile or overwrite:
             headfile = paths.headers / txtfile
             logger.info('Writing fits header to text at {}.', showfile(headfile))
@@ -149,10 +148,13 @@ def compute_preview(run, paths, ui, overwrite,
     # if overwrite or not products['Images']['Overview']:
     samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
 
-    plot_sample_images(run, samples, paths, ui,
-                       thumbs=paths.output / thumbs, overwrite=overwrite)
+    thumbs = paths.output / thumbs
+    image_grid, = plot_sample_images(run, samples, paths, None, thumbs,
+                                     overwrite=overwrite)
+    if ui:
+        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
 
-    return products
+    return data_products
 
     # source regions
     # if not any(products['Images']['Source Regions']):
@@ -160,18 +162,24 @@ def compute_preview(run, paths, ui, overwrite,
 
 
 def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
-                       overwrite=True):
+                       overwrite=True, delay=False):
+    returns = []
 
     if ui:
         logger.info('Adding sample images to ui: {}', ui)
-        _plot_sample_images(run, samples, paths.sample_images,  ui, overwrite)
+        delay = False if ui is None else delay
+        figures = _plot_sample_images(run, samples, paths.sample_images,
+                                      ui, overwrite, delay)
+        returns.append(list(figures))
 
     # plot thumbnails for sample image from first portion of each data cube
     if thumbs:
         if not (thumbs := Path(thumbs)).is_absolute():
             thumbs = paths.output / thumbs
 
-        thumbs = plot_thumbnails(samples, ui, thumbs, overwrite)
+        returns.append(plot_thumbnails(samples, ui, thumbs, overwrite))
+
+    return returns
 
 
 def plot_thumbnails(samples, ui, thumbs, overwrite):
@@ -189,7 +197,8 @@ def plot_thumbnails(samples, ui, thumbs, overwrite):
 
     if ui:
         ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
-    return thumbs
+
+    return image_grid
 
 
 def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
@@ -200,6 +209,7 @@ def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
     if save_as := CONFIG.samples.save_as:
         _j_k = '.{j}-{k}' if (n_intervals > 1) or subset else ''
         filename_template = f'{{hdu.file.stem}}{_j_k}.{save_as}'
+        # logger
 
     for hdu in run:
         images = samples[hdu.file.name]
@@ -216,14 +226,17 @@ def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
                 filename = None
 
             #
-            fig = ui.add_tab('Sources', *key)
+            fig = ui.add_tab('Samples', *key)
 
             if delay:
                 logger.info('Plotting delayed: Adding plot callback for {}', key)
-                fig.add_callback(plot_image, image=image, save_as=filename)
+                ui['Samples'].add_callback(plot_image, image=image)
+                atexit.register(save_image, image, filename)
             else:
                 logger.info('Plotting sample image {}', key)
                 plot_image(fig, image=image, save_as=filename)
+
+            yield fig
 
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
 
@@ -232,17 +245,24 @@ def plot_image(fig, *indices, image, save_as=None):
 
     # image = samples[indices]
     logger.debug('Plotting {}', image)
-    art = image.plot(fig=fig.figure,
-                     regions=CONFIG.plotting.segments.contours,
-                     labels=CONFIG.plotting.segments.labels)
+    display, art = image.plot(fig=fig.figure,
+                              regions=CONFIG.plotting.segments.contours,
+                              labels=CONFIG.plotting.segments.labels,
+                              coords='pixel')
 
-    if save_as:
-        logger.info('Saving: {}', save_as)
-        art.image.axes.figure.savefig(save_as)  # ['image-regions']
-    # return im.figure
+    save_image(art.image, save_as)
 
+    return art
+
+
+def save_image(image, filename):
+    if filename:
+        logger.info('Saving image: {}', filename)
+        image.axes.figure.savefig(filename)
 
 # ---------------------------------------------------------------------------- #
+
+
 def get_intervals(hdu, subset, n_intervals):
     n = hdu.nframes
     if subset:
@@ -350,7 +370,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
                 '{!s:}', paths.summary)
 
     # Sample images prior to calibration and header info
-    products = compute_preview(run, paths, None, overwrite)
+    data_products = compute_preview(run, paths, ui, overwrite)
 
     # ------------------------------------------------------------------------ #
     # Calibrate
@@ -360,26 +380,34 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # images.
     gobj, mdark, mflat = calibrate(run, overwrite=overwrite)
 
-    # Sample images (after calibration)
     # if overwrite or CONFIG.files.thumbs_cal.exists():
     # sample_images_cal, segments = \
-    samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
-    #
-    plot_sample_images(run, samples_cal, paths, ui,
-                       CONFIG.files.thumbs_cal, overwrite)
 
     # have to ensure we have single target here
     target = check_single_target(run)
 
     # Image Registration
     logger.section('Image Registration')
-    # #
-    if paths.reg.exists() and not overwrite:
+    #
+    if do_reg := (overwrite or not paths.reg.exists()):
+        # Sample images (after calibration)
+        samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
+    else:
         logger.info('Loading image register from file: {}.', paths.reg)
         reg = io.deserialize(paths.reg)
         reg.params = np.load(paths.reg_params)
-    else:
-        # align
+        samples_cal = {
+            fn: {('', ''): im}
+            for fn, im in zip(run.files.names, list(reg)[1:])
+        }
+        # samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
+
+    if plot:
+        plot_sample_images(run, samples_cal, paths, ui,
+                           CONFIG.files.thumbs_cal, overwrite)
+
+    # align
+    if do_reg:
         # note: source detections were reported above in `get_sample_images`
         reg = run.coalign_survey(**CONFIG.register,
                                  **{**CONFIG.detection, 'report': False})
@@ -394,7 +422,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # mosaic
     mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
-    ui.add_tab('Overview', 'Mosaic',)  # fig=mosaic.fig
+    ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
     mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
 
     # txt, arrows = mos.mark_target(
@@ -415,33 +443,38 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # ts = mv phot.ragged() phot.regions()
 
     # Write data products spreadsheet
-    write_data_products_xlsx(run, paths)
+    products.write_xlsx(run, paths)
 
-    # logger.info('The following data products were created:\n{}',
-    #             io.show_tree(paths.output))
-
-    # logger.section('Source Tracking')
+    # ------------------------------------------------------------------------ #
     # logger.section('Quick Phot')
+    logger.section('Source Tracking')
 
-    # for hdu, (img, labels) in zip(run, itt.islice(zip(reg, reg.labels_per_image), 1, None)):
-    #     # back transform to image coords
-    #     coords = (reg.xy[sorted(labels)] - reg.params[1, :2]) / reg.rscale[1]
+    from obstools.phot.tracking import SourceTracker
 
-    #     tracker = SourceTracker(coords, img.seg.circularize().dilate(2))
-    #     tracker.init_memory(hdu.nframes, DATAPATH / 'shoc/phot/' / hdu.file.stem, overwrite=True)
+    image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
+    for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
+        # back transform to image coords
+        coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+        
+        
+        tracker = SourceTracker(coords, img.seg.circularize().dilate(2))
+        tracker.init_memory(hdu.nframes, paths.phot / hdu.file.stem,
+                            overwrite=overwrite)
+        break
+
     #
-    # tracker.run(hdu.calibrated)
+    tracker.run(hdu.calibrated)
 
     # logger.section('Photometry')
 
     # Launch the GUI
     if plot:
+        logger.debug('Launching GUI')
         ui.show()
-        app.exec_()
+        # app.exec_()
+        sys.exit(app.exec_())
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':676")
-
-    # sys.exit(app.exec_())
+    # from IPython import embed
+    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':676")
 
 # %%
