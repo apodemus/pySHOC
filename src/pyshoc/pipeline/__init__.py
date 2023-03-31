@@ -43,10 +43,10 @@ class FolderTree(AttributeAutoComplete):
         self.root = Path(root).resolve()
 
         if output is None:
-            output = self.root / CONFIG.files.output_root
+            output = self.root / CONFIG.folders.output_root
         self.output = output
 
-        for folder in folders:
+        for key, folder in folders.items():
             path = output / folder
             setattr(self, path.name.lstrip('.'), path)
 
