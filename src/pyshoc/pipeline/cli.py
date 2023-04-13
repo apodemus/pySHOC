@@ -21,7 +21,6 @@ from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree, logging
 from . import main as pipeline
 
 
-
 def check_files_exist(files_or_folder):
     for path in files_or_folder:
         if not Path(path).exists():
@@ -122,13 +121,13 @@ def setup(root, output, use_cache):
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
 
-    #
     paths = FolderTree(root, output,
                        obslog=CONFIG.files.obslog,
                        summary=CONFIG.files.summary,
                        products=CONFIG.files.products,
-                       reg=CONFIG.files.reg,
+                       registry=CONFIG.files.reg,
                        reg_params=CONFIG.files.reg_params)
+    paths.reg = paths.registry
     paths.create()
 
     # add log file sink
@@ -257,13 +256,14 @@ def main(files_or_folder, output='./.pyshoc',
         logger.info('Ignoring option sub {} for multi-file run.', sub)
 
     # -------------------------------------------------------------------------#
-    try:
-        # pipeline main routine
-        pipeline.main(paths, target, telescope, top, plot, cutouts, overwrite)
+    # try:
 
-    except Exception as err:
-        # catch errors so we can safely shut down any remaining processes
-        from better_exceptions import format_exception
+    # pipeline main routine
+    pipeline.main(paths, target, telescope, top, plot, cutouts, overwrite)
 
-        logger.exception('Exception during pipeline execution.\n{}',
-                         '\n'.join(format_exception(*sys.exc_info())))
+    # except Exception as err:
+    #     # catch errors so we can safely shut down any remaining processes
+    #     from better_exceptions import format_exception
+
+    #     logger.exception('Exception during pipeline execution.\n{}',
+    #                      '\n'.join(format_exception(*sys.exc_info())))

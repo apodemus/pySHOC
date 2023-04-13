@@ -24,13 +24,17 @@ if CONFIG.console.banner.pop('show'):
 SUPPORTED_APERTURES = [
     'square',
     'ragged',
-    'round', 'circle',
+    'round',
     'ellipse',
     'optimal',
     # 'psf',
     # 'cog',
 ]
-APPERTURE_SYNONYMS = {'round': 'circle'}
+APPERTURE_SYNONYMS = {
+    'circle':     'round',
+    'circular':   'round',
+    'elliptical': 'ellipse'
+}
 
 # ---------------------------------------------------------------------------- #
 
@@ -42,13 +46,15 @@ class FolderTree(AttributeAutoComplete):
         #
         self.root = Path(root).resolve()
 
+        #
+        folders = dict(CONFIG.folders)
+        output_root_default = folders.pop('output_root')
         if output is None:
-            output = self.root / CONFIG.folders.output_root
+            output = self.root / output_root_default
         self.output = output
 
         for key, folder in folders.items():
-            path = output / folder
-            setattr(self, path.name.lstrip('.'), path)
+            setattr(self, key, output / folder)
 
         # folders to create
         self.folders = dict(vars(self))

@@ -103,8 +103,9 @@ plotting: &plotting
 # ---------------------------------------------------------------------------- #
 # Folder structure for results
 folders:
-    # root 
+    # root folder name default (if not provided by user at cli)
     output_root:    .pyshoc
+    # The folder structure defined here will be created inside `output_root`
     info:           info
     logs:           info/logs
     headers:        info/headers
@@ -139,11 +140,12 @@ files: &filenames
 # ---------------------------------------------------------------------------- #
 # sampled image stats
 samples:
-    stat:           median
-    min_depth:      10          # minimun simulated integration time (seconds)
-    n_intervals:    1
-    subset:         Null        # eg: median sample from first 1000
-    save_as:        png
+    stat:               median
+    min_depth:          10          # minimun simulated integration time (seconds)
+    n_intervals:        1
+    subset:             Null        # eg: 1000 for sample from first 1000
+    save_as:            png
+    # filename_template:  {hdu.file.stem}{interval?}.{save_as}
     
 
 # ---------------------------------------------------------------------------- #
@@ -167,7 +169,7 @@ detect:          *source_detection #
 
 # ---------------------------------------------------------------------------- #
 # image registration 
-register:
+registration: &image_registration
     survey:         dss
     fov_stretch:    1.65
     plot:           False
