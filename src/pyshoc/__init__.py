@@ -37,6 +37,14 @@ CONFIG = ConfigNode(
 )
 # CONFIG.freeze()
 
+# load cmasher if needed
+plt = CONFIG.plotting 
+for cmap in (plt.cmap, plt.segments.contours.cmap, plt.mosaic.cmap):
+    if cmap.startswith('cmr.'):
+        import cmasher
+        break
+
+
 # ---------------------------------------------------------------------------- #
 # register HDU classes (must happen before CalDB init)
 register_hdu(shocHDU)
