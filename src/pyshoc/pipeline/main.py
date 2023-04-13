@@ -73,7 +73,7 @@ rcParams.update({'font.size': 14,
 
 
 # ---------------------------------------------------------------------------- #
-
+# utils
 
 def check_single_target(run):
 
@@ -123,6 +123,7 @@ def check_required_info(run, telescope, target):
     return info
 
 # ---------------------------------------------------------------------------- #
+# data
 
 
 def compute_preview(run, paths, ui, overwrite,
@@ -159,108 +160,6 @@ def compute_preview(run, paths, ui, overwrite,
     # source regions
     # if not any(products['Images']['Source Regions']):
     #     sample_images = products['Images']['Samples']
-
-
-def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
-                       overwrite=True, delay=False):
-    returns = []
-
-    if ui:
-        logger.info('Adding sample images to ui: {}', ui)
-        delay = False if ui is None else delay
-        figures = _plot_sample_images(run, samples, paths.sample_images,
-                                      ui, overwrite, delay)
-        returns.append(list(figures))
-
-    # plot thumbnails for sample image from first portion of each data cube
-    if thumbs:
-        if not (thumbs := Path(thumbs)).is_absolute():
-            thumbs = paths.output / thumbs
-
-        returns.append(plot_thumbnails(samples, ui, thumbs, overwrite))
-
-    return returns
-
-
-def plot_thumbnails(samples, ui, thumbs, overwrite):
-
-    # portion = mit.chunked(sample_images, len(run))
-    images, = zip(*map(dict.values, samples.values()))
-
-    # filenames, images = zip(*(map(dict.items, samples.values())))
-    image_grid = plot_image_grid(images,
-                                 titles=list(samples.keys()),
-                                 **CONFIG.plotting.thumbnails)
-
-    if not thumbs.exists() or overwrite:
-        image_grid.figure.savefig(thumbs)  # image_grid.save ??
-
-    if ui:
-        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
-
-    return image_grid
-
-
-def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
-    n_intervals = CONFIG.samples.n_intervals
-    subset = CONFIG.samples.subset
-
-    filename_template = ''
-    if save_as := CONFIG.samples.save_as:
-        _j_k = '.{j}-{k}' if (n_intervals > 1) or subset else ''
-        filename_template = f'{{hdu.file.stem}}{_j_k}.{save_as}'
-        # logger
-
-    for hdu in run:
-        images = samples[hdu.file.name]
-        # grouping
-        year, day = str(hdu.t.date_for_filename).split('-', 1)
-
-        for (j, k), image in images.items():
-            # add tab to ui
-            key = [year, day, hdu.file.nr,
-                   *([_j_k.format(j=j, k=k)] if (n_intervals > 1) else [])]
-
-            filename = path / filename_template.format(hdu=hdu, j=j, k=k)
-            if filename.exists() and not overwrite:
-                filename = None
-
-            #
-            fig = ui.add_tab('Samples', *key)
-
-            if delay:
-                logger.info('Plotting delayed: Adding plot callback for {}', key)
-                ui['Samples'].add_callback(plot_image, image=image)
-                atexit.register(save_image, image, filename)
-            else:
-                logger.info('Plotting sample image {}', key)
-                plot_image(fig, image=image, save_as=filename)
-
-            yield fig
-
-# @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
-
-
-def plot_image(fig, *indices, image, save_as=None):
-
-    # image = samples[indices]
-    logger.debug('Plotting {}', image)
-    display, art = image.plot(fig=fig.figure,
-                              regions=CONFIG.plotting.segments.contours,
-                              labels=CONFIG.plotting.segments.labels,
-                              coords='pixel')
-
-    save_image(art.image, save_as)
-
-    return art
-
-
-def save_image(image, filename):
-    if filename:
-        logger.info('Saving image: {}', filename)
-        image.axes.figure.savefig(filename)
-
-# ---------------------------------------------------------------------------- #
 
 
 def get_intervals(hdu, subset, n_intervals):
@@ -316,6 +215,118 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
             )
 
         yield (j, k), image
+
+
+# ---------------------------------------------------------------------------- #
+# plotting
+
+def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
+                       overwrite=True, delay=False):
+    returns = []
+
+    if ui:
+        logger.info('Adding sample images to ui: {}', ui)
+        delay = False if ui is None else delay
+        figures = _plot_sample_images(run, samples, paths.sample_images,
+                                      ui, overwrite, delay)
+        returns.append(list(figures))
+
+    # plot thumbnails for sample image from first portion of each data cube
+    if thumbs:
+        if not (thumbs := Path(thumbs)).is_absolute():
+            thumbs = paths.output / thumbs
+
+        returns.append(plot_thumbnails(samples, ui, thumbs, overwrite))
+
+    return returns
+
+
+def plot_thumbnails(samples, ui, thumbs, overwrite):
+
+    # portion = mit.chunked(sample_images, len(run))
+    images, = zip(*map(dict.values, samples.values()))
+
+    # filenames, images = zip(*(map(dict.items, samples.values())))
+    image_grid = plot_image_grid(images,
+                                 titles=list(samples.keys()),
+                                 **CONFIG.plotting.thumbnails)
+
+    if not thumbs.exists() or overwrite:
+        image_grid.figure.savefig(thumbs)  # image_grid.save ??
+
+    if ui:
+        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
+
+    return image_grid
+
+
+def get_filename_template(ext):
+    cfg = CONFIG.samples
+    if ext := ext.lstrip('.'):
+        _j_k = '.{j}-{k}' if (cfg.n_intervals > 1) or cfg.subset else ''
+        return f'{{stem}}{_j_k}.{ext}'
+    return ''
+
+
+def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
+
+    filename_template = get_filename_template(CONFIG.samples.save_as)
+    #
+    for hdu in run:
+        # grouping
+        year, day = str(hdu.t.date_for_filename).split('-', 1)
+
+        for (j, k), image in samples[hdu.file.name].items():
+
+            filename = path / filename_template.format(stem=hdu.file.stem, j=j, k=k)
+
+            # add tab to ui
+            key = [year, day, hdu.file.nr]
+
+            if j and k and (j, k) != (0, hdu.nframes):
+                key.append('{j}-{k}'.format(j=j, k=k))
+
+            fig = ui.add_tab('Samples', *key)
+
+            # plot
+            if filename.exists() and not overwrite:
+                filename = None
+
+            if delay:
+                logger.info('Plotting delayed: Adding plot callback for {}', key)
+                ui['Samples'].add_callback(plot_image, image=image)
+                atexit.register(save_image, image, filename)
+            else:
+                logger.info('Plotting sample image {}', key)
+                plot_image(fig, image=image, save_as=filename)
+
+            yield fig
+
+# @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
+
+
+def plot_image(fig, *indices, image, save_as=None):
+
+    # image = samples[indices]
+    logger.debug('Plotting {}', image)
+    display, art = image.plot(fig=fig.figure,
+                              regions=CONFIG.plotting.segments.contours,
+                              labels=CONFIG.plotting.segments.labels,
+                              coords='pixel',
+                              use_blit=False)
+
+    save_image(art.image, save_as)
+
+    return art
+
+
+def save_image(image, filename):
+    if filename:
+        logger.info('Saving image: {}', filename)
+        image.axes.figure.savefig(filename)
+
+# ---------------------------------------------------------------------------- #
+# main
 
 
 @trace
