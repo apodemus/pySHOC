@@ -6,11 +6,10 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 from importlib.metadata import PackageNotFoundError, version
 
 # third-party
-import yaml
+
 from astropy.io.fits.hdu.base import register_hdu
 
-# local
-from recipes.dicts import AttrReadItem, DictNode
+
 
 # relative
 from .core import *
@@ -23,26 +22,6 @@ try:
 except PackageNotFoundError:
     __version__ = '?.?.?'
 
-
-# ---------------------------------------------------------------------------- #
-# settings
-
-class ConfigNode(DictNode, AttrReadItem):
-    pass
-
-
-CONFIG = ConfigNode(
-    **yaml.load((Path(__file__).parent / 'config.yaml').read_text(),
-                Loader=yaml.FullLoader)
-)
-# CONFIG.freeze()
-
-# load cmasher if needed
-plt = CONFIG.plotting 
-for cmap in (plt.cmap, plt.segments.contours.cmap, plt.mosaic.cmap):
-    if cmap.startswith('cmr.'):
-        import cmasher
-        break
 
 
 # ---------------------------------------------------------------------------- #

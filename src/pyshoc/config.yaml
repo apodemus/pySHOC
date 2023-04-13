@@ -3,6 +3,16 @@
 # Location of calibration database
 caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
 
+# prefer SI based naming convention for telescopes eg: "1.9m" over "74in" 
+metric_names: True
+
+empty_filter_string: ∅
+
+remote:
+    server: astro.cape.saao.ac.za
+    username: Null
+
+
 # ---------------------------------------------------------------------------- #
 # logging
 logging:
