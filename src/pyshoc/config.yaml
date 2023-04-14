@@ -191,6 +191,10 @@ registration: &image_registration
     fit_angle:      True
     # sigma_fallback: 10
 
+drizzle: 
+    pixfrac:        0.5
+    cmap:           cmr.voltage
+
 # ---------------------------------------------------------------------------- #
 # source tracking 
 tracking:

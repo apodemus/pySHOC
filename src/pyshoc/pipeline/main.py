@@ -405,19 +405,16 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # Sample images prior to calibration and header info
     data_products = compute_preview(run, paths, ui, overwrite)
 
-    # ------------------------------------------------------------------------ #
-    # Calibrate
-    logger.section('Calibration')
 
-    # Compute/retrieve master dark/flat. Point science stacks to calibration
-    # images.
-    gobj, mdark, mflat = calibrate(run, overwrite=overwrite)
+def plot_drizzle(fig, *indices, ff, save_as):
+    logger
+    if indices and indices[-1] == 'Drizzle':
+        ff.show_colorscale(CONFIG.drizzle.cmap)
+        fig.tight_layout()
 
-    # if overwrite or CONFIG.files.thumbs_cal.exists():
-    # sample_images_cal, segments = \
+        if save_as:
+            fig.savefig(save_as)
 
-    # have to ensure we have single target here
-    target = check_single_target(run)
 
     # Image Registration
     logger.section('Image Registration (WCS)')
@@ -452,13 +449,34 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         io.serialize(paths.reg, reg)
         # np.save(paths.reg_params, reg.params)
 
-    # reg.plot_clusters(nrs=True)
+        # reg.plot_clusters(nrs=True)
 
-    # mosaic
+        # Build image WCS
+        wcss = reg.build_wcs(run)
+        # save samples fits
+        save_samples_fits(samples_cal, wcss, paths.sample_images, overwrite)
+
+        # Drizzle image
+        reg.drizzle(paths.drizzle, CONFIG.drizzle.pixfrac)
+
     if plot:
+        # mosaic
         mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
         ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
         mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
+
+        # drizzle
+        ff = apl.FITSFigure(str(paths.drizzle))
+        ui.add_tab('Overview', 'Drizzle', fig=ff._figure)
+
+        if delay:
+            logger.info('Plotting delayed: Adding plot callback for {}', key)
+            ui['Overview'].add_callback(plot_drizzle, ff=ff,
+                                        save_as=paths.drizzle.with_suffix('.png'))
+            atexit.register(save_image, image, filename)
+        else:
+            logger.info('Plotting sample image {}', key)
+            plot_image(fig, image=image, save_as=filename)
 
         # txt, arrows = mos.mark_target(
         #     run[0].target,
