@@ -325,6 +325,25 @@ def save_image(image, filename):
         logger.info('Saving image: {}', filename)
         image.axes.figure.savefig(filename)
 
+
+# ---------------------------------------------------------------------------- #
+
+
+def write_rsync_script(run, paths, username=CONFIG.remote.username,
+                       server=CONFIG.remote.server):
+
+    remotes = list(map(str, run.calls.get_server_path(None)))
+    prefix = f'{server}:{shared_prefix(remotes)}'
+    filelist = paths.info / 'remote-files.txt'
+    io.write_lines(filelist, [remove_prefix(_, prefix) for _ in remotes])
+
+    outfile = paths.info / 'rsync-remote.sh'
+    outfile.write_text(
+        f'sudo rsync -arvzh --info=progress2 '
+        f'--files-from={filelist!s} --no-implied-dirs '
+        f'{username}@{prefix} {paths.output!s}'
+    )
+
 # ---------------------------------------------------------------------------- #
 # main
 
@@ -356,6 +375,9 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         missing_telescope_info = run[~np.array(run.attrs.telescope, bool)]
         missing_telescope_info.attrs.set(repeat(telescope=info.pop('telescope')))
         run.attrs.set(repeat(info))
+
+    # write script for remote data retrieval
+    write_rsync_script(run, paths)
 
     # ------------------------------------------------------------------------ #
     # Preview

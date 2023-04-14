@@ -4,13 +4,14 @@
 caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
 
 # prefer SI based naming convention for telescopes eg: "1.9m" over "74in" 
-metric_names: True
+metric_names:           True
+empty_filter_string:    ∅
 
-empty_filter_string: ∅
-
+# ---------------------------------------------------------------------------- #
 remote:
-    server: astro.cape.saao.ac.za
-    username: Null
+    write_rsync_script: True
+    server:             astro.cape.saao.ac.za
+    username:           Null
 
 
 # ---------------------------------------------------------------------------- #
@@ -131,6 +132,10 @@ files: &filenames
     summary:        info/campaign-files.xlsx
     products:       info/data-products.xlsx
     obslog:         info/observing-log.tex
+
+    # remote file retrieval
+    remote:         'info/remote-files.txt'
+    rsync_script:   'info/rsync-remote.sh'
     
     # image registration (wcs)
     registry: &reg  reg/registry.pkl
