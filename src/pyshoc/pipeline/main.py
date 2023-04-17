@@ -4,6 +4,7 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 
 
 # std
+from obstools.phot.tracking import SourceTracker
 import sys
 import atexit
 import itertools as itt
@@ -12,8 +13,10 @@ from collections import defaultdict
 
 # third-party
 import numpy as np
+import aplpy as apl
 import more_itertools as mit
 from loguru import logger
+from astropy.io import fits
 from matplotlib import rcParams
 from mpl_multitab import MplMultiTab, QtWidgets
 
@@ -25,6 +28,7 @@ from obstools.image import SkyImage
 from obstools.modelling import int2tup
 from recipes import io
 from recipes.decorators.reporting import trace
+from recipes.string import remove_prefix, shared_prefix
 
 # relative
 from .. import CONFIG, shocCampaign
@@ -155,7 +159,7 @@ def compute_preview(run, paths, ui, overwrite,
     if ui:
         ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
 
-    return data_products
+    return samples, overview, data_products
 
     # source regions
     # if not any(products['Images']['Source Regions']):
@@ -221,7 +225,7 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
 # plotting
 
 def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
-                       overwrite=True, delay=False):
+                       overwrite=True, delay=CONFIG.plotting.delay):
     returns = []
 
     if ui:
@@ -247,7 +251,7 @@ def plot_thumbnails(samples, ui, thumbs, overwrite):
     images, = zip(*map(dict.values, samples.values()))
 
     # filenames, images = zip(*(map(dict.items, samples.values())))
-    image_grid = plot_image_grid(images,
+    image_grid = plot_image_grid(images, use_blit=False,
                                  titles=list(samples.keys()),
                                  **CONFIG.plotting.thumbnails)
 
@@ -268,7 +272,8 @@ def get_filename_template(ext):
     return ''
 
 
-def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
+def _plot_sample_images(run, samples, path, ui, overwrite,
+                        delay=CONFIG.plotting.delay):
 
     filename_template = get_filename_template(CONFIG.samples.save_as)
     #
@@ -295,7 +300,7 @@ def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
             if delay:
                 logger.info('Plotting delayed: Adding plot callback for {}', key)
                 ui['Samples'].add_callback(plot_image, image=image)
-                atexit.register(save_image, image, filename)
+                atexit.register(save_fig, fig.figure, filename)
             else:
                 logger.info('Plotting sample image {}', key)
                 plot_image(fig, image=image, save_as=filename)
@@ -308,23 +313,45 @@ def _plot_sample_images(run, samples, path, ui, overwrite, delay=False):
 def plot_image(fig, *indices, image, save_as=None):
 
     # image = samples[indices]
-    logger.debug('Plotting {}', image)
+    logger.debug('Plotting image {}', image)
     display, art = image.plot(fig=fig.figure,
                               regions=CONFIG.plotting.segments.contours,
                               labels=CONFIG.plotting.segments.labels,
                               coords='pixel',
                               use_blit=False)
 
-    save_image(art.image, save_as)
-
+    save_fig(art.image.axes.figure, save_as)
     return art
 
 
-def save_image(image, filename):
+def plot_drizzle(fig, *indices, ff, save_as):
+    logger.info('Plotting drizzle image.')
+
+    if not indices or indices[-1] == 'Drizzle':
+        ff.show_colorscale(cmap=CONFIG.plotting.cmap)
+        fig.tight_layout()
+
+    save_fig(fig, save_as)
+
+
+def save_fig(fig, filename):
     if filename:
         logger.info('Saving image: {}', filename)
-        image.axes.figure.savefig(filename)
+        fig.savefig(filename)
 
+
+def save_samples_fits(samples, wcss, path, overwrite):
+    # save samples as fits with wcs
+    filename_template = get_filename_template('fits')
+    for (stem, subs), wcs in zip(samples.items(), wcss):
+        path = path / stem
+        for (j, k), image in subs.items():
+            filename = path / filename_template.format(stem=stem, j=j, k=k)
+
+            if filename.exists() or overwrite:
+                header = fits.Header(image.meta)
+                header.update(wcs.to_header())
+                fits.writeto(filename, image.data, header)
 
 # ---------------------------------------------------------------------------- #
 
@@ -348,19 +375,7 @@ def write_rsync_script(run, paths, username=CONFIG.remote.username,
 # main
 
 
-@trace
-def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
-    #
-    # from obstools.phot import PhotInterface
-
-    # GUI
-    ui = None
-    if plot:
-        app = QtWidgets.QApplication(sys.argv)
-        ui = MplMultiTab(title=CONFIG.gui.title, pos=CONFIG.gui.pos)
-
-    # ------------------------------------------------------------------------ #
-    # Load data
+def init(paths, telescope, target, overwrite):
     run = shocCampaign.load(paths.root, obstype='object')
 
     # update info if given
@@ -377,10 +392,14 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         run.attrs.set(repeat(info))
 
     # write script for remote data retrieval
-    write_rsync_script(run, paths)
+    if (CONFIG.remote.write_rsync_script and
+            (overwrite or not (paths.remote.exists() or paths.rsync_script.exists()))):
+        write_rsync_script(run, paths)
 
-    # ------------------------------------------------------------------------ #
-    # Preview
+    return run, info
+
+
+def preview(run, paths, info, ui, overwrite):
     logger.section('Overview')
 
     # Print summary table
@@ -403,30 +422,39 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
                 '{!s:}', paths.summary)
 
     # Sample images prior to calibration and header info
-    data_products = compute_preview(run, paths, ui, overwrite)
+    return compute_preview(run, paths, ui, overwrite)
 
 
-def plot_drizzle(fig, *indices, ff, save_as):
-    logger
-    if indices and indices[-1] == 'Drizzle':
-        ff.show_colorscale(CONFIG.drizzle.cmap)
-        fig.tight_layout()
+def calibration(run, overwrite):
+    logger.section('Calibration')
 
-        if save_as:
-            fig.savefig(save_as)
+    # Compute/retrieve master dark/flat. Point science stacks to calibration
+    # images.
+    gobj, mdark, mflat = calibrate(run, overwrite=overwrite)
+
+    # TODO: logger.info('Calibrating sample images.')
+    # from IPython import embed
+    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':534")
+    # samples
+
+    # if overwrite or CONFIG.files.thumbs_cal.exists():
+    # sample_images_cal, segments = \
 
 
-    # Image Registration
+def registration(run, paths, ui, plot, show_cutouts, overwrite):
     logger.section('Image Registration (WCS)')
     #
+    # None in [hdu.wcs for hdu in run]
     if do_reg := (overwrite or not paths.reg.exists()):
         # Sample images (after calibration)
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
     else:
-        logger.info('Loading image register from file: {}.', paths.reg)
+        logger.info('Loading image registry from file: {}.', paths.reg)
         reg = io.deserialize(paths.reg)
         reg.params = np.load(paths.reg_params)
+
         # retrieve samples from register
+        # TODO: get from fits?
         samples_cal = {
             fn: {('', ''): im}
             for fn, im in zip(run.files.names, list(reg)[1:])
@@ -439,61 +467,98 @@ def plot_drizzle(fig, *indices, ff, save_as):
 
     # align
     if do_reg:
-        # note: source detections were reported above in `get_sample_images`
-        reg = run.coalign_survey(**CONFIG.register,
-                                 **{**CONFIG.detection, 'report': False})
-
-        # save
-        logger.info('Saving image register at: {}.', paths.reg)
-        reg.params = np.load(paths.reg_params)
-        io.serialize(paths.reg, reg)
-        # np.save(paths.reg_params, reg.params)
-
-        # reg.plot_clusters(nrs=True)
-
-        # Build image WCS
-        wcss = reg.build_wcs(run)
-        # save samples fits
-        save_samples_fits(samples_cal, wcss, paths.sample_images, overwrite)
-
-        # Drizzle image
-        reg.drizzle(paths.drizzle, CONFIG.drizzle.pixfrac)
+        reg = register(run, paths, samples_cal, overwrite)
 
     if plot:
-        # mosaic
-        mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
-        ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
-        mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
+        plot_overview(reg, run, ui, paths)
+    return reg
 
-        # drizzle
-        ff = apl.FITSFigure(str(paths.drizzle))
-        ui.add_tab('Overview', 'Drizzle', fig=ff._figure)
 
-        if delay:
-            logger.info('Plotting delayed: Adding plot callback for {}', key)
-            ui['Overview'].add_callback(plot_drizzle, ff=ff,
-                                        save_as=paths.drizzle.with_suffix('.png'))
-            atexit.register(save_image, image, filename)
-        else:
-            logger.info('Plotting sample image {}', key)
-            plot_image(fig, image=image, save_as=filename)
+def register(run, paths, samples_cal, overwrite):
 
-        # txt, arrows = mos.mark_target(
-        #     run[0].target,
-        #     arrow_head_distance=2.,
-        #     arrow_size=10,
-        #     arrow_offset=(1.2, -1.2),
-        #     text_offset=(4, 5), size=12, fontweight='bold'
-        # )
+    # note: source detections were reported above in `get_sample_images`
+    reg = run.coalign_survey(
+        **CONFIG.registration, **{**CONFIG.detection, 'report': False}
+    )
 
-    # %%
-    # if not products['Images']['Source Regions']:
-    #     ui = reg.plot_detections()
-    #     ui.save(filenames=[f'{hdu.file.stem}.regions.png' for hdu in run],
-    #             path=paths.plots)
+    # TODO region files
 
-    # phot = PhotInterface(run, reg, paths.phot)
-    # ts = mv phot.ragged() phot.regions()
+    # save
+    logger.info('Saving image registry at: {}.', paths.reg)
+    reg.params = np.load(paths.reg_params)
+    io.serialize(paths.reg, reg)
+    # np.save(paths.reg_params, reg.params)
+
+    # reg.plot_clusters(nrs=True)
+
+    # Build image WCS
+    wcss = reg.build_wcs(run)
+    # save samples fits
+    save_samples_fits(samples_cal, wcss, paths.sample_images, overwrite)
+
+    # Drizzle image
+    reg.drizzle(paths.drizzle, CONFIG.drizzle.pixfrac)
+
+    return reg
+
+
+def plot_overview(reg, run, ui, paths):
+
+    # mosaic
+    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
+    ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
+    mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
+
+    # txt, arrows = mos.mark_target(
+    #     run[0].target,
+    #     arrow_head_distance=2.,
+    #     arrow_size=10,
+    #     arrow_offset=(1.2, -1.2),
+    #     text_offset=(4, 5), size=12, fontweight='bold'
+    # )
+
+    # drizzle
+    ff = apl.FITSFigure(str(paths.drizzle))
+    ui.add_tab('Overview', 'Drizzle', fig=ff._figure)
+    filename = paths.plots / paths.drizzle.with_suffix('.png').name
+
+    if CONFIG.plotting.delay:
+        logger.info('Plotting delayed: Adding plot callback for drizzle.')
+        ui['Overview'].add_callback(plot_drizzle, ff=ff, save_as=None)
+        atexit.register(save_fig, ff._figure, filename)
+    else:
+        plot_drizzle(ff._figure, ff=ff, save_as=filename)
+
+
+@trace
+def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
+    #
+    # from obstools.phot import PhotInterface
+
+    # GUI
+    ui = None
+    if plot:
+        app = QtWidgets.QApplication(sys.argv)
+        ui = MplMultiTab(title=CONFIG.gui.title, pos=CONFIG.gui.pos)
+
+    # ------------------------------------------------------------------------ #
+    # Load data
+    run, info = init(paths, telescope, target, overwrite)
+
+    # ------------------------------------------------------------------------ #
+    # Preview
+    samples, overview, data_products = preview(run, paths, info, ui, overwrite)
+
+    # ------------------------------------------------------------------------ #
+    # Calibrate
+    calibration(run, overwrite)
+
+    # Image Registration
+    # ------------------------------------------------------------------------ #
+    # have to ensure we have single target here
+    target = check_single_target(run)
+
+    reg = registration(run, paths, ui, plot, show_cutouts, overwrite)
 
     # Write data products spreadsheet
     products.write_xlsx(run, paths)
@@ -502,14 +567,16 @@ def plot_drizzle(fig, *indices, ff, save_as):
     # logger.section('Quick Phot')
     logger.section('Source Tracking')
 
-    from obstools.phot.tracking import SourceTracker
+    spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
+    logger.info('Sources: {} span all observations.', spanning)
 
+    dilate = CONFIG.tracker.dilate
     image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
+        logger.info('Launching tracker for {}.', hdu.file.name)
         # back transform to image coords
         coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-
-        tracker = SourceTracker(coords, img.seg.circularize().dilate(2))
+        tracker = SourceTracker(coords, img.seg.circularize().dilate(dilate))
         tracker.init_memory(hdu.nframes, paths.phot / hdu.file.stem,
                             overwrite=overwrite)
         break
@@ -519,9 +586,12 @@ def plot_drizzle(fig, *indices, ff, save_as):
 
     # logger.section('Photometry')
 
+    # phot = PhotInterface(run, reg, paths.phot)
+    # ts = mv phot.ragged() phot.regions()
+
     # Launch the GUI
     if plot:
-        logger.debug('Launching GUI')
+        logger.section('Launching GUI')
         ui.show()
         # app.exec_()
         sys.exit(app.exec_())
