@@ -78,7 +78,8 @@ gui:
 
 # plotting
 plotting: &plotting
-    cmap:       cmr.voltage
+    delay:      True
+    cmap:       cmr.voltage_r
 
     # samples:
     segments:
@@ -112,7 +113,7 @@ plotting: &plotting
 
 
 # ---------------------------------------------------------------------------- #
-# Folder structure for results
+# Folder structure for pipeline results
 folders:
     # root folder name default (if not provided by user at cli)
     output_root:    .pyshoc
@@ -126,7 +127,7 @@ folders:
     phot:           phot
     cache:          .cache
 
-# Data product filenames
+# Filenames for pipeline data products
 files: &filenames
     # campaign info
     summary:        info/campaign-files.xlsx
@@ -193,9 +194,9 @@ registration: &image_registration
 
 drizzle: 
     pixfrac:        0.5
-    cmap:           cmr.voltage
 
 # ---------------------------------------------------------------------------- #
 # source tracking 
 tracking:
+    dilate: 2
     # com

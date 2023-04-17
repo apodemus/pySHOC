@@ -121,13 +121,7 @@ def setup(root, output, use_cache):
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
 
-    paths = FolderTree(root, output,
-                       obslog=CONFIG.files.obslog,
-                       summary=CONFIG.files.summary,
-                       products=CONFIG.files.products,
-                       registry=CONFIG.files.reg,
-                       reg_params=CONFIG.files.reg_params)
-    paths.reg = paths.registry
+    paths = FolderTree(root, output, CONFIG.folders, **CONFIG.files)
     paths.create()
 
     # add log file sink

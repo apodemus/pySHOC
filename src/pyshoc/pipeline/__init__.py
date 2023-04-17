@@ -47,7 +47,7 @@ class FolderTree(AttributeAutoComplete):
         self.root = Path(root).resolve()
 
         #
-        folders = dict(CONFIG.folders)
+        folders = dict(folders)
         output_root_default = folders.pop('output_root')
         if output is None:
             output = self.root / output_root_default
