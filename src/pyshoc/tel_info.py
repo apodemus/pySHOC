@@ -29,7 +29,7 @@ NAME_EQUIVALENTS.update(
     {'74': _74, '1.9': _74,
      '40': _40, '1.0': _40, '1': _40}
 )
-KNOWN_NAMES = [*METRIC_NAMES, *IMPERIAL_NAMES, *NAME_EQUIVALENTS]
+KNOWN_NAMES = sorted([*METRIC_NAMES, *IMPERIAL_NAMES, *NAME_EQUIVALENTS])
 
 
 FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer

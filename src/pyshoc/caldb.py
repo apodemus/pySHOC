@@ -195,7 +195,7 @@ class CalDB(DB, LoggingMixin):
         shocObsGroups
             The matched and grouped `shocCampaign`s.
         """
-        from . import CONFIG
+        from .config import CONFIG
 
         which = 'master' if master else 'raw'
         name = motley.apply(f'{which} {kind}', CONFIG.console.colors[kind])

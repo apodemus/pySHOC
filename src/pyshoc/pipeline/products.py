@@ -15,7 +15,6 @@ from recipes.dicts import DictNode, vdict
 
 # relative
 from .. import CONFIG
-from . import _file_struct
 from .utils import get_file_age, human_time
 
 
@@ -24,8 +23,8 @@ from .utils import get_file_age, human_time
 # change actual locations of output data products in config.yaml
 _file_struct = {
     'plots': ('thumbs', 'thumbs_cal', 'mosaic'),
-    'info': ('summary', 'products', 'obslog'),
-    'reg': ('registry', 'params', 'drizzle')
+    'info':  ('summary', 'products', 'obslog'),
+    'reg':   ('registry', 'reg_params', 'drizzle')
 }
 
 
@@ -36,15 +35,17 @@ class Node(DictNode, vdict):
 
 def get_previous(run, paths):
 
+    # get overview products
     files = CONFIG.files
     overview = Node()
     for key, items in _file_struct.items():
         for item in items:
             path = paths.output / files[item]
             overview[key][path.name] = get_file_age(path)
-
+    # make read-only
     overview.freeze()
 
+    # get hdu products
     hdu_products = Node()
     for stem in run.files.stems:
         # get_info = ftl.partial(_get_info, stem)
