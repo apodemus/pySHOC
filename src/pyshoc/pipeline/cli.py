@@ -1,7 +1,7 @@
 
 
 # std
-import sys
+import atexit
 from pathlib import Path
 
 # third-party
@@ -17,8 +17,8 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
-from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree, logging
-from . import main as pipeline
+from . import (APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree, logging,
+               main as pipeline)
 
 
 def check_files_exist(files_or_folder):
@@ -125,8 +125,11 @@ def setup(root, output, use_cache):
     paths.create()
 
     # add log file sink
-    logger.add(paths.logs / 'main.log', level=CONFIG.logging.level.upper(),
-               format=logging.formatter, colorize=False)
+    logfile = paths.logs / 'main.log'
+    logger.add(logfile,
+               colorize=False,
+               **CONFIG.logging.file)
+    atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory
     rcParams['savefig.directory'] = paths.plots

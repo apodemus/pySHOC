@@ -4,7 +4,6 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 
 
 # std
-from obstools.phot.tracking import SourceTracker
 import sys
 import atexit
 import itertools as itt
@@ -26,20 +25,31 @@ from pyxides.vectorize import repeat
 from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
+from obstools.phot.tracking import SourceTracker
 from recipes import io
 from recipes.decorators.reporting import trace
 from recipes.string import remove_prefix, shared_prefix
 
 # relative
 from .. import CONFIG, shocCampaign
-from . import logging, products
+from . import products
 from .calibrate import calibrate
+from .logging import config, logger
 
 
 # ---------------------------------------------------------------------------- #
-# setup logging for pipeline
-logging.config()
+# logging config
+config()
 
+# ---------------------------------------------------------------------------- #
+# plot config
+rcParams.update({'font.size': 14,
+                 'axes.labelweight': 'bold',
+                 'image.cmap': CONFIG.plotting.cmap})
+# rc('text', usetex=False)
+
+
+# ---------------------------------------------------------------------------- #
 
 CONSOLE_CUTOUTS_TITLE = motley.stylize(CONFIG.console.cutouts.pop('title'))
 
@@ -53,12 +63,6 @@ CONSOLE_CUTOUTS_TITLE = motley.stylize(CONFIG.console.cutouts.pop('title'))
 # photomerty
 # decorrelate
 # spectral analysis
-
-# rc('savefig', directory=FIGPATH)
-# rc('text', usetex=False)
-rcParams.update({'font.size': 14,
-                 'axes.labelweight': 'bold',
-                 'image.cmap': CONFIG.plotting.cmap})
 
 # ---------------------------------------------------------------------------- #
 
@@ -570,7 +574,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
     logger.info('Sources: {} span all observations.', spanning)
 
-    dilate = CONFIG.tracker.dilate
+    dilate = CONFIG.tracking.dilate
     image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
         logger.info('Launching tracker for {}.', hdu.file.name)
@@ -583,6 +587,8 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     #
     tracker.run(hdu.calibrated)
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':584")
 
     # logger.section('Photometry')
 

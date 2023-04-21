@@ -5,6 +5,7 @@ Logging config for pyshoc pipeline.
 
 # std
 import warnings
+from pathlib import Path
 from functools import partialmethod
 
 # third-party
@@ -18,6 +19,9 @@ from recipes.logging import RepeatMessageHandler, TimeDeltaFormatter
 # relative
 from .. import CONFIG
 
+
+# ---------------------------------------------------------------------------- #
+cfg = CONFIG.logging.console
 
 # ---------------------------------------------------------------------------- #
 # Capture warnings
@@ -41,14 +45,14 @@ def markup_to_list(tags):
 
 
 level_formats = {
-    level.name: motley.stylize(CONFIG.logging.format,
+    level.name: motley.stylize(cfg.format,
                                level=level,
                                style=markup_to_list(level.color))
     for level in logger._core.levels.values()
 }
 
 # custom level for sectioning
-level_formats['SECTION'] = motley.stylize(CONFIG.logging.section, '',
+level_formats['SECTION'] = motley.stylize(cfg.section, '',
                                           width=get_terminal_size()[0])
 logger.level('SECTION', no=15)
 Logger = type(logger)
@@ -78,18 +82,21 @@ def escape_module(record):
 
 
 def formatter(record):
-    # {time:YYYY-MM-DD HH:mm:ss zz}
-    format_string = level_formats[record['level'].name]
-    format_string += '\n'
-
     # If we format the `message` here, loguru will try format a second time,
     # which is usually fine, except when the message contains braces (eg dict as
     # str), in which case it fails.
-    # FIXME: just escape the braces. Use color=False
-    # record['message'] = '{message}'
-    # motley.format_partial(record['message']) #
 
-    return motley.format(format_string, **{**record, 'message': '{message}'})
+    return motley.format(f'{level_formats[record["level"].name]}\n',
+                         **{**record, 'message': '{message}'})
+
+
+# def filter_console(record):
+#     return _console_sink_active
+
+
+def cleanup(logfile):
+    logfile = Path(logfile)
+    logfile.write_text(motley.ansi.strip(logfile.read_text()))
 
 
 # ---------------------------------------------------------------------------- #
@@ -98,48 +105,42 @@ def formatter(record):
 
 def config():
     # logger config
-    # logger.level('DEBUG', color='<black><bold>')
-
-    # formatter = motley.stylize(
-    #     '{elapsed:s|Bb}|'
-    #     '{{{name}.{function}:|green}:{line:d|orange}: <52}|'
-    #     '<level>{level}: {message}</>'
-    # )
-
-    console_sink = RepeatMessageHandler()
-    console_sink._template = motley.apply(console_sink._template, *'kB')
-
-    logger.configure(
-        handlers=[
-            # console handler
-            dict(sink=console_sink,
-                 level='DEBUG',
-                 catch=False,
-                 colorize=False,
-                 format=formatter,
-                 ),
-
-            # File handler
-            # dict(sink=path,
-            #      # serialize= True
-            #      level='DEBUG',
-            #      format=formatter,
-            #      colorize=False,
-            #      ),
+    return logger.configure(
+        # disable logging for motley.formatter, since it is being used here to
+        # format the log messages and will thus recurse infinitely.
+        activation=[
+            ('pyshoc', True),
+            ('obstools.phot', 'TRACE'),
+            ('recipes', True),
+            ('recipes.io.utils', False),
+            ('motley.formatter', False),
+            ('scrawl.moves.machinery', False)
         ],
+
+        # File sink is added by pipeline.cli.setup once output path is known
+        handlers=[{
+            # console handler
+            'sink':     RepeatMessageHandler(template=cfg.repeats),
+            'level':    cfg.level,
+            'catch':    cfg.catch,
+            'colorize': False,
+            'format':   formatter,
+            # 'filter':   filter_console
+            # One can also pass a dict mapping module names to minimum
+            # required level. In such case, each log record will search for
+            # it’s closest parent in the dict and use the associated level
+            # as the filter. The dict values can be int severity, str level
+            # name or True and False to respectively authorize and discard
+            # all module logs unconditionally. In order to set a default
+            # level, the "" module name should be used as it is the parent
+            # of all modules (it does not suppress global level threshold,
+            # though).
+        }],
 
         # "extra": {"user": "someone"}
         patcher=patch,
-
-        # disable logging for motley.formatter, since it is being used here to
-        # format the log messages and will thus recurse infinitely.
-        activation=[('pyshoc', True),
-                    ('obstools', True),
-                    ('recipes', True),
-                    ('motley.formatter', False)]
     )
 
-    return logger
 
 # ---------------------------------------------------------------------------- #
 

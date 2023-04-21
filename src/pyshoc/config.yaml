@@ -17,17 +17,29 @@ remote:
 # ---------------------------------------------------------------------------- #
 # logging
 logging:
-    level: debug
-    format: >-
-        {elapsed:s|Bb}|
-        {{{name}.{function}:s|green}:{line:d|orange}: <52}|
-        {{level.name}: {message}:|{style}}
-    section: |
+    console:
+        level: info
+        catch: False
+        format: >- # -  chomping indicator strips end newlines
+            {elapsed:s|Bb}|
+            {{{name}.{function}:s|green}:{line:d|orange}: <52}|
+            {{level.name}: {message}:|{style}}
+        section: |
 
-        {0:━<{width}}
-        {{level.name}: {message}:|B,teal}
-        {0:━<{width}}
+            {0:━<{width}}
+            {{level.name}: {message}:|B,teal}
+            {0:━<{width}}
+        repeats: |
+            { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
 
+    file:
+        level: debug
+        rotation: 2Mb
+        format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
+            {time:HH:mm:ss!UTC}|
+            {name}.{function}:{line:d}|
+            {level.name}: {message}
+        
 # ---------------------------------------------------------------------------- #
 # console info styling
 console:

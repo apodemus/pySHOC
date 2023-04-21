@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 # local
+import motley
 from recipes.dicts import AttrReadItem, DictNode
 
 
@@ -17,6 +18,7 @@ def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
 # ---------------------------------------------------------------------------- #
+
 
 class ConfigNode(DictNode, AttrReadItem):
     pass
@@ -38,4 +40,11 @@ for cmap in (plt.cmap, plt.segments.contours.cmap, plt.mosaic.cmap):
 
 # set remote username default
 if CONFIG.remote.username is None:
-    CONFIG.remote.username = get_username()
+    CONFIG.remote['username'] = get_username()
+
+# uppercase logging level
+for cfg in CONFIG.logging.values():
+    cfg['level'] = cfg.level.upper()
+del cfg
+
+CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
