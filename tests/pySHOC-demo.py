@@ -6,6 +6,7 @@
 
 import logging
 from pathlib import Path
+import itertools as itt
 
 from matplotlib import rc
 from IPython.display import display, HTML
@@ -57,20 +58,20 @@ tables = g.pprint();
 # headers untouched
 for obstype, r in g.items():
     # set attributes on HDU objects - not yet in header
-    r.set_attrs(obstype=obstype)
+    r.attrs.set(obstype=itt.repeat(obstype))
 
 # remove bad files
 g.pop('bad', None)
 
 # set the target name
 run_src = g['object']
-run_src.set_attrs(target='CTCV J1928-5001')
+run_src.attrs.set(target=itt.repeat('CTCV J1928-5001'))
 
 # add telescope info for old data.  We will need this later
 for obstype in ['object', 'flat']:
     run = g[obstype]
     is74in = np.equal(run.attrs('telescope'), None)
-    run[is74in].set_attrs(telescope='74in')
+    run[is74in].attrs.set(telescope=itt.repeat('74in'))
 
 # print target observations
 run_src.sort_by('date').pprint();   # todo: list by date; export to latex

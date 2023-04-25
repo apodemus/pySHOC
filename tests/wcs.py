@@ -6,9 +6,9 @@ if __name__ == '__main__':
     # see: https://www.aanda.org/articles/aa/full/2002/45/aah3859/aah3859.html
     # for definitions
     # array location of the reference point in pixels
-    w.wcs.crpix = [-234.75,                   8.3393]
+    w.wcs.crpix = [-234.75, 8.3393]
     # coordinate increment at reference point
-    w.wcs.cdelt = [-0.066667,                   0.066667]
+    w.wcs.cdelt = [-0.066667, 0.066667]
     # coordinate value at reference point
     w.wcs.crval = [0, -90]
     # axis type

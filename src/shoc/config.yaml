@@ -1,0 +1,7 @@
+# Location of calibration database
+caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
+
+
+colors:
+    flat: cornflowerblue
+    dark: tan

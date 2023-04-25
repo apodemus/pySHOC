@@ -1,79 +1,85 @@
-from shoc.timing import TimeDelta
-from astropy import time
-
-import more_itertools as mit
-import functools as ftl
-# from recipes.testing import Expect
-from recipes.containers import is_property
-from recipes.testing import  expected, Expect, mock
-from astropy.io.fits.hdu.base import _BaseHDU
-from pathlib import Path
-from shoc.core import (shocCampaign, shocHDU,  shocDarkHDU, shocFlatHDU,
-                       shocDarkMaster, shocOldDarkHDU)
-import pytest
-import numpy as np
-import os
-import tempfile as tmp
-import inspect
-
-# TODO: old + new data all modes!!!
-# TODO: all combinations of science, bias, dark, flats (+ masters)
-# TODO:
 
 # pylint: disable=C0111     # Missing %s docstring
 # pylint: disable=R0201     # Method could be a function
 
-# pretty sample images here:
-DATA = Path(__file__).parent / 'data'
-EX1 = DATA / 'AT2020hat'
-CAL = DATA / 'calibration'
 
-ROOT = Path('/media/Oceanus/work/Observing/data/sources/')
-EX2 = ROOT / 'Chariklo/20140429.016{,._X2}.fits'
-EX3 = ROOT / 'CVs/polars/CTCV J1928-5001/SHOC/raw'
+# std
+import os
+import inspect
+import tempfile as tmp
+from pathlib import Path
+from collections import defaultdict
+
+# third-party
+import pytest
+import numpy as np
+
+# local
+from recipes.testing import Expected, Throws, expected, mock, logger
+from shoc.header import Header
+from shoc.core import (shocCampaign, shocHDU, shocDarkHDU, shocFlatHDU,
+                       shocDarkMaster, shocFlatMaster,
+                       shocOldDarkHDU, shocOldFlatHDU)
+from shoc.timing import UnknownTimeException
+
+logger.setLevel(10)
+# TODO: old + new data all modes!!!
+# TODO: all combinations of science, bias, dark, flats (+ masters)
+# TODO:
+
+
+# pretty sample images here:
+DATAPATH = Path(__file__).parent / 'data'
+_ = Path('/media/Oceanus/work/Observing/data/sources/')
+CAL = DATAPATH / 'calibration'
+EX1 = DATAPATH / 'AT2020hat'
+EX2 = _ / 'Chariklo/20140429.016{,._X2}.fits'
+EX3 = _ / 'CVs/polars/CTCV J1928-5001/SHOC/raw'
+DATAPATHS = [EX1, EX2, EX3]
+
+# derived HDU classes
+# list(shocHDU._shocHDU__shoc_hdu_types.values())[2:]
+childHDUs = [shocDarkHDU, shocFlatHDU,
+             shocOldDarkHDU, shocOldFlatHDU,
+             shocDarkMaster, shocFlatMaster]
 
 #
 np.random.seed(12345)
 
 
 # ---------------------------------- Helpers --------------------------------- #
+datasets = defaultdict(shocCampaign.load)
 
-def list_of_files():
+
+def list_of_files(i):
     # create text file with list of filenames for test load
     fp, filename = tmp.mkstemp('.txt')
-    for name in EX1.glob('*.fits'):
+    for name in DATAPATHS[i].glob('*.fits'):
         os.write(fp, f'{name}{os.linesep}'.encode())
     os.close(fp)
     return filename
 
+
+def random_data(head):
+    shape = [head[f'NAXIS{i}'] for i in range(1, head['NAXIS'])[::-1]]
+    return np.random.rand(*shape)
+
 # --------------------------------- Fixtures --------------------------------- #
 
 
-@pytest.fixture
-def run():
-    return shocCampaign.load(EX1)
-# run = shocCampaign.load(EX1)
+@pytest.fixture(scope='session', params=DATAPATHS)
+def dataset(request):
+    return datasets[request.param]
 
+
+@pytest.fixture(scope='session')
+def header():
+    return Header.fromstring((DATAPATH / 'shoc_header.txt').read_text())
 
 # ----------------------------------- Tests ---------------------------------- #
 
 
-class TestTiming:
-    @pytest.mark.parametrize(
-        't',
-        [
-            # TimeDelta(TimeDelta(1)),
-            TimeDelta(time.TimeDelta(1)),
-            #  TimeDelta(1) * 2,
-            #  2 * TimeDelta(1),
-            #  TimeDelta(1) / 2
-        ])
-    def test_type(self, t):
-        assert type(t) is TimeDelta
-        print(t)
-
-
-test_hdu_type = Expect(_BaseHDU.readfrom)(
+test_hdu_type = Expected(shocHDU.readfrom)(
     {
         CAL/'SHA_20200822.0005.fits':                       shocDarkHDU,
         CAL/'SHA_20200801.0001.fits':                       shocFlatHDU,
@@ -84,26 +90,29 @@ test_hdu_type = Expect(_BaseHDU.readfrom)(
     left_transform=type
 )
 
+# FIXME:  TypeError: missing a required argument: 'header'
+# @expected(dict(zip(childHDUs, itt.repeat(ECHO))),
+#             right_transform=type)
+# def init(kls, header):
+#     return kls(random_data(header), header)
 
+
+# @pytest.skip
 class TestHDU:
-    def test_str(self, run):
-        print(str(run[0]))
+    def test_str(self, dataset):
+        print(str(dataset[0]))
 
-    # def test_hdu_type(self, filename, expected):
-    #     assert _BaseHDU.readfrom(filename).__class__ == expected
-    # @expected([(CAL/'SHA_20200822.0005.fits', shocDarkHDU),
-    #            (CAL/'SHA_20200801.0001.fits', shocFlatHDU),
-    #            (EX1/'SHA_20200731.0022.fits', shocNewHDU)],
-    #            globals_=globals())
-    # def hdu_type(self, filename):
-    #     return _BaseHDU.readfrom(filename).__class__
-    # print('....', filename)
-    # print(obj)
-    # return obj
-    # @pytest.mark.parametrize('hdu', run()[:1])
+    @pytest.mark.parametrize('kls', childHDUs)
+    def test_init(self, kls, header):
+        assert isinstance(kls(random_data(header), header), kls)
 
-    def test_timing(self, run):
-        hdu = run[0]
+    @expected({
+        EX1: None,
+        EX2: Throws(UnknownTimeException),
+        EX3: None
+    })
+    def test_timing(self, dataset):
+        hdu = dataset[0]
         t = hdu.t
         for attr, p in inspect.getmembers(type(t), is_property):
             getattr(t, attr)
@@ -128,11 +137,18 @@ class TestCampaign:
             # directory
             EX1, str(EX1),
             # pointer to text file with list of filenames
-            f'@{list_of_files()}'
+            f'@{list_of_files(0)}'
         )
     )
     def test_load(self, pointer):
-        run = shocCampaign.load(pointer)
+        shocCampaign.load(pointer)
+
+    def test_pprint(self, run):
+        print(run)
+        print(run.table(run))
+        print(run[:1])
+        print()
+        print()
 
     def test_file_helper(self, run):
         run.files
@@ -151,7 +167,7 @@ class TestCampaign:
         )
     )
     def test_single_index(self, run, index):
-        print(run[index].file.name)
+        # print(run[index].file.name)
         assert isinstance(run[index], shocHDU)
 
     @pytest.mark.parametrize(
@@ -216,26 +232,16 @@ class TestCampaign:
         assert isinstance(sub, shocCampaign)
         assert set(sub.files.names) == set(expected)
 
-    @pytest.mark.parametrize(
-        'run',
-        [shocCampaign.load(x) for x in (EX1, EX2, EX3)]
-    )
-    def test_pprint(self, run):
-        print(run)
-        print(run.table(run))
-        print(run[:1])
-        # print()
-        # print()
-
     # TODO: test_id, test_group, test_combine, test_save
     # steps below
+
     @pytest.mark.skip()
     def test_masters(self, run):
         from obstools.stats import median_scaled_median
-        from shoc import MATCH_FLATS, MATCH_DARKS
+        from shoc import MATCH_FLATS, MATCH_DARKS, repeat
 
         is_flat = np.array(run.calls('pointing_zenith'))
-        run[is_flat].set_attrs(obstype='flat')
+        run[is_flat].attrs.set(repeat(obstype='flat'))
 
         grp = run.group_by('obstype')
         gobj, gflats = grp['object'].match(grp['flat'], *MATCH_FLATS)
@@ -271,8 +277,6 @@ class TestCampaign:
 #      EX1/'SHA_20200731.0022.fits', shocNewHDU)
 # )
 
-
-# TODO: shocOldHDU, shocMasterBias, shocMasterFlat
 
 # TODO
 # def test_select
