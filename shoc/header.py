@@ -16,12 +16,12 @@ from .convert_keywords import KEYWORDS as KWS_OLD_NEW
 #                  Conversion as convert,
 #                  InputCallbackLoop
 #                  )
-from recipes.introspection.utils import get_module_name
+from recipes.logging import get_module_logger
+from motley.table import Table
 
-# from recipes.io import warn
 
 # module level logger
-logger = logging.getLogger(get_module_name(__file__))
+logger = get_module_logger()
 
 HEADER_KEYS_MISSING_OLD = \
     [
@@ -71,7 +71,7 @@ def get_new_key(old):
     return KWS_REMAP.get(old, old)
 
 
-def headers_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
+def header_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
     agg = defaultdict(list)
     if keys is None:
         keys = set(itt.chain(*run.calls('header.keys')))
@@ -82,33 +82,37 @@ def headers_table(run, keys=None, ignore=('COMMENT', 'HISTORY')):
         for header in run.attrs('header'):
             agg[key].append(header.get(key, '--'))
 
-    return agg
+    return Table(agg)
     # return Table(agg, order='r', minimalist=True,
     # width=[5] * 35, too_wide=False)
 
 
-def headers_intersect(obs, merge_histories=False):
+def headers_intersect(run, merge_histories=False):
     """
     For the headers of the observation set, keep only the keywords that have
     the same value across all headers.
 
     Parameters
     ----------
-    obs
+    run
 
     Returns
     -------
 
     """
+    size = len(run)
+    assert size > 0
 
-    assert len(obs)
+    headers = h0, *hrest = run.attrs('header')
+    # if single stack we are done
+    if not hrest:
+        return h0
 
-    from recipes.containers.sets import OrderedSet
+    from recipes.sets import OrderedSet
     from astropy.io.fits.verify import VerifyWarning
     from astropy.io.fits.header import Header
     import warnings
 
-    headers = h0, *hrest = obs.attrs('header')
     all_keys = OrderedSet(h0.keys())
     for h in hrest:
         all_keys &= OrderedSet(h.keys())
@@ -138,8 +142,8 @@ def headers_intersect(obs, merge_histories=False):
             if key in h:
                 agg |= OrderedSet(tuple(h[key]))
 
-        for x in agg:
-            getattr(out, f'add_{key.lower()}')(x)
+        for msg in agg:
+            getattr(out, f'add_{key.lower()}')(msg)
         continue
 
     return out
@@ -321,7 +325,7 @@ class shocHeader(Header):
     #     """
     #     Readout noise, sensitivity, saturation as taken from ReadNoiseTable
     #     """
-    #     from pyshoc import readNoiseTable
+    #     from shoc import readNoiseTable
     #     return readNoiseTable.get_readnoise(self)
     #
     # def get_readnoise_dict(self, with_comments=False):

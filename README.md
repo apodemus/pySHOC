@@ -11,16 +11,8 @@ Sutherland High Speed Optical Cameras (SHOC).
 * grant execute permissions: `chmod u+x install.sh`
 * run the script: `./install.sh`
 
-<!-- ### Third party libraries
-* see [LIBRARIES](https://github.com/username/sw-name/blob/master/LIBRARIES.md) files -->
 
-## License 
-* see [LICENSE](https://github.com/astromancer/pyshoc/blob/master/LICENSE.txt)
-
-## Version 
-* Pre-release
-
-## How-to use this code
+## Use
 * We are working on official documentation. 
 * For the moment the best place to see how to use pyshoc is the 
 [example notebook](https://nbviewer.jupyter.org/github/astromancer/pyshoc/blob/master/pyshoc/example/pyshoc.demo.ipynb)
@@ -37,3 +29,11 @@ Sutherland High Speed Optical Cameras (SHOC).
 ## Contact
 * e-mail: hannes@saao.ac.za
 
+<!-- ### Third party libraries
+* see [LIBRARIES](https://github.com/username/sw-name/blob/master/LIBRARIES.md) files -->
+
+## License 
+* see [LICENSE](https://github.com/astromancer/pyshoc/blob/master/LICENSE.txt)
+
+## Version 
+* Pre-release

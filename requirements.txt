@@ -1,0 +1,13 @@
+numpy==1.20.0
+scipy==1.5.1
+astropy==4.0.1
+joblib==0.13.2
+more_itertools==7.0.0
+dataclasses==0.6
+pytest==5.4.3
+matplotlib==3.3.1
+Pillow==7.2.0
+spiceypy==2.2.0
+barycorrpy==0.3.2
+recipes==0.1
+motley==0.0.1

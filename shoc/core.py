@@ -2,12 +2,13 @@
 
 
 # std libs
+import operator as op
 from obstools.phot.campaign import FnHelp
-import datetime
 import functools as ftl
 import itertools as itt
 from collections import defaultdict
 import warnings
+from pathlib import Path
 
 # third-party libs
 import numpy as np
@@ -29,17 +30,23 @@ from obstools.stats import median_scaled_median
 from obstools.image.calibration import keep
 from obstools.utils import get_coords_named, convert_skycoords
 from recipes import pprint
-from recipes.containers.sets import OrderedSet
-from recipes.containers import Grouped, OfType, PrettyPrinter
+from recipes.sets import OrderedSet
+from recipes.containers import Grouped, OfType
+from recipes.introspect import get_caller_name
+from recipes.string import sub, remove_prefix
+from recipes import bash
+from scrawl.imagine import plot_image_grid
 
 # relative libs
-from graphing.imagine import plot_image_grid
-
-# from pyshoc.image.sample import ResampleFlip
+# from shoc.image.sample import ResampleFlip
+from .timing import shocTiming, shocTimingOld, Trigger
 from .readnoise import readNoiseTables
-from .timing import shocTimingOld, shocTimingNew
-from .convert_keywords import KEYWORDS as kw_old_to_new
-from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
+from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
+from .header import headers_intersect, HEADER_KEYS_MISSING_OLD
+# from recipes.decor import expose
+from .pprint import BraceContract
+
+from motley.table import Table
 
 # only emit this warning once!!
 warnings.filterwarnings('once', 'Using telescope pointing coordinates')
@@ -82,21 +89,25 @@ LOCATIONS = {
 
 
 # ----------------------------- module constants ----------------------------- #
-
-EMPTY_FILTER_STR = '∅'
+CALIBRATION_NAMES = ('bias', 'flat', 'dark')
+OBSTYPE_EQUIVALENT = {'bias': 'dark'}
+EMPTY_FILTER_NAME = '∅'
 
 # Attributes for matching calibration frames
-ATT_EQUAL_DARK = ('instrument', 'binning',  # subrect
-                  'readout.preAmpGain', 'readout.outAmp.mode', 'readout.frq')  # <-- 'readout'
+ATT_EQUAL_DARK = ('camera', 'binning',  # subrect
+                  'readout.frq', 'readout.preAmpGain', 'readout.outAmp.mode')  # <-- 'readout'
 ATT_CLOSE_DARK = ('readout.outAmp.emGain', 'timing.exp')
-MATCH_DARKS = ATT_EQUAL_DARK, ATT_CLOSE_DARK
 
-ATT_EQUAL_FLAT = ('telescope', 'instrument', 'binning', 'filters')
-ATT_CLOSE_FLAT = ('date', )
-MATCH_FLATS = ATT_EQUAL_FLAT, ATT_CLOSE_FLAT
+ATT_EQUAL_FLAT = ('telescope', 'camera', 'binning', 'filters')
+ATT_CLOSE_FLAT = ('timing.date', )
+
+MATCH = {}
+MATCH['flats'] = MATCH['flat'] = MATCH_FLATS = (ATT_EQUAL_FLAT, ATT_CLOSE_FLAT)
+MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 
 
 # ------------------------------------- ~ ------------------------------------ #
+
 
 def str2tup(keys):
     if isinstance(keys, str):
@@ -115,6 +126,13 @@ def hbrace(size, name=''):
                      ['⎬ %s' % str(name)] +
                      ['⎪'] * (d + r) +
                      ['⎭'])
+
+
+class Messenger:
+    def message(self, message, cls_name=True):
+        """Make a message tagged with class and function name"""
+        return (f'{self.__class__.__name__}.{get_caller_name(2)} {Time.now()}: '
+                f'{message}')
 
 
 # def get_id(hdu):
@@ -143,20 +161,7 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
     return func(*args, **kws)
 
 
-class Date(datetime.date):
-    """
-    We need this so the datetime.date instances print in date format instead
-    of the class representation format, when print is called on, for eg. a tuple
-    containing a date_time object.
-    """
-
-    def __repr__(self):
-        return str(self)
-
-    def __format__(self, spec):
-        if 'd' in spec:
-            return str(self).replace('-', '')
-        return super().__format__(spec)
+# ------------------------------ Helper classes ------------------------------ #
 
 # class yxTuple(tuple):
 #     def __init__(self, *args):
@@ -257,9 +262,15 @@ class ReadoutMode:
          ) = readNoiseTables[self.serial][
             (self.frq, self.outAmp.mode, self.preAmpGain)]
 
+    def __iter__(self):
+        yield from (self.frq, self.preAmpGain, self.outAmp.mode, self.outAmp.emGain)
+
     def __repr__(self):
-        return (f'{self.frq}MHz {self.preAmpGain} {self.outAmp}' +
-                (f' {self.outAmp.emGain}' if self.isEM else ''))
+        return (f'{self.frq}MHz {self.preAmpGain} {self.outAmp}')
+
+    # @property
+    # def short(self):
+    #     return (f'{self.frq}MHz {self.outAmp}')
 
     def __hash__(self):
         return hash((self.frq,
@@ -289,18 +300,29 @@ class Filters:
         self.B = self.get(b)
 
     def get(self, long):
-        # get short description like UVBRI
+        # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return EMPTY_FILTER_STR
+            return EMPTY_FILTER_NAME
         if long:
             return long.split(' - ')[0]
-        return (long or EMPTY_FILTER_STR)
+        return (long or EMPTY_FILTER_NAME)
 
     def __members(self):
         return self.A, self.B
 
     def __repr__(self):
         return f'{self.__class__.__name__}{self.__members()}'
+
+    def __format__(self, spec):
+        return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
+        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), '')
+
+    def __str__(self):
+        return next(filter(EMPTY_FILTER_NAME.__ne__, self), EMPTY_FILTER_NAME)
+        # return next((s for s in self if (s != EMPTY_FILTER_NAME)), EMPTY_FILTER_NAME)
+
+    def __iter__(self):
+        yield from self.__members()
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -309,6 +331,11 @@ class Filters:
 
     def __hash__(self):
         return hash(self.__members())
+    
+    @property
+    def name(self):
+        """Name of the non-empty filter in either position A or B, else ∅"""
+        return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
 
 
 class shocFnHelp(FnHelp):
@@ -321,38 +348,59 @@ class shocFnHelp(FnHelp):
         return self.path.suffixes[0].lstrip('.')
 
 
-# HDU Subclasses
+# ------------------------------ HDU Subclasses ------------------------------ #
 
-class shocHDU(HDUExtra):
+
+class shocHDU(HDUExtra, Messenger):
     _FnHelper = shocFnHelp
+    __shoc_hdu_types = {}
+    filename_format = None
 
-    def __init__(self, data=None, header=None, do_not_scale_image_data=False,
-                 ignore_blank=False, uint=True, scale_back=None):
+    @classmethod
+    def match_header(cls, header):
+        return ('SERNO' in header)
+
+    def __new__(cls, data, header, obstype=None, *args, **kws):
+        # Choose subtypes of `shocHDU` here - simpler than using `match_header`
+        # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
+        # hierarch keywords, so for SHOC we cannot tell if it's the old format
+        # header by checking those.
+
+        obstype = (obstype or '').lower()
+        if not obstype:
+            obstype = header.get('OBSTYPE', '')
+
+        # check if all the new keywords are present
+        age, kind, suffix = '', '', 'HDU'
+        if any((kw not in header for kw in HEADER_KEYS_MISSING_OLD)):
+            age = 'Old'
+
+        # calibration stacks
+        obstype = OBSTYPE_EQUIVALENT.get(obstype, obstype)
+        if obstype in CALIBRATION_NAMES:
+            kind = obstype.title()
+            if (header['NAXIS'] == 2 and header['MASTER']):
+                suffix = 'Master'
+        elif obstype not in ('', 'object'):
+            cls.logger.warning('Unknown OBSTYPE: %r', obstype)
+
+        #
+        class_name = f'shoc{age}{kind}{suffix}'
+        # cls = cls.__shoc_hdu_types.get(class_name, cls)
+        # print(f'{class_name=:}; {cls=:}')
+        return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
+
+    def __init_subclass__(cls):
+        cls.__shoc_hdu_types[cls.__name__] = cls
+
+    def __init__(self, data=None, header=None, obstype=None, *args, **kws):
         # init PrimaryHDU
-        super().__init__(data=data, header=header,
-                         do_not_scale_image_data=do_not_scale_image_data,
-                         uint=uint,
-                         ignore_blank=ignore_blank,
-                         scale_back=scale_back)
-
-        # ImageSamplerHDUMixin.__init__(self)
+        super().__init__(data=data, header=header, *args, **kws)
 
         serial = header['SERNO']
-        shocNr = SERIAL_NRS.index(serial) + 1
-        self.instrument = 'SHOC %i' % shocNr
+        self.camera = f'SHOC{SERIAL_NRS.index(serial) + 1}'
         self.telescope = header.get('TELESCOP')
         self.location = LOCATIONS.get(self.telescope)
-
-        # date from header
-        self.date = self.nameDate = None  # FIXME: self.t.date ??
-        if 'DATE' in header:
-            date, time = header['DATE'].split('T')
-            self.date = Date(*map(int, date.split('-')))
-            # oldSHOC: file creation date
-            # starting date of the observing run: used for naming
-            h = int(time.split(':')[0])
-            nameDate = self.date - datetime.timedelta(int(h < 12))
-            self.nameDate = str(nameDate).replace('-', '')
 
         # # field of view
         # self.fov = self.get_fov()
@@ -384,7 +432,7 @@ class shocHDU(HDUExtra):
                                  for _ in 'AB'))
 
         # object name
-        self.target = header.get('OBJECT')  # objName
+        self.target = header.get('OBJECT')
         self.obstype = header.get('OBSTYPE')
 
         # # manage on-the-fly image orientation
@@ -392,6 +440,21 @@ class shocHDU(HDUExtra):
 
         # # manage on-the-fly calibration for large files
         # self.calibrated = ImageCalibration(self)
+
+    def __str__(self):
+        attrs = ('t.t0_flagged', 'binning', 'readout.mode', 'filters')
+        info = ('', ) + op.attrgetter(*attrs)(self) + ('',)
+        sep = ' | '
+        return f'<{self.__class__.__name__}:{sep.join(map(str, info))}>'
+
+    # def __repr__(self):
+
+    @property
+    def nframes(self):
+        """Total number of images in observation"""
+        if self.ndim == 2:
+            return 1
+        return self.shape[0]  #
 
     @lazyproperty
     def oriented(self):
@@ -415,24 +478,13 @@ class shocHDU(HDUExtra):
     def timing(self):
         # Initialise timing
         # this is delayed from init on the hdu above since this class may
-        # initially be created with a _`BasicHeader` only, in which case we
+        # initially be created with a `_BasicHeader` only, in which case we
         # will not yet have all the correct keywords available yet to identify
-        # old vs new.
-        # return shocTimingBase(self)
-        # 'shocOld' in self.__class__.__name__:
-        if isinstance(self, shocOldHDU):
-            return shocTimingOld(self)
-        return shocTimingNew(self)
+        # old vs new shoc data
+        return shocTiming(self)
 
     # alias
     t = timing
-
-    @property
-    def nframes(self):
-        """Total number of images in observation"""
-        if self.ndim == 2:
-            return 1
-        return self.shape[0]  #
 
     @lazyproperty
     def coords(self):
@@ -495,6 +547,12 @@ class shocHDU(HDUExtra):
         bool
             True if point to zenith, False otherwise
         """
+        if self.coords is None:
+            raise ValueError(
+                'No coordinates available for observation HDU. Please assign '
+                'the `target` attribute with the source name, or set the '
+                '`coord` directly.'
+            )
         return self.t[0].zd(self.coords, self.location).deg < tol
 
     # def pointing_park(obs, tol=1):
@@ -520,12 +578,12 @@ class shocHDU(HDUExtra):
 
         Examples
         --------
-        cube = shocObs.load(filename)
-        cube.get_field_of_view(1)               # 1.0m telescope
-        cube.get_field_of_view(1.9)             # 1.9m telescope
-        cube.get_field_of_view(74)              # 1.9m
-        cube.get_field_of_view('74in')          # 1.9m
-        cube.get_field_of_view('40 in')         # 1.0m
+        >>> cube = shocObs.load(filename)
+        >>> cube.get_fov(1)               # 1.0m telescope
+        >>> cube.get_fov(1.9)             # 1.9m telescope
+        >>> cube.get_fov(74)              # 1.9m
+        >>> cube.get_fov('74in')          # 1.9m
+        >>> cube.get_fov('40 in')         # 1.0m
         """
 
         # PS. welcome to the new millennium, we use the metric system now
@@ -612,11 +670,11 @@ class shocHDU(HDUExtra):
         m, v, s, k = np.divide(moments, self.readout.saturation)
 
         # s = 0 implies all constant pixel values.  These frames are sometimes
-        # created erroneously by SHOC
+        # created erroneously by the SHOC GUI
         if v == 0 or m >= 1.5:
             o = 'bad'
 
-        elif self.pointing_zenith():
+        if self.coords and self.pointing_zenith():
             # either bias or flat
             # Flat fields are usually about halfway to the saturation value
             if 0.15 <= m < 1.5:
@@ -642,10 +700,12 @@ class shocHDU(HDUExtra):
         check for date-obs keyword to determine if header information needs
         updating
         """
-        return not ('date-obs' in self.header)
+        return ('date-obs' not in self.header)
         # TODO: is this good enough???
 
+    # ------------------------------------------------------------------------ #
     # image arithmetic
+
     def combine(self, func, *args, **kws):
         """
         Combine images in the stack by applying the function `func` along the
@@ -662,21 +722,26 @@ class shocHDU(HDUExtra):
 
         """
 
+        assert callable(func), 'Func needs to be callable'
+
         # check if single image
         if (self.ndim == 2) or ((self.ndim == 3) and len(self.data) == 1):
             return self
 
+        # log some info
+        msg = f'{func.__name__} of {self.nframes} images from {self.file.name}'
+        msg = self.message(msg)
+        self.logger.info(remove_prefix(msg, self.__class__.__name__))
+
         # combine across images
         kws.setdefault('axis', 0)
+        # TODO: self.calibrated ???
         hdu = self.__class__(func(self.data, *args, **kws), self.header)
 
         # update header
         hdu.header['MASTER'] = True
         hdu.header['NCOMBINE'] = self.nframes
-        hdu.header.add_history(f'pyshoc.combine {Time.now()}: '
-                               f'{func.__name__} of {self.nframes} images '
-                               f'from {self.file.name}')
-
+        hdu.header.add_history(msg)
         return hdu
 
     def subtract(self, bias):
@@ -695,224 +760,240 @@ class shocHDU(HDUExtra):
         self.data = self.data - bias.data
 
         # update history
-        # self.header.add_history
-        # print(
-        #         f'{Time.now()}: Subtracted image {get_id(bias)}'
-        # )
+        msg = self.message(f'Subtracted image {bias.file.name}')
+        self.header.add_history(msg)
         return self
 
-    def attrs_to_header(self, **kws):
-        new_kws = dict(
-            object=self.target,
-            objra=self.coords.ra.to_string('hourangle', sep=':', precision=1),
-            objdec=self.coords.dec.to_string('deg', sep=':', precision=1),
-            obstype=self.obstype
-        )
+    def auto_update_header(self, **kws):
+        # FIXME: better to handle these as property and update header there ?
+        new_kws = {'obstype': self.obstype}
+        if self.target:
+            new_kws['object'] = self.target
+
+        if 'coords' in self.__dict__ and self.coords:
+            ra, dec = self.coords.ra, self.coords.dec
+            new_kws.update(
+                objra=ra.to_string('hourangle', sep=':', precision=1),
+                objdec=dec.to_string('deg', sep=':', precision=1),
+            )
+
         self.header.update({**new_kws, **kws})
 
-    # def save(folder=None, filename=None, name_format=None):
-    #     if name_format is None:
-    #         if self.nframe == 1:
-    #             fmt = '{0.obstype} {0.binning} {0.readout}'
-    #         else:
+    def get_save_name(self, name_format=None, ext='fits'):
+        # TODO: at filename helper?
+        name_format = name_format or self.filename_format
 
-    #         name_format =
+        if self.file.path:
+            return self.file.path
 
+        if name_format:
+            # get attribute values and replace unwnated characters for filename
+            fmt = name_format.replace('{', '{0.')
+            name = sub(fmt.format(self), {' ': '-', "'": '', ': ': ''})
+            return name + f'.{ext.lstrip(".")}'
+
+    # @expose.args()
+    def save(self, filename=None, folder=None, name_format=None,
+             overwrite=False):
+
+        # any changes to attrs maps to fits header before save
+        self.auto_update_header()
+
+        filename = filename or self.get_save_name(name_format)
+        if filename is None:
+            raise ValueError('Please provide a filename for saving.')
+
+        path = Path(filename)
+        if folder is not None:
+            folder = Path(folder)
+
+        if path.parent == Path():  # cwd
+            if folder is None:
+                raise ValueError('Please provide a folder location, or specify '
+                                 'a absolute path as `filename`.')
+            path = folder / path
+
+        if not path.parent.exists():
+            self.logger.info('Creating directory: %r', str(path.parent))
+            path.parent.mkdir()
+
+        action = 'Saving to'
+        if path.exists():
+            action = 'Overwriting'
+            
+        self.logger.info('%s %r', action, str(path))
+        self.writeto(path, overwrite=overwrite)
+        return path
+
+
+# FILENAME_TRANS = str.maketrans({'-': '', ' ': '-'})
 
 class shocOldHDU(shocHDU):
-    # NOTE:_BaseHDU creates a _BasicHeader, which does not contain hierarch
-    # keywords, so for SHOC we cannot tell if it's the old format header by
-    # checking those
+    def __init__(self, data, header, *args, **kws):
 
-    @classmethod
-    def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False           # not SHOC!
+        super().__init__(data, header, *args, **kws)
 
-        # check if any of the new keywords are missing in the header
-        return any((kw not in header for kw in HEADER_KEYS_MISSING_OLD))
+        # fix keywords
+        for old, new in KWS_OLD_TO_NEW:
+            if old in header:
+                self.header.rename_keyword(old, new)
 
-
-class shocNewHDU(shocHDU):
-    @classmethod
-    def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False        # not SHOC!
-
-        # first check not calibration stack
-        for c in [shocBiasHDU, shocFlatHDU]:
-            if c.match_header(header):
-                return False
-
-        # check if all the new keywords are present
-        old, new = zip(*kw_old_to_new)
-        return all([kw in header for kw in new])
+    @lazyproperty
+    def timing(self):
+        return shocTimingOld(self)
 
 
-class shocBiasHDU(shocHDU):
-    # TODO: don't pprint filters since irrelevant
-
-    @classmethod
-    def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False
-        return 'bias' in header.get('OBSTYPE', '')
+class shocCalibrationHDU(shocHDU):
+    _combine_func = None  # place-holder
+    
+    # TODO: set target=''
 
     def get_coords(self):
         return
 
-    def combine(self, func=np.median):
-        # "Median combining can completely remove cosmic ray hits and
-        # radioactive decay trails from the result, which cannot be done by
-        # standard mean combining. However, median combining achieves an
-        # ultimate signal to noise ratio about 80% that of mean combining the
-        # same number of frames. The difference in signal to noise ratio can
-        # be by median combining 57% more frames than if mean combining were
-        # used. In addition, variants on mean combining, such as sigma
-        # clipping, can remove deviant pixels while improving the S/N
-        # somewhere between that of median combining and ordinary mean
-        # combining. In a nutshell, if all images are "clean", use mean
-        # combining. If the images have mild to severe contamination by
-        # radiation events such as cosmic rays, use the median or sigma
-        # clipping method." - Newberry
-        return super().combine(func)
+    def combine(self, func=_combine_func, *args, **kws):
+        return super().combine(func or self._combine_func, *args, **kws)
 
 
-class shocFlatHDU(shocBiasHDU):
-    @classmethod
-    def match_header(cls, header):
-        if 'SERNO' not in header:
-            return False
-        return 'flat' in header.get('OBSTYPE', '')
+class shocDarkHDU(shocCalibrationHDU):
+    # TODO: don't pprint filters since irrelevant
 
-    def combine(self, func=median_scaled_median):
-        # default combine algorithm first median scales each image,
-        # then takes median across images
-        return super().combine(func)
+    filename_format = '{obstype}-{camera}-{binning}-{readout}'
+    _combine_func = staticmethod(np.median)
 
-
-class shocMasterBias(shocBiasHDU):
-    @classmethod
-    def match_header(cls, header):
-        if super().match_header(header):
-            if header['NAXIS'] == 2 and header['MASTER']:
-                return True
-        return False
+    # "Median combining can completely remove cosmic ray hits and radioactive
+    # decay trails from the result, which cannot be done by standard mean
+    # combining. However, median combining achieves an ultimate signal to noise
+    # ratio about 80% that of mean combining the same number of frames. The
+    # difference in signal to noise ratio can be by median combining 57% more
+    # frames than if mean combining were used. In addition, variants on mean
+    # combining, such as sigma clipping, can remove deviant pixels while
+    # improving the S/N somewhere between that of median combining and ordinary
+    # mean combining. In a nutshell, if all images are "clean", use mean
+    # combining. If the images have mild to severe contamination by radiation
+    # events such as cosmic rays, use the median or sigma clipping method."
+    # - Newberry
 
 
-class shocMasterFlat(shocFlatHDU):
-    @classmethod
-    def match_header(cls, header):
-        if super().match_header(header):
-            if header['NAXIS'] == 2 and header['MASTER']:
-                return True
-        return False
+class shocFlatHDU(shocCalibrationHDU):
+
+    filename_format = '{obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}'
+    _combine_func = staticmethod(median_scaled_median)
+    # default combine algorithm first median scales each image, then takes
+    # median across images
 
 
-class TableHelper(AttrTable):
-    # def __call__(self, container, attrs=None, **kws):
+class shocOldDarkHDU(shocOldHDU, shocDarkHDU):
+    pass
 
-    def get_table(self, run, attrs=None, **kws):
-        # Add '*' flag to times that are gps triggered
-        flags = {}
-        attrs = attrs or self.attrs
-        # index_of = attrs.index
-        postscript = []
-        for key, fun in [('timing._t0_repr', 'timing.trigger.is_gps'),
-                         ('timing.exp', 'timing.trigger.is_gps_loop')]:
-            if key in attrs:
-                # type needed below so empty arrays work with `np.choose`
-                _flags = np.array(run.calls(fun), bool)
-                if _flags.any():
-                    head = self.headers[key]
-                    flags[head] = np.choose(_flags, [' ' * any(_flags), '*'])
-                    postscript.append(f'* {head}: {fun}')
 
-        units = kws.pop('units', self.kws['units'])
-        if units and kws.get('col_headers'):
-            ok = set(map(self.headers.get, attrs)) - {None}
-            units = {k: u for k, u in units.items() if k in ok}
-        else:
-            units = None
+class shocOldFlatHDU(shocOldHDU, shocDarkHDU):
+    pass
 
-        # compacted `filter` displays 'A = ∅' which is not very clear. Go more
-        # verbose again for clarity
+# class shocBiasHDU(shocDarkHDU):
+#     # alias
+#     pass
 
-        table = super().get_table(run, attrs, flags=flags, units=units,
-                                  footnotes=postscript, **kws)
 
-        replace = {'A': 'filter.A',
-                   'B': 'filter.B'}
-        if table.compact_items:
-            table.compact_items = {replace.get(name, name): item
-                                   for name, item in table.compact_items.items()
-                                   }
-        return table
+class shocDarkMaster(shocDarkHDU):
+    pass
+
+
+class shocFlatMaster(shocFlatHDU):
+    pass
+
+# -------------------------- Pretty printing helpers ------------------------- #
+
+
+def hms(t):
+    """sexagesimal formatter"""
+    return pprint.hms(t.to('s').value, unicode=True, precision=1)
 
 
 def get_table(r, attrs=None, **kws):
     return r.table.get_table(r, attrs, **kws)
 
 
-class shocTerseFilenamePPrint(PrettyPrinter):
-    def __call__(self, run):
+class TableHelper(AttrTable):
 
-        names = defaultdict(list)
-        for name in run.files.names:
-            base, nr, _ = name.split('.')
-            names[base].append(nr)
+    def get_table(self, run, attrs=None, **kws):
+        # Add '*' flag to times that are gps triggered
+        flags = {}
+        postscript = []
+        for key, attr in [('timing.t0', 'timing.trigger.flag', ),
+                          ('timing.exp', 'timing.trigger.loop_flag')]:
+            head = self.aliases[key]
+            flg = flags[head] = run.attrs(attr)
+            for flag in set(flg):
+                if flag:
+                    info = Trigger.FLAG_INFO[self.get_header(attr)]
+                    postscript.append(f'{key}{flag}: {info[flag]}')
 
-        condensed = []
-        for base, stems in names.items():
-            stems = np.array(stems)
-            nrs = stems.astype(int)
-            idx = np.where(np.diff(nrs) != 1)[0] + 1
-            for seq in np.split(nrs, idx):
-                zfill = len(str(seq[-1]))
-                pre = stems[0][:-zfill]
-                s = ':'.join(np.char.zfill(seq[[0, -1]].astype(str), zfill))
-                condensed.append(f'{base}.{pre}[{s}].fits')
+        # get table
+        postscript = '\n'.join(postscript)
+        table = super().get_table(run, attrs, flags=flags,
+                                  footnotes=postscript, **kws)
 
-        return f'{self.pre(run)}: {self.joined(condensed)}'
+        # compacted `filter` displays 'A = ∅' which is not very clear. Go more
+        # verbose again for clarity
+        # HACK:
+        if table.compact_items:
+            replace = {'A': 'filter.A',
+                       'B': 'filter.B'}
+            table.compact_items = {replace.get(name, name): item
+                                   for name, item in table.compact_items.items()
+                                   }
+            table._compact_table = table._get_compact_table()
+        return table
 
 
-class shocCampaign(PhotCampaign, OfType(shocHDU)):
+# ------------------------------------- ~ ------------------------------------ #
+
+
+class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
     #
-    pretty = shocTerseFilenamePPrint(sep='\n', brackets='')
+    pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
 
-    # pprinter controls which attributes will be printed
-    # TODO: table
+    # controls which attributes will be printed
     table = TableHelper(
         ['file.stem',
-         'telescope', 'instrument',
+         'telescope', 'camera',
          'target', 'obstype',
          'filters.A', 'filters.B',
          'nframes', 'ishape', 'binning',
-         'readout.preAmpGain',
+         #  'readout.preAmpGain',
          'readout.mode',
+         #  'readout.mode.frq',
+         #  'readout.mode.outAmp',
 
-         'timing._t0_repr',
+         'timing.t0',
          'timing.exp',
          'timing.duration',
          ],
-        column_headers={
+        aliases={
             'file.stem': 'filename',
             'telescope': 'tel',
-            'instrument': 'camera',
+            # 'camera': 'camera',
             'nframes': 'n',
             'binning': 'bin',
+            # 'readout.mode.frq': 'mode',
             'readout.preAmpGain': 'preAmp',  # 'γₚᵣₑ',
             'timing.exp': 'tExp',
-            'timing._t0_repr': 't0',
+            # 'timing.t0': 't0',
+            # 'timing.duration': 'duration'
         },
         formatters={
-            'timing.duration': ftl.partial(pprint.hms,
-                                           unicode=True,
-                                           precision=1)
+            'duration': hms,
+            't0': lambda t: t.iso
         },
-        units={'preAmp': 'e⁻/ADU',
-               'tExp': 's',
-               't0': 'UTC'},
+        units={
+            # 'readout.preAmpGain': 'e⁻/ADU',
+            # 'readout.mode.frq': 'MHz',
+            # 'readout.mode': ''
+            'tExp': 's',
+            't0': 'UTC',
+            'ishape': 'y, x',
+        },
 
         compact=True,
         title_props=dict(txt=('underline', 'bold'), bg='g'),
@@ -926,15 +1007,14 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
     #     """Map and arbitrary function onto the data of each observation"""
     #     shocHDU.data.get
 
-    # def group_by_obstype(self, *keys, return_index=False, **kws):
+    # @expose.args
 
-    def save(self, folder=None, name_format=None):
+    def save(self, folder=None, name_format=None,  overwrite=False):
+        filenames = self.calls('save', None, folder, name_format, overwrite)
+        return self.__class__.load(filenames)
 
-        trans = str.maketrans({'-': '', ' ': '-'})
-        fmt = '{0.obstype} {0.binning} {0.readout}'
-        name = fmt.format(self).translate(trans)
-
-    # TODO: def update_headers
+    def update_headers(self, **kws):
+        self.calls('auto_update_header', **kws)
 
     def thumbnails(self, statistic='mean', depth=10, subset=None,
                    title='file.name', calibrated=False, figsize=None, **kws):
@@ -958,6 +1038,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
             calibrate the image if bias / flat field available
         figsize:  tuple
                size of the figure in inches
+
         Returns
         -------
 
@@ -1077,9 +1158,9 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
         exact, closest = str2tup(exact), str2tup(closest)
         keys = OrderedSet(filter(None, mit.flatten([exact, closest])))
 
-        assert len(keys), ('Need at least one key (attribute name) by which '
+        assert len(keys), ('Need at least one `key` (attribute name) by which '
                            'to match')
-        assert len(other), 'Need at least one key observation to match'
+        # assert len(other), 'Need at least one other observation to match'
         if threshold_warn is not None:
             threshold_warn = np.atleast_1d(threshold_warn)
             assert threshold_warn.size == len(closest)
@@ -1116,7 +1197,19 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
                 # get delta matrix
                 v1 = vals1[idx1[key], lme:]
                 v0 = vals0[idx0[key], lme:]
-                delta_mtx = np.abs(v1[:, None] - v0)
+                try:
+                    delta_mtx = np.abs(v1[:, None] - v0)
+                except Exception as err:
+                    from IPython import embed
+                    import textwrap, traceback
+                    embed(header=textwrap.dedent(
+                            f"""\
+                            Caught the following {type(err).__name__}:
+                            %s
+                            Exception will be re-raised upon exiting this embedded interpreter.
+                            """) % traceback.format_exc())
+                    raise
+                    
                 # split sub groups for closest match
                 # if more than one attribute key provided for `closest`,
                 # we take 'closest' to mean overall closeness as measured
@@ -1155,9 +1248,10 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
 
         return out0, out1
 
-    def combine(self, func, *args, **kws):
+    def combine(self, func=None, *args, **kws):
         """
-        Combine each stack in the run
+        Combine each `shocHDU` in the campaign into a 2D image by calling `func`
+        on each data stack.  Can be used to compute image statistics.
 
         Parameters
         ----------
@@ -1167,8 +1261,19 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
         -------
 
         """
-        return self.__class__([hdu.combine(func, *args, **kws)
-                               for hdu in self])
+        # if func is None:
+        #     types = set(map(type, self))
+        #     if len(types) > 1:
+        #         raise ValueError(
+        #             'Please provide a function to combine. Combine function '
+        #             'will only be automatically selected if the Campaign has '
+        #             'observations of uniform obstype.'
+        #         )
+
+        #     func = types.pop()._combine_func
+        # #
+        # assert callable(func), f'`func` should be a callable not {type(func)}'
+        return self.__class__(self.calls('combine', func, *args, **kws))
 
     def stack(self):
         """
@@ -1178,58 +1283,36 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
         -------
 
         """
-        # keep only header keywords that are the same in all headers
-        hdu = shocHDU(np.dstack([hdu.data for hdu in self]),
-                      headers_intersect(self))
+        if len(self) == 1:
+            return self[0]
 
-        msg = f'Stacked {len(self)} files'
-        if None not in self.attrs('_file'):
-            names = ", ".join(map("{!r}".format, self.files.names))
-            msg = ': '.join((msg, names))
+        shapes = set(self.attrs('ishape'))
+        if len(shapes) > 1:
+            raise ValueError('Cannot stack images with different shapes')
+
+        # keep only header keywords that are the same in all headers
+        self.calls('auto_update_header')
+        header = headers_intersect(self)
+        #     header['DATE'] = self[0].header['date']  # HACK
+        hdu = shocHDU(np.dstack([hdu.data for hdu in self]),
+                      header)
+        msg = self.message(f'Stacked {len(self)} files.')
         hdu.header.add_history(msg)
         return hdu
 
-    def merge_combine(self, func, *args, **kws):
-        """
-        Combines all of the stacks in the run into a single image
-
-        Parameters
-        ----------
-        func: Callable
-           function used to combine
-        args:
-           extra arguments to *func*
-        kws:
-            extra keyword arguments to func
-
-        Returns
-        ------
-        shocObs instance
-        """
-        combined = self.combine(func, *args, **kws)
-        kws.setdefault('axis', 0)
-        image = func([hdu.data for hdu in combined], *args, **kws)
-
-        # keep only header keywords that are the same in all headers
-        header = headers_intersect(self)
-        header['DATE'] = combined[0].header['date']  # HACK
-        hdu = shocHDU(image, header)
-
-        names = ", ".join(map("{!r}".format, self.files.names))
-        hdu.header.add_history(
-            f'Combined {len(self)} files with {func.__name__}: {names} '
-        )
-        return hdu
+    def merge_combine(func, *args, **kws):
+        return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
     def subtract(self, master_bias):
 
         if not isinstance(master_bias, PrimaryHDU):
-            raise TypeError('Not a shocHDU.')
+            raise TypeError(f'Expected shocHDU, got {type(master_bias)}')
 
         if len(master_bias.shape) > 2:
-            raise TypeError('The input hdu contains multiple images instead '
-                            'of a single image. Do `combine` to compute the '
-                            'master bias.')
+            raise TypeError(
+                'The input hdu contains multiple images instead of a single '
+                'image. Do `combine` to compute the master bias.'
+            )
 
         return self.__class__([hdu.subtract(master_bias) for hdu in self])
 
@@ -1310,8 +1393,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
 
         NOTE: The FITS headers are left unchanged by this function which only
         alters the attributed of the `shocHDU` instances.  To update the headers
-        you should do `hdu.attrs_to_header()` afterwards for each observation,
-        or alternatively `run.calls('attrs_to_header')` on the shocCampaign.
+        you should do `hdu.auto_update_header()` afterwards for each observation,
+        or alternatively `run.calls('auto_update_header')` on the shocCampaign.
 
         Parameters
         ----------
@@ -1339,20 +1422,25 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
                 sel.set_attrs(coords=obj_coords,
                               target=names[i],
                               obstype='object')
+    
 
-    def missing_flats(self):
+    def missing(self, kind):
+        kind = kind.lower()
+        assert kind in CALIBRATION_NAMES
+        kind = OBSTYPE_EQUIVALENT.get(kind, kind)
+        
         g = self.group_by('obstype')
-        return (set(g['object'].attrs(*MATCH_FLATS[0])) -
-                set(g['flat'].attrs(*MATCH_FLATS[0])))
-
-    def missing_darks(self):
-        g = self.group_by('obstype')
-        return (set(g['object'].join(g['flat']).attrs(*MATCH_DARKS[0])) -
-                set(g['flat'].attrs(*MATCH_DARKS[0])))
-
+        attr = MATCH[kind][0]
+        
+        atrset = set(g['object'].attrs(*attr))
+        if kind == 'dark':
+            atrset += set(g['flat'].attrs(*attr))
+        
+        atrset -= set(g[kind].attrs(*attr))
+        return sorted(atrset, key=str)
+    
     def missing_calibration(self, report=False):
-        missing = {cal: sorted(getattr(self, f'missing_{cal}s')(), key=str)
-                   for cal in ('flat', 'dark')}
+        missing = {kind: self.missing(kind) for kind in ('flat', 'dark')}
 
         if report:
             s = ''
@@ -1363,6 +1451,40 @@ class shocCampaign(PhotCampaign, OfType(shocHDU)):
             print(s)
 
         return missing
+
+    def gps_start_(self):
+        gps_start_missing = np.array(self.attrs('t.trigger.flag'), bool)
+        return self[gps_start_missing]
+
+    def no_gps_interval(self):
+        return self[self.calls('t.has_gps_interval')]
+
+    # def set_t0_sast(self, times):
+    #     assert len(times) == len(self)
+    #     for obs, t0 in zip(self, times):
+    #         obs.t.t0 = obs.t.from_local(t0)
+
+    def provide_gps(self, filename):
+
+        # read file with gps triggers
+        names, sast = np.loadtxt(str(filename), str, unpack=True)
+
+        gps_provided = run[names]
+        need_gps = run.select_by(**{'t.trigger.flag': bool})
+        assert gps_provided == need_gps
+
+        # t0 = need_gps.attrs('t.t0')
+        # need_gps.set_t0_sast(sast)
+
+        # assert len(times) == len(self)
+        for obs, t0 in zip(need_gps, sast):
+            obs.t.t0 = obs.t.from_local(t0)
+            obs.trigger.flag = ''
+
+        # print('TIMEDELTA')
+        # print((Time(t0) - Time(need_gps.attrs('t.t0'))).to('s'))
+
+        # TODO: header keyword
 
     # def partition_by_source():
 
@@ -1409,9 +1531,12 @@ class shocObsGroups(Grouped):
         super().__init__(factory, *args, **kws)
 
     def get_tables(self, titled=make_title, headers=False, **kws):
+        # TODO: move to motley.table
+        # FIXME: headers param not used
         """
         Get a dictionary of tables (`motley.table.Table` objects) for this
-        grouping. This method assists pprinting groups of observation sets.
+        grouping. This method assists pretty printing groups of observation
+        sets.
 
         Parameters
         ----------
@@ -1421,7 +1546,7 @@ class shocObsGroups(Grouped):
         -------
 
         """
-        from motley.table import Table
+
         # TODO: consider merging this functionality into  motley.table
         #       Table.group_rows(), or hstack or some somesuch
 
@@ -1429,16 +1554,16 @@ class shocObsGroups(Grouped):
             titled = make_title
 
         title = kws.pop('title', self.__class__.__name__)
-        ncc = kws.pop('compact', False)
+        ncc = kws.pop('compact', False)  # number of columns in compact part
         kws['compact'] = False
 
         pp = shocCampaign.table
         attrs = OrderedSet(pp.attrs)
         attrs_grouped_by = ()
         compactable = set()
-        multiple = (len(self) > 1)
-        if multiple:
-            if self.group_id is not None:
+        # multiple = (len(self) > 1)
+        if len(self) > 1:
+            if self.group_id != ((), {}):
                 keys, _ = self.group_id
                 key_types = dict()
                 for gid, grp in itt.groupby(keys, type):
@@ -1451,7 +1576,7 @@ class shocObsGroups(Grouped):
             compactable = attrs - attrs_varies
             attrs -= compactable
 
-        #
+        # column headers
         headers = pp.get_headers(attrs)
 
         # handle column totals
@@ -1462,9 +1587,9 @@ class shocObsGroups(Grouped):
             totals = set(totals) - set(attrs_grouped_by) - compactable
             # convert totals to numeric since we remove column headers for
             # lower tables
-            totals = list(map(headers.index, totals))
+            totals = list(map(headers.index, pp.convert_aliases(list(totals))))
 
-        units = kws.pop('units', pp.kws['units'])
+        units = kws.pop('units', pp.units)
         if units:
             want_units = set(units.keys())
             nope = set(units.keys()) - set(headers)
@@ -1481,7 +1606,7 @@ class shocObsGroups(Grouped):
             # get table
             if titled:
                 # FIXME: problem with dynamically formatted group title.
-                # Table want to know width at runtime....
+                # Table wants to know width at runtime....
                 title = titled(gid)
                 # title = titled(i, gid, kws.get('title_props'))
 
@@ -1513,7 +1638,7 @@ class shocObsGroups(Grouped):
             for gid in empty:
                 tables[gid] = filler
 
-        # HACK compact repre
+        # HACK compact repr
         if ncc and first.compactable():
             first.compact = ncc
             first.compact_items = dict(zip(
@@ -1528,7 +1653,8 @@ class shocObsGroups(Grouped):
         # tables.update(empty)
         return tables
 
-    def pprint(self, titled=make_title, headers=False, braces=False, **kws):
+    def pformat(self, titled=make_title, headers=False, braces=False, vspace=0,
+                **kws):
         """
         Run pprint on each group
         """
@@ -1547,21 +1673,25 @@ class shocObsGroups(Grouped):
                 tbl = tables[gid]
                 braces += ('\n' * bool(i) +
                            hbrace(tbl.data.shape[0], gid) +
-                           '\n' * tbl.has_totals)
+                           '\n' * (tbl.has_totals + vspace))
 
-            # # vertical offset
-
+            # vertical offset
             offset = stack[0].n_head_lines
-            final = hstack([vstack(stack), braces], spacing=1, offset=offset)
+            final = hstack([vstack(stack, True, vspace), braces],
+                           spacing=1, offset=offset)
         else:
-            final = vstack(stack)
+            final = vstack(stack, not bool(titled), vspace)
 
-        print(final)
-        return tables
+        return final
+
+    def pprint(self, titled=make_title, headers=False, braces=False, vspace=0,
+               **kws):
+        print(self.pformat(titled, headers, braces, vspace, **kws))
 
     def map(self, func, *args, **kws):
-        # runs an arbitrary function on each shocCampaign
+        # runs an arbitrary function on each shocCampaign in the group
         out = self.__class__()
+        out.group_id = self.group_id
 
         for key, obj in self.items():
             if obj is None:
@@ -1569,14 +1699,6 @@ class shocObsGroups(Grouped):
             else:
                 out[key] = func(obj, *args, **kws)
         return out
-
-    # TODO: multiprocess!
-
-    def _map_method(self, name, *args, **kws):
-        def _runner(run, *args, **kws):
-            return getattr(run, name)(*args, **kws)
-
-        return self.map(_runner, *args, **kws)
 
     def calls(self, name, *args, **kws):
         """
@@ -1593,25 +1715,40 @@ class shocObsGroups(Grouped):
         -------
 
         """
-        return self._map_method('calls', name, *args, **kws)
+
+        def run_method(obj, *args, **kws):
+            return getattr(obj, name)(*args, **kws)
+
+        return self.map(run_method, *args, **kws)
 
     def attrs(self, *keys):
-        return self._map_method('attrs', *keys)
+        out = {}
+        for key, obs in self.items():
+            if obj is None:
+                out[key] = None
+            elif isinstance(key, shocCampaign):
+                out[key] = obs.attrs(*keys)
+            elif isinstance(obj, shocHDU):
+                out[key] = op.attrgetter(*keys)(obj)
+        return out
 
-    def combine(self, func, *args, **kws):
-        return self._map_method('combine', func, *args, **kws)
+    def combine(self, func=None, *args, **kws):
+        return self.calls('combine', func, *args, **kws)
 
-    def merge_combine(self, func, *args, **kws):
-        return self._map_method('merge_combine', func, *args, **kws)
+    def stack(self):
+        return self.calls('stack')
+
+    def merge_combine(self, func=None, *args, **kws):
+        return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
     def select_by(self, **kws):
         out = self.__class__()
         out.update({key: obs
-                    for key, obs in self._map_method('select_by', **kws).items()
+                    for key, obs in self.calls('select_by', **kws).items()
                     if len(obs)})
         return out
 
-    def co_map(self, func, other, *args, **kws):
+    def comap(self, func, other, *args, **kws):
         out = self.__class__()
         for key, run in self.items():
             co = other[key]
@@ -1625,7 +1762,10 @@ class shocObsGroups(Grouped):
 
         return out
 
-    def _co_map_func(self, other, name, *args, **kws):
+    def _comap_method(self, other, name, *args, **kws):
+
+        if not set(other.keys()) == set(self.keys()):
+            raise ValueError('GroupId mismatch')
 
         out = self.__class__()
         for key, run in self.items():
@@ -1654,7 +1794,7 @@ class shocObsGroups(Grouped):
         Bias subtracted shocObsGroups
         """
 
-        return self._co_map_func(biases, 'subtract')
+        return self._comap_method(biases, 'subtract')
 
     def set_calibrators(self, biases=None, flats=None):
         """
@@ -1679,6 +1819,15 @@ class shocObsGroups(Grouped):
             for hdu in run:
                 hdu.set_calibrators(bias, flat)
 
+    def save(self, folder=None, name_format=None, overwrite=False):
+        # since this calls `save` on polymorphic class HDU / Campaign and 'save'
+        # method in each of those have different signature, we have to unpack
+        # the keyword
+        return self.calls('save',
+                          folder=folder,
+                          name_format=name_format,
+                          overwrite=overwrite)
+
 
 class Filler:
     s = 'NO MATCH'
@@ -1699,8 +1848,6 @@ class Filler:
 def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
                  group_header_style='bold', no_match_style='r', g1_style='c',
                  ):
-    from collections import defaultdict
-    from recipes.containers.sets import OrderedSet
 
     # create tmp shocCampaign so we can use the builtin pprint machinery
     tmp = shocCampaign()
@@ -1792,7 +1939,6 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         import operator as op
         import itertools as itt
 
-        from motley.table import Table
         from motley import codes
         from motley.utils import hstack, overlay, ConditionalFormatter
 
@@ -1816,9 +1962,3 @@ def pprint_match(g0, g1, deltas, closest=(), threshold_warn=(),
         print(tbl)
         print()
         return tbl
-
-
-# class shocObsBase()
-
-# class PhotHelper:
-#     """helper class for photometry interface"""
