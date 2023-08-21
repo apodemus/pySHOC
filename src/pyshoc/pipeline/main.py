@@ -25,7 +25,6 @@ from pyxides.vectorize import repeat
 from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
-from obstools.phot.tracking import SourceTracker
 from recipes import io
 from recipes.decorators.reporting import trace
 from recipes.string import remove_prefix, shared_prefix
@@ -34,12 +33,12 @@ from recipes.string import remove_prefix, shared_prefix
 from .. import CONFIG, shocCampaign
 from . import products
 from .calibrate import calibrate
-from .logging import config, logger
+from .logging import config as config_logging, logger
 
 
 # ---------------------------------------------------------------------------- #
 # logging config
-config()
+config_logging()
 
 # ---------------------------------------------------------------------------- #
 # plot config
@@ -147,7 +146,7 @@ def compute_preview(run, paths, ui, overwrite,
     for hdu in run:
         stem = hdu.file.stem
         txtfile = f'{stem}.txt'
-        headfile = data_products[stem]['info/headers'].get(txtfile, '')
+        headfile = data_products[stem].get(txtfile, '')
         if not headfile or overwrite:
             headfile = paths.headers / txtfile
             logger.info('Writing fits header to text at {}.', showfile(headfile))
@@ -407,7 +406,7 @@ def preview(run, paths, info, ui, overwrite):
     logger.section('Overview')
 
     # Print summary table
-    daily = run.group_by('date')
+    daily = run.group_by('date') # 't.date_for_filename'
     logger.info('Observations of {} by date:\n{:s}\n', info['target'],
                 daily.pformat(titled=repr))
 
@@ -453,9 +452,9 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # Sample images (after calibration)
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
     else:
-        logger.info('Loading image registry from file: {}.', paths.reg)
-        reg = io.deserialize(paths.reg)
-        reg.params = np.load(paths.reg_params)
+        logger.info('Loading image registry from file: {}.', paths.reg.file)
+        reg = io.deserialize(paths.reg.file)
+        reg.params = np.load(paths.reg.params)
 
         # retrieve samples from register
         # TODO: get from fits?
@@ -488,10 +487,10 @@ def register(run, paths, samples_cal, overwrite):
     # TODO region files
 
     # save
-    logger.info('Saving image registry at: {}.', paths.reg)
-    reg.params = np.load(paths.reg_params)
-    io.serialize(paths.reg, reg)
-    # np.save(paths.reg_params, reg.params)
+    logger.info('Saving image registry at: {}.', paths.reg.file)
+    reg.params = np.load(paths.reg.params)
+    io.serialize(paths.reg.file, reg)
+    # np.save(paths.reg.params, reg.params)
 
     # reg.plot_clusters(nrs=True)
 
@@ -534,6 +533,57 @@ def plot_overview(reg, run, ui, paths):
         plot_drizzle(ff._figure, ff=ff, save_as=filename)
 
 
+def _track(hdu, seg, labels, coords, path, dilate=CONFIG.tracking.dilate,
+           njobs=CONFIG.tracking.dilate):
+
+    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'), 
+                hdu.file.name)
+
+    if CONFIG.tracking.circularize:
+        seg = seg.circularize()
+
+    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
+    tracker.init_memory(hdu.nframes, path, overwrite=overwrite)
+    tracker.run(hdu.calibrated, njobs=njobs)
+
+    # plot
+    if CONFIG.tracking.plot:
+        def get_filename(name, folder=path / 'plots'):
+            return folder / f'positions-{name.lower().replace(" ", "")}'
+
+        ui, art = tracker.plot.positions(ui=ion)
+        if ion:
+            ui.tabs.save(get_filename)
+        else:
+            for i, j in enumerate(tracker.use_labels):
+                ui[i].savefig(get_filename(f'source{j}'))
+
+        # plot individual
+        fig = plot_positions_individual(tracker)
+
+    return tracker, ui
+
+
+def track(run, reg):
+
+    logger.section('Source Tracking')
+    spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
+    logger.info('Sources: {} span all observations.', spanning)
+
+    image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
+    for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
+        # back transform to image coords
+        coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+
+        logger.info('Launching tracker for {}.', hdu.file.name)
+
+        tracker, ui = _track(hdu, img.seg, spanning, coords,
+                             products.resolve_path(paths.tracking, hdu.file.stem))
+
+        # return ui
+    return spanning
+
+
 @trace
 def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     #
@@ -557,8 +607,9 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # Calibrate
     calibration(run, overwrite)
 
-    # Image Registration
     # ------------------------------------------------------------------------ #
+    # Image Registration
+
     # have to ensure we have single target here
     target = check_single_target(run)
 
@@ -568,22 +619,8 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     products.write_xlsx(run, paths)
 
     # ------------------------------------------------------------------------ #
-    # logger.section('Quick Phot')
-    logger.section('Source Tracking')
-
-    spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
-    logger.info('Sources: {} span all observations.', spanning)
-
-    dilate = CONFIG.tracking.dilate
-    image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
-    for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
-        logger.info('Launching tracker for {}.', hdu.file.name)
-        # back transform to image coords
-        coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-        tracker = SourceTracker(coords, img.seg.circularize().dilate(dilate))
-        tracker.init_memory(hdu.nframes, paths.phot / hdu.file.stem,
-                            overwrite=overwrite)
-        break
+    # Source Tracking
+    spanning = track(reg, run)
 
     #
     tracker.run(hdu.calibrated)

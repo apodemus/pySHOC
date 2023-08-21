@@ -18,7 +18,7 @@ remote:
 # logging
 logging:
     console:
-        level: info
+        level: debug
         catch: False
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
@@ -131,35 +131,47 @@ folders:
     output_root:    .pyshoc
     # The folder structure defined here will be created inside `output_root`
     info:           info
-    logs:           info/logs
-    headers:        info/headers
+    logs:           $INFO/logs
     plots:          plots
-    sample_images:  plots/sample_images
+    sample_images:  $PLOTS/sample_images
     registry:       reg
-    phot:           phot
+    phot:           phot/$HDU
+    tracking:       $PHOT/track
     cache:          .cache
 
-# Filenames for pipeline data products
+# Filenames for pipeline data products. 
+# The folder paths defined above can be accessed below by eg $NAME for the `folders.name` field
 files: &filenames
     # campaign info
-    summary:        info/campaign-files.xlsx
-    products:       info/data-products.xlsx
-    obslog:         info/observing-log.tex
+    summary:        $INFO/campaign-files.xlsx
+    products:       $INFO/data-products.xlsx
+    obslog:         $INFO/observing-log.tex
+    headers:        $PHOT/$HDU/header.txt
 
     # remote file retrieval
-    remote:         'info/remote-files.txt'
-    rsync_script:   'info/rsync-remote.sh'
+    remote:         $INFO/remote-files.txt
+    rsync_script:   $INFO/rsync-remote.sh
     
     # image registration (wcs)
-    registry: &reg  reg/registry.pkl
-    reg_params:     reg/params.npy
-    drizzle:        reg/drizzle.fits
+    registry: &reg 
+        file:       $REGISTRY/registry.pkl
+        params:     $REGISTRY/params.npy
     reg: *reg       # alias
+    drizzle:        $REGISTRY/drizzle.fits
 
     # image plots
-    thumbs:         plots/thumbnails.png
-    thumbs_cal:     plots/thumbnails-cal.png
-    mosaic:         plots/mosaic.png
+    thumbs:         $PLOTS/thumbnails.png
+    thumbs_cal:     $PLOTS/thumbnails-cal.png
+    mosaic:         $PLOTS/mosaic.png
+
+    # source tracking data files
+    tracking:
+        measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
+        coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
+        frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
+        source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
+        feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
+        source_weights:     $TRACKING/source-weights.dat  # nsources  
 
 # aliases
 # filenames: *filenames
@@ -210,5 +222,134 @@ drizzle:
 # ---------------------------------------------------------------------------- #
 # source tracking 
 tracking:
-    dilate: 2
-    # com
+    dilate:             2
+    circularize:        True
+    njobs:              -1
+    
+    centroids:
+        # features used for tracking
+        com:                            1
+        geometric_median:               1
+        peak:               
+            upsample: 1     # note, changing this will siginificantly affect compute times
+            filter: lanczos
+
+    pre_subtract:       True
+    # subtract background from image prior to computing features
+    bg:                 median
+    # statistic used for background
+    
+    precision:          0.5
+    # Required positional accuracy in pixels
+    weights:            snr 
+    # Per-source weights for frame offset calculation. Use "snr" for
+    # signal-to-noise weighting.
+
+    cutoffs:
+        edge:           0
+        snr:            3.
+        # Sources with signal-to-noise ratio less than this will not be 
+        # considered when solving for image dither
+        distance:       10
+        # For outlier detection: maximum distance allowed for point measurements
+        # from centre of distribution.
+        saturation:     95
+        # If we know the saturation value of the CCD chip, we discard pixels above
+        # this percentage of the saturation value
+
+    compute:
+        centres: [0 , 1000, 100 ]
+
+    # ------------------------------------------------------------------------ #
+    table:
+        title:          Measured source coordinates
+        title_style: 
+            fg:         [B,  _,  w]
+            bg:         darkslategrey
+        col_head_style:
+            fg:         [B,  _,  black]
+            bg:         grey
+        col_head_align: ^ 
+        precision:      3
+        align:          r
+        row_nrs:        True
+        max_rows:       25
+
+    progress:
+        bar_format: >-
+            {{desc}: {percentage:3.0f}%{bar}{n_fmt}/{total_fmt}:|green}
+            {rate_fmt:|gold}
+            {elapsed:|cyan} eta {remaining:|cyan}
+        ascii: " ╸━"
+        unit:  " frames"
+    
+    # ------------------------------------------------------------------------ #
+    plot:   True
+    plots:
+
+        centroids:
+            com:              [r, +, "Centre of Mass"]
+            geometric_median: [g, o, "Projected\n Geometric Median"]
+            peak:             [m, ^, "Peak"]
+            avg:              [k, x, "Weighted Centroid"] 
+             # NOTE: avg sould be last
+
+        labels:
+            offset: [6, 6]
+            color:  w
+            size:   10
+            # fontweight:bold
+
+        position:
+            figsize:            [12, 6.5]
+            legend:             False
+            show:               [avg, weights, caption]  #  nulls, pixel
+
+            density:
+                cmap:               null
+                tessellation:       hex
+                min_count:          3
+
+            scatter:
+                marker: x
+                s:      5
+                ls:     ''
+                color:  null
+                zorder: 1
+                alpha:  0.35
+            
+            title:
+                size:       13
+                fontweight: bold
+                pad:        10
+
+            caption:
+                pos:    [0.075, 0.01]
+                text:   >-
+                    $x_0 = {x:s}$
+                    $y_0 = {y:s}$
+                va:     bottom
+                ha:     left
+                bbox:       # these are matplotlib.patch.Patch properties
+                    boxstyle:    round
+                    facecolor:  lightgrey
+
+            cbar:
+                # shrink: 0.9
+                pad:    0.01
+                label0:  Counts
+                label1:  Counts (Recentred)
+
+            pixel: 
+                lw:         0.75
+                ls:         '--'
+                fc:         none
+                ec:         lime
+                zorder:     100
+
+            precision:
+                lw:         0.75
+                ls:         '--'
+                fc:         none
+                ec:         darkgreen
+                zorder:     100

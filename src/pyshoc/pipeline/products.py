@@ -19,12 +19,12 @@ from .utils import get_file_age, human_time
 
 
 # ---------------------------------------------------------------------------- #
-# Internal naming convention for data products. User can
-# change actual locations of output data products in config.yaml
+# Internal naming convention for data products. User can change actual locations
+# of output data products in config.yaml, this is just for representation
 _file_struct = {
     'plots': ('thumbs', 'thumbs_cal', 'mosaic'),
     'info':  ('summary', 'products', 'obslog'),
-    'reg':   ('registry', 'reg_params', 'drizzle')
+    'reg':   ('file', 'params', 'drizzle')
 }
 
 
@@ -33,15 +33,40 @@ class Node(DictNode, vdict):
     pass
 
 
+# def _get_files_age(node):
+#     new = Node()
+
+#     for key, path in node.items():
+#         if isinstance(path, abc.MutableMapping):
+#             if ages := _get_files_age(path):
+#                 new[key] = ages
+#         elif path.is_file():
+#             new[key][path.name] = get_file_age(path)
+#         else:
+#             new[key][path.name] = None
+
+#     return new
+
+def resolve_path(path, hdu):
+    return Path(str(paths).replace('$HDU', hdu.file.stem))
+
+
 def get_previous(run, paths):
 
     # get overview products
     files = CONFIG.files
     overview = Node()
+
+    _file_struct = {
+        'plots':    (paths.thumbs, paths.thumbs_cal, paths.mosaic),
+        'info':     (paths.summary, paths.products, paths.obslog),
+        'reg':      (paths.reg.file, paths.reg.params, paths.drizzle)
+    }
+
     for key, items in _file_struct.items():
-        for item in items:
-            path = paths.output / files[item]
+        for path in items:
             overview[key][path.name] = get_file_age(path)
+
     # make read-only
     overview.freeze()
 
@@ -49,7 +74,7 @@ def get_previous(run, paths):
     hdu_products = Node()
     for stem in run.files.stems:
         # get_info = ftl.partial(_get_info, stem)
-        for path in io.iter_files(paths.output/f'**/{stem}*', recurse=True):
+        for path in io.iter_files(resolve_path(paths.phot, hdu), recurse=True):
             mid = str(path.parent.relative_to(paths.output))  # .replace(stem, '*')
             end = path.name  # .replace(stem, '*')
             hdu_products[stem][mid][end] = get_file_age(path)
@@ -57,15 +82,13 @@ def get_previous(run, paths):
     hdu_products.freeze()
 
     #
-
     def get_key(key):
         base, mid, end = key
         return f'/{mid.replace(base, "*")}/', f'{end.replace(base, "*")}'
 
-    # op.index()
-
+    # op.index()    
     logger.opt(lazy=True).debug(
-        'Found previous data products: \n{}\n{}\n',
+        'Found previous data products: \n{}\n',
         lambda: Table.from_dict(
             overview,
             convert_keys='/'.join,
@@ -76,18 +99,18 @@ def get_previous(run, paths):
             align={'Age': '>'},
             **CONFIG.console.products,
         ),
-        lambda: Table.from_dict(
-            hdu_products,
-            convert_keys=get_key,
-            title='Data Products: HDU (Age)',
-            row_headers=['*.fits', *hdu_products.keys()],
-            col_head_align='<',
-            ignore_keys=('origin.dat', 'centroids-mean.dat', 'coords-delta.dat'),
-            col_sort=('*.txt', 'flux.dat', 'flux-std.dat', 'snr.dat',
-                      'centroids.dat', 'coords-std.dat', '*.png').index,
-            formatter=human_time,
-            **CONFIG.console.products,
-        )
+        # lambda: Table.from_dict(
+        #     hdu_products,
+        #     convert_keys=get_key,
+        #     title='Data Products: HDU (Age)',
+        #     row_headers=['*.fits', *hdu_products.keys()],
+        #     col_head_align='<',
+        #     ignore_keys=(),
+        #     col_sort=('*.txt', 'flux.dat', 'flux-std.dat', 'snr.dat',
+        #               'centroids.dat', 'coords-std.dat', '*.png').index,
+        #     formatter=human_time,
+        #     **CONFIG.console.products,
+        # )
     )
 
     return overview, hdu_products

@@ -395,9 +395,7 @@ class shocHDU(ImageHDU, Messenger):
             return super().__new__(cls)
 
         # assign class based on obstype and age
-        obstype = (obstype or '').lower()
-        if not obstype:
-            obstype = header.get('OBSTYPE', '')
+        obstype = (obstype or '').lower() or header.get('OBSTYPE', '')
 
         # check if all the new keywords are present
         # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
@@ -536,7 +534,7 @@ class shocHDU(ImageHDU, Messenger):
     @property
     def diffraction_limit(self):
         # diffraction limit 1.9m
-        return DIFF_LIMS.get(self.telescope, None)
+        return DIFF_LIMS.get(self.telescope)
 
     def get_server_path(self, server=CONFIG.remote.server):
         if None in (self.file.path, self.telescope):
@@ -867,17 +865,14 @@ class shocHDU(ImageHDU, Messenger):
     # ------------------------------------------------------------------------ #
 
     def get_save_name(self, name_format=None, ext='fits'):
-        # TODO: at filename helper?
-        name_format = name_format or self.filename_format
-
         if self.file.path:
             return self.file.path
 
-        if name_format:
+        if (name_format := name_format or self.filename_format):
             # get attribute values and replace unwnated characters for filename
             fmt = name_format.replace('{', '{0.')
             name = sub(fmt.format(self), {' ': '-', "'": '', ': ': ''})
-            return f"{name}.{ext.lstrip('.')}"
+            return f'{name}.{ext.lstrip(".")}'
 
     # @expose.args()
     def save(self, filename=None, folder=None, name_format=None,

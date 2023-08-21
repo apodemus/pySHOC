@@ -17,8 +17,8 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
-from . import (APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree, logging,
-               main as pipeline)
+from . import (APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree,
+               _prefix_relative_path, logging, main as pipeline)
 
 
 def check_files_exist(files_or_folder):
@@ -83,7 +83,7 @@ def get_root(files_or_folder, _level=0):
 
 
 def resolve_output(output, root):
-    out = o if (o := Path(output)).is_absolute() else (root / output).resolve()
+    out = _prefix_relative_path(output, root)
     logger.info('Output root: {}', out)
     return out
 
@@ -126,9 +126,7 @@ def setup(root, output, use_cache):
 
     # add log file sink
     logfile = paths.logs / 'main.log'
-    logger.add(logfile,
-               colorize=False,
-               **CONFIG.logging.file)
+    logger.add(logfile, colorize=False, **CONFIG.logging.file)
     atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory

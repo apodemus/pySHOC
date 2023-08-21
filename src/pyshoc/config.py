@@ -28,7 +28,7 @@ CONFIG = ConfigNode(
     **yaml.load((Path(__file__).parent / 'config.yaml').read_text(),
                 Loader=yaml.FullLoader)
 )
-# CONFIG.freeze()
+#
 
 # load cmasher if needed
 plt = CONFIG.plotting
@@ -48,3 +48,6 @@ for cfg in CONFIG.logging.values():
 del cfg
 
 CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
+
+# make read-only
+CONFIG.freeze()

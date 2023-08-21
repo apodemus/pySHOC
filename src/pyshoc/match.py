@@ -35,7 +35,7 @@ def proximity_groups(self, other, keys, null=None):
         Sentinel value for a null match, by default None.
 
     Yields
-    -------
+    ------
     gid : tuple
         Group identifier: The values of attributes in `keys`, identical for all 
         observations in the sub groups. If no matching observations exist in one 
