@@ -29,28 +29,30 @@ COLOURS = CONFIG.console.colors
 def calibrate(run, path=None, overwrite=False):
 
     gobj = run.select_by(obstype='object')
-    fstax, mflat = find_cal(run, 'flat', path, overwrite)
-    dstax, mdark = find_cal(run.join(fstax), 'dark', path, overwrite)
+    raw_flats, master_flats = find_cal(run, 'flat', path, overwrite)
+    raw_darks, master_dark = find_cal(run.join(raw_flats), 'dark', path, overwrite)
 
-    if dstax:
-        mdark.update(compute_masters(dstax, 'dark', path, overwrite))
+    if raw_darks:
+        master_dark.update(compute_masters(raw_darks, 'dark', path, overwrite))
 
-    if fstax:
+    if raw_flats:
+        # Have raw flat field cubes. 
         # debias flats
-        # check = [hdu.data[0,0,0] for hdu in fstax.to_list()]
-        fstax.group_by(mdark).subtract(mdark, handle_missing=warnings.warn)
+        # check = [hdu.data[0,0,0] for hdu in raw_flats.to_list()]
+        raw_flats.group_by(master_dark).set_calibrators(dark=master_dark)
+        # raw_flats.group_by(master_dark).subtract(master_dark, handle_missing=warnings.warn)
 
-        # check2 =  [hdu.data[0,0,0] for hdu in fstax.to_list()]
-        mflat.update(compute_masters(fstax, 'flat', path, overwrite))
+        # check2 =  [hdu.data[0,0,0] for hdu in raw_flats.to_list()]
+        master_flats.update(compute_masters(raw_flats, 'flat', path, overwrite))
 
-    if mdark or mflat:
+    if master_dark or master_flats:
         # enable on-the-fly calibration
-        gobj.set_calibrators(mdark, mflat)
+        gobj.set_calibrators(master_dark, master_flats)
         logger.info('Calibration frames set.')
     else:
         logger.info('No calibration frames found in {:s}', run)
 
-    return gobj, mdark, mflat
+    return gobj, master_dark, master_flats
 
 
 def split_cal(run, kind):
