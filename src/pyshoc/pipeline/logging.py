@@ -110,6 +110,7 @@ def config():
         # format the log messages and will thus recurse infinitely.
         activation=[
             ('pyshoc', True),
+            ('obstools', True),
             ('obstools.phot', 'TRACE'),
             ('recipes', True),
             ('recipes.io.utils', False),

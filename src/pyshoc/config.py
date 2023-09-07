@@ -47,7 +47,13 @@ for cfg in CONFIG.logging.values():
     cfg['level'] = cfg.level.upper()
 del cfg
 
+# stylize log repeat handler
 CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
 
-# make read-only
+# stylize progressbar
+prg = CONFIG.tracking.progress
+prg['bar_format'] = motley.stylize(prg.bar_format)
+del prg
+
+# make config read-only
 CONFIG.freeze()

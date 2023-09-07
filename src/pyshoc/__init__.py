@@ -12,6 +12,7 @@ from astropy.io.fits.hdu.base import register_hdu
 
 
 # relative
+from .config import CONFIG
 from .core import *
 from .caldb import CalDB
 

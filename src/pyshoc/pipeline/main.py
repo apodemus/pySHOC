@@ -7,7 +7,6 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 import sys
 import atexit
 import itertools as itt
-from pathlib import Path
 from collections import defaultdict
 
 # third-party
@@ -25,16 +24,17 @@ from pyxides.vectorize import repeat
 from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
+from obstools.phot.tracking import SourceTracker
 from recipes import io
 from recipes.decorators.reporting import trace
 from recipes.string import remove_prefix, shared_prefix
 
 # relative
 from .. import CONFIG, shocCampaign
-from . import products
+from . import lightcurve as lc, products
 from .calibrate import calibrate
-from .logging import config as config_logging, logger
-
+from .logging import logger, config as config_logging
+from .utils import save_fig
 
 # ---------------------------------------------------------------------------- #
 # logging config
@@ -133,8 +133,8 @@ def check_required_info(run, telescope, target):
 # data
 
 
-def compute_preview(run, paths, ui, overwrite,
-                    thumbs=CONFIG.files.thumbs, show_cutouts=False):
+def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
+
     # get results from previous run
     overview, data_products = products.get_previous(run, paths)
 
@@ -144,9 +144,7 @@ def compute_preview(run, paths, ui, overwrite,
 
     # write fits headers to text
     for hdu in run:
-        stem = hdu.file.stem
-        txtfile = f'{stem}.txt'
-        headfile = data_products[stem].get(txtfile, '')
+        headfile = products.resolve_path(paths.headers, hdu)
         if not headfile or overwrite:
             headfile = paths.headers / txtfile
             logger.info('Writing fits header to text at {}.', showfile(headfile))
@@ -156,11 +154,11 @@ def compute_preview(run, paths, ui, overwrite,
     # if overwrite or not products['Images']['Overview']:
     samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
 
-    thumbs = paths.output / thumbs
-    image_grid, = plot_sample_images(run, samples, paths, None, thumbs,
+    #
+    image_grid, = plot_sample_images(run, samples, paths, None, paths.thumbs,
                                      overwrite=overwrite)
     if ui:
-        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
+        ui.add_tab('Overview', paths.thumbs.name, fig=image_grid.figure)
 
     return samples, overview, data_products
 
@@ -227,7 +225,7 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
 # ---------------------------------------------------------------------------- #
 # plotting
 
-def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
+def plot_sample_images(run, samples, paths, ui=None, thumbs=None,
                        overwrite=True, delay=CONFIG.plotting.delay):
     returns = []
 
@@ -240,9 +238,6 @@ def plot_sample_images(run, samples, paths, ui=None, thumbs=CONFIG.files.thumbs,
 
     # plot thumbnails for sample image from first portion of each data cube
     if thumbs:
-        if not (thumbs := Path(thumbs)).is_absolute():
-            thumbs = paths.output / thumbs
-
         returns.append(plot_thumbnails(samples, ui, thumbs, overwrite))
 
     return returns
@@ -337,12 +332,6 @@ def plot_drizzle(fig, *indices, ff, save_as):
     save_fig(fig, save_as)
 
 
-def save_fig(fig, filename):
-    if filename:
-        logger.info('Saving image: {}', filename)
-        fig.savefig(filename)
-
-
 def save_samples_fits(samples, wcss, path, overwrite):
     # save samples as fits with wcs
     filename_template = get_filename_template('fits')
@@ -406,7 +395,7 @@ def preview(run, paths, info, ui, overwrite):
     logger.section('Overview')
 
     # Print summary table
-    daily = run.group_by('date') # 't.date_for_filename'
+    daily = run.group_by('date')  # 't.date_for_filename'
     logger.info('Observations of {} by date:\n{:s}\n', info['target'],
                 daily.pformat(titled=repr))
 
@@ -446,9 +435,9 @@ def calibration(run, overwrite):
 
 def registration(run, paths, ui, plot, show_cutouts, overwrite):
     logger.section('Image Registration (WCS)')
-    #
+
     # None in [hdu.wcs for hdu in run]
-    if do_reg := (overwrite or not paths.reg.exists()):
+    if do_reg := (overwrite or not paths.reg.file.exists()):
         # Sample images (after calibration)
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
     else:
@@ -466,7 +455,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
     if plot:
         plot_sample_images(run, samples_cal, paths, ui,
-                           CONFIG.files.thumbs_cal, overwrite)
+                           paths.thumbs_cal, overwrite)
 
     # align
     if do_reg:
@@ -474,6 +463,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
     if plot:
         plot_overview(reg, run, ui, paths)
+
     return reg
 
 
@@ -510,7 +500,7 @@ def plot_overview(reg, run, ui, paths):
     # mosaic
     mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
     ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
-    mosaic.fig.savefig(paths.output / CONFIG.files.mosaic, bbox_inches='tight')
+    mosaic.fig.savefig(paths.output / paths.mosaic, bbox_inches='tight')
 
     # txt, arrows = mos.mark_target(
     #     run[0].target,
@@ -528,15 +518,15 @@ def plot_overview(reg, run, ui, paths):
     if CONFIG.plotting.delay:
         logger.info('Plotting delayed: Adding plot callback for drizzle.')
         ui['Overview'].add_callback(plot_drizzle, ff=ff, save_as=None)
-        atexit.register(save_fig, ff._figure, filename)
+        # atexit.register(save_fig, ff._figure, filename) # ERROR
     else:
         plot_drizzle(ff._figure, ff=ff, save_as=filename)
 
 
 def _track(hdu, seg, labels, coords, path, dilate=CONFIG.tracking.dilate,
-           njobs=CONFIG.tracking.dilate):
+           njobs=CONFIG.tracking.njobs, overwrite=False):
 
-    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'), 
+    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
                 hdu.file.name)
 
     if CONFIG.tracking.circularize:
@@ -558,13 +548,18 @@ def _track(hdu, seg, labels, coords, path, dilate=CONFIG.tracking.dilate,
             for i, j in enumerate(tracker.use_labels):
                 ui[i].savefig(get_filename(f'source{j}'))
 
-        # plot individual
+        # plot individual features
         fig = plot_positions_individual(tracker)
+
+        # plot positions time series
+        fig, ax = plt.subplots(figsize=(12, 5))
+        tracker.show.positions_time_series(ax)
+        fig.savefig(plotpath / 'positions-ts.png')
 
     return tracker, ui
 
 
-def track(run, reg):
+def track(run, reg, paths, overwrite=False):
 
     logger.section('Source Tracking')
     spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
@@ -572,16 +567,38 @@ def track(run, reg):
 
     image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
-        # back transform to image coords
-        coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+        missing_files = {
+            key: path
+            for key, path in paths.tracking.items()
+            if not products.resolve_path(paths.folders.tracking, hdu).exists()
+        }
+        if overwrite or missing_files:
+            logger.info('Launching tracker for {}.', hdu.file.name)
 
-        logger.info('Launching tracker for {}.', hdu.file.name)
-
-        tracker, ui = _track(hdu, img.seg, spanning, coords,
-                             products.resolve_path(paths.tracking, hdu.file.stem))
+            # back transform to image coords
+            coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+            tracker, ui = _track(hdu, img.seg, spanning, coords, True)
 
         # return ui
+    logger.info('Source tracking complete.')
     return spanning
+
+
+def lightcurves(run, paths, plot=True, overwrite=False):
+
+    lcs = lc.extract(run, paths, overwrite)
+    
+    if plot:
+        for x in lcs.items():
+            lc.plot(x, filename_template=None, overwrite=False, delay=True, **kws)
+3
+    # for hdu in run:
+    #     lc.io.load_raw(hdu, products.resolve_path(paths.lightcurves.raw, hdu),
+    #                 overwrite)
+
+    # for step in ['flagged', 'diff0', 'decor']:
+    #     file = paths.lightcurves[step]
+    #     load_or_compute(file, overwrite, LOADERS[step], (hdu, file))
 
 
 @trace
@@ -620,18 +637,18 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    spanning = track(reg, run)
+    spanning = track(run, reg, paths)
 
-    #
-    tracker.run(hdu.calibrated)
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':584")
-
-    # logger.section('Photometry')
+    # ------------------------------------------------------------------------ #
+    # Photometry
+    logger.section('Photometry')
+    lcs = lightcurves(run, paths, overwrite)
+    # paths.lightcurves
 
     # phot = PhotInterface(run, reg, paths.phot)
     # ts = mv phot.ragged() phot.regions()
 
+    # ------------------------------------------------------------------------ #
     # Launch the GUI
     if plot:
         logger.section('Launching GUI')

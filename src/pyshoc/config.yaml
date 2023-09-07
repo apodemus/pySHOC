@@ -91,7 +91,7 @@ gui:
 # plotting
 plotting: &plotting
     delay:      True
-    cmap:       cmr.voltage_r
+    cmap:       cmr.voltage
 
     # samples:
     segments:
@@ -135,8 +135,9 @@ folders:
     plots:          plots
     sample_images:  $PLOTS/sample_images
     registry:       reg
-    phot:           phot/$HDU
-    tracking:       $PHOT/track
+    phot:           phot/
+    tracking:       $PHOT/tracking/$HDU
+    lightcurves:    $PHOT/lightcurves
     cache:          .cache
 
 # Filenames for pipeline data products. 
@@ -146,7 +147,7 @@ files: &filenames
     summary:        $INFO/campaign-files.xlsx
     products:       $INFO/data-products.xlsx
     obslog:         $INFO/observing-log.tex
-    headers:        $PHOT/$HDU/header.txt
+    headers:        $INFO/headers/$HDU.txt
 
     # remote file retrieval
     remote:         $INFO/remote-files.txt
@@ -172,6 +173,16 @@ files: &filenames
         source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
         feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
         source_weights:     $TRACKING/source-weights.dat  # nsources  
+
+    lightcurves:
+        raw:                $LIGHTCURVES/unstacked/raw/$HDU.raw.txt
+        flagged:            $LIGHTCURVES/unstacked/raw/$HDU.oflag.txt
+        diff0:              $LIGHTCURVES/unstacked/diff/$HDU.diff0.txt
+
+        nightly:
+            diff0:              $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
+            decor:              $LIGHTCURVES/nightly/decor/$DATE.decor.txt
+
 
 # aliases
 # filenames: *filenames
@@ -286,7 +297,6 @@ tracking:
     # ------------------------------------------------------------------------ #
     plot:   True
     plots:
-
         centroids:
             com:              [r, +, "Centre of Mass"]
             geometric_median: [g, o, "Projected\n Geometric Median"]
@@ -353,3 +363,6 @@ tracking:
                 fc:         none
                 ec:         darkgreen
                 zorder:     100
+
+# ---------------------------------------------------------------------------- #
+phot:   

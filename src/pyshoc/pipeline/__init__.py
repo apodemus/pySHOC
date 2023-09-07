@@ -12,10 +12,12 @@ from obstools.phot import tracking
 from recipes import dicts
 from recipes.string import sub
 from recipes.config import ConfigNode
+from recipes.functionals import negate
 from recipes.oo import AttributeAutoComplete
 
 # relative
 from .. import CONFIG
+from .logging import logger
 from .banner import make_banner
 
 
@@ -73,6 +75,18 @@ def _recurse(func, mapping, arg):
     return mapping
 
 
+def _is_special(path):
+    return ('$HDU' in (s := str(path))) or ('$DATE' in s)
+
+
+def get_parents(pathdict):
+    for item in pathdict.values():
+        if isinstance(item, abc.MutableMapping):
+            yield from get_parents(item)
+        elif not _is_special(item.parent):
+            yield item.parent
+
+
 class FolderTree(AttributeAutoComplete):
     """
     Filesystem tree helper. Attributes point to the full system folders and
@@ -95,19 +109,19 @@ class FolderTree(AttributeAutoComplete):
             setattr(self, key, folder)
 
         # folders to create
-        self.folders = dict(vars(self))
+        self.folders = dicts.AttrReadItem(vars(self))
 
         # files
-        output_files = prefix_paths(output_files, output, substitutions)
-        for alias, filename in output_files.items():
+        self.files = prefix_paths(output_files, output, substitutions)
+        for alias, filename in self.files.items():
             setattr(self, alias, filename)
-        
+
     def __getitem__(self, key):
         return self.__dict__[key]
-    
+
     def __repr__(self):
-        return dicts.pformat(vars(self), rhs=self._relative_to_root, 
-                             ignore='folders')
+        return dicts.pformat(vars(self), rhs=self._relative_to_root,
+                             ignore=('folders', 'files'))
 
     def _set_path_attrs(self, mapping, prefix):
         for key, item in mapping.items():
@@ -120,8 +134,12 @@ class FolderTree(AttributeAutoComplete):
                    else '$ROOT' / path)
 
     def create(self):
+        logger.info('Creating output folder structure.')
+        required = list(set(get_parents(self.files)))
         for _, path in self.folders.items():
-            path.mkdir(exist_ok=True)
+            if not _is_special(path):
+                required.append(path)
 
-    # def folders(self):
-    #     return list(filter(Path.is_dir, self.__dict__.values()))
+        for path in filter(negate(Path.exists), required):
+            logger.debug('Creating folder: {}', path)
+            path.mkdir()
