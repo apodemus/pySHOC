@@ -1,11 +1,30 @@
-
 # ---------------------------------------------------------------------------- #
-# Location of calibration database
-caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
-
 # prefer SI based naming convention for telescopes eg: "1.9m" over "74in" 
 metric_names:           True
 empty_filter_string:    ∅
+
+# ---------------------------------------------------------------------------- #
+# Folder structure for pipeline results
+# The folder paths defined above can be accessed below by eg $NAME for the `folders.name` field
+folders:
+    # root folder name default (if not provided by user at cli)
+    # The folder structure defined here will be created inside `output_root`
+    output:     .pyshoc
+    cache:      .cache
+    # Location of calibration database
+    # ~/.config/pyshoc/caldb
+    # caldb:          /media/Oceanus/work/Observing/data/SHOC/calibration/
+    # remaining folder structure defined per section below
+    
+    # # The folder structure defined here will be created inside `output_root`
+    # info:           info
+    # logs:           $INFO/logs
+    # plots:          plots
+    # sample_images:  $PLOTS/sample_images
+    # registry:       reg
+    # phot:           phot/
+    # tracking:       $PHOT/tracking/$HDU
+    # lightcurves:    $PHOT/lightcurves
 
 # ---------------------------------------------------------------------------- #
 remote:
@@ -17,6 +36,17 @@ remote:
 # ---------------------------------------------------------------------------- #
 # logging
 logging:
+    folder:         $INFO/logs
+    # file sink
+    file:
+        level:      debug
+        rotation:   2Mb
+        format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
+            {time:HH:mm:ss!UTC}|
+            {name}.{function}:{line:d}|
+            {level.name}: {message}
+        
+    # Console logging sink
     console:
         level: debug
         catch: False
@@ -32,14 +62,7 @@ logging:
         repeats: |
             { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
 
-    file:
-        level: debug
-        rotation: 2Mb
-        format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
-            {time:HH:mm:ss!UTC}|
-            {name}.{function}:{line:d}|
-            {level.name}: {message}
-        
+    
 # ---------------------------------------------------------------------------- #
 # console info styling
 console:
@@ -56,10 +79,16 @@ console:
         linecolor:  teal
         width:      Null
 
+    progress:
+        bar_format: >-
+            {{desc}: {percentage:3.0f}%{bar}{n_fmt}/{total_fmt}:|green}
+            {rate_fmt:|gold}
+            {elapsed:|cyan} eta {remaining:|cyan}
+        ascii: " ╸━"
+
     colors:
         flat: cornflowerblue
         dark: tan
-        
 
     cutouts: 
         title:          "Source image cutouts: {hdu.file.name:|c}"
@@ -76,73 +105,42 @@ console:
             bg:     lightgreen
             fg:     [darkslategrey, B]
 
-
-
-# # ---------------------------------------------------------------------------- #
-# caching:
-#     regions:   
-
 # ---------------------------------------------------------------------------- #
-# GUI
-gui: 
-    title: pySHOC Photometry Pipeline GUI
-    pos : N
-
 # plotting
 plotting: &plotting
-    delay:      True
-    cmap:       cmr.voltage
+    folder:         plots
 
-    # samples:
-    segments:
-        contours: 
-            cmap:   cmr.pride
-            lw:     1.5
+    # GUI
+    gui: 
+        title:      pySHOC Photometry Pipeline GUI
+        pos :       N
+        delay:      True
 
-        labels:
-            offset: [4, 4]
-            size:   10
-            color:  w
-            emboss: [1, k]
+    #
+    cmap:           cmr.voltage
 
-    # Sample thumbnails plot config
-    thumbnails:
-        # name: thumbnails.png
-        figsize: [9, 7.5]
-        title_kws:
-            color:      w
-            size:       xx-small
-            fontweight: bold
-
-    mosaic:
-        # name: mosaic.png
-        cmap:   cmr.chroma
-        alpha:  0.35
 
 # aliases
 # plots: *plotting
 # plotting: *plotting
 
+# ---------------------------------------------------------------------------- #
+calibration:
+    # Location of calibration database
+    # ~/.config/pyshoc/caldb
+    folder:     /media/Oceanus/work/Observing/data/SHOC/calibration/
+
+    # darks:
+    #     filename_format: {obstype}-{camera}-{binning}-{readout}
+    #     combine:         median
+
+    # flats:
+    #     filename_format: {obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}
 
 # ---------------------------------------------------------------------------- #
-# Folder structure for pipeline results
-folders:
-    # root folder name default (if not provided by user at cli)
-    output_root:    .pyshoc
-    # The folder structure defined here will be created inside `output_root`
-    info:           info
-    logs:           $INFO/logs
-    plots:          plots
-    sample_images:  $PLOTS/sample_images
-    registry:       reg
-    phot:           phot/
-    tracking:       $PHOT/tracking/$HDU
-    lightcurves:    $PHOT/lightcurves
-    cache:          .cache
+info:
+    folder:         info
 
-# Filenames for pipeline data products. 
-# The folder paths defined above can be accessed below by eg $NAME for the `folders.name` field
-files: &filenames
     # campaign info
     summary:        $INFO/campaign-files.xlsx
     products:       $INFO/data-products.xlsx
@@ -154,50 +152,77 @@ files: &filenames
     rsync_script:   $INFO/rsync-remote.sh
     
     # image registration (wcs)
-    registry: &reg 
-        file:       $REGISTRY/registry.pkl
-        params:     $REGISTRY/params.npy
-    reg: *reg       # alias
-    drizzle:        $REGISTRY/drizzle.fits
+    # registry: &reg 
+        # file:       $REGISTRY/registry.pkl
+        # params:     $REGISTRY/params.npy
+    # reg: *reg       # alias
+    # drizzle:        $REGISTRY/drizzle.fits
 
     # image plots
-    thumbs:         $PLOTS/thumbnails.png
-    thumbs_cal:     $PLOTS/thumbnails-cal.png
-    mosaic:         $PLOTS/mosaic.png
+    # thumbs:         $PLOTS/thumbnails.png
+    # thumbs_cal:     $PLOTS/thumbnails-cal.png
+    # mosaic:         $PLOTS/mosaic.png
 
-    # source tracking data files
-    tracking:
-        measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
-        coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
-        frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
-        source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
-        feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
-        source_weights:     $TRACKING/source-weights.dat  # nsources  
+    # # source tracking data files
+    # tracking:
+    #     measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
+    #     coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
+    #     frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
+    #     source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
+    #     feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
+    #     source_weights:     $TRACKING/source-weights.dat  # nsources  
 
-    lightcurves:
-        raw:                $LIGHTCURVES/unstacked/raw/$HDU.raw.txt
-        flagged:            $LIGHTCURVES/unstacked/raw/$HDU.oflag.txt
-        diff0:              $LIGHTCURVES/unstacked/diff/$HDU.diff0.txt
+    # lightcurves:
+    #     raw:                $LIGHTCURVES/by_file/raw/$HDU.raw.txt
+    #     flagged:            $LIGHTCURVES/by_file/raw/$HDU.oflag.txt
+    #     diff0:              $LIGHTCURVES/by_file/diff/$HDU.diff0.txt
 
-        nightly:
-            diff0:              $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
-            decor:              $LIGHTCURVES/nightly/decor/$DATE.decor.txt
+    #     nightly:
+    #         diff0:              $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
+    #         decor:              $LIGHTCURVES/nightly/decor/$DATE.decor.txt
 
 
 # aliases
 # filenames: *filenames
 
 
+
 # ---------------------------------------------------------------------------- #
 # sampled image stats
 samples:
-    stat:               median
-    min_depth:          10          # minimun simulated integration time (seconds)
-    n_intervals:        1
-    subset:             Null        # eg: 1000 for sample from first 1000
-    save_as:            png
-    # filename_template:  {hdu.file.stem}{interval?}.{save_as}
+    folder:             $PLOTS/sample_images
+    filename:           $HDU{.$FRAMES}?.png
+
+    params:
+        stat:               median
+        min_depth:          10          # minimun simulated integration time (seconds)
+        n_intervals:        1
+        subset:             Null        # eg: 1000 for sample from first 1000
     
+    plots:
+        # detections
+        contours: 
+            cmap:   cmr.pride
+            lw:     1.5
+
+        labels:
+            offset: [4, 4]
+            size:   10
+            color:  w
+            emboss: [1, k]
+
+        # Sample thumbnails plot config
+        thumbnails:
+            filename: $PLOTS/thumbnails.png
+            figsize: [9, 7.5]
+            title_kws:
+                color:      w
+                size:       xx-small
+                fontweight: bold
+        
+        thumbs_cal:
+            filename: $PLOTS/thumbnails-cal.png
+
 
 # ---------------------------------------------------------------------------- #
 # source detection
@@ -215,62 +240,91 @@ detection: &source_detection
 
 # aliases
 detect:          *source_detection #
-# source_find:        *source_detection #
 # source_detection:   *source_detection #
 
 # ---------------------------------------------------------------------------- #
-# image registration 
+# image registration (wcs)
 registration: &image_registration
-    survey:         dss
-    fov_stretch:    1.65
-    plot:           False
-    fit_angle:      True
-    # sigma_fallback: 10
 
-drizzle: 
-    pixfrac:        0.5
+    folder:         reg
+    filenames:  
+        registry:   $REGISTRY/registry.pkl
+        params:     $REGISTRY/params.npy
+    
+    params:
+        survey:         dss
+        fov_stretch:    1.65
+        plot:           False
+        fit_angle:      True
+        # sigma_fallback: 10
+
+    drizzle: 
+        filename:       $REGISTRY/drizzle.fits
+        pixfrac:        0.5
+    
+    plots:
+        mosaic:
+            filename:   $PLOTS/mosaic.png
+            cmap:       cmr.chroma
+            alpha:      0.35
+
+# alias
+# reg: *image_registration
 
 # ---------------------------------------------------------------------------- #
 # source tracking 
 tracking:
-    dilate:             2
-    circularize:        True
-    njobs:              -1
+    # ------------------------------------------------------------------------ #
+    # source tracking data files
+    folder:     $PHOT/tracking/$HDU
+    filenames:  
+        measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
+        coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
+        frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
+        source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
+        feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
+        source_weights:     $TRACKING/source-weights.dat  # nsources  
+
+    # ------------------------------------------------------------------------ #
+    params:
+        dilate:             2
+        circularize:        True
+        njobs:              -1
+        
+        centroids:
+            # features used for tracking
+            com:                            1
+            geometric_median:               1
+            peak:               
+                upsample: 1     # note, changing this will siginificantly affect compute times
+                filter: lanczos
+
+        pre_subtract:       True
+        # subtract background from image prior to computing features
+        bg:                 median
+        # statistic used for background
+        
+        precision:          0.5
+        # Required positional accuracy in pixels
+        weights:            snr 
+        # Per-source weights for frame offset calculation. Use "snr" for
+        # signal-to-noise weighting.
+
+        cutoffs:
+            edge:           0
+            snr:            3.
+            # Sources with signal-to-noise ratio less than this will not be 
+            # considered when solving for image dither
+            distance:       10
+            # For outlier detection: maximum distance allowed for point measurements
+            # from centre of distribution.
+            saturation:     95
+            # If we know the saturation value of the CCD chip, we discard pixels above
+            # this percentage of the saturation value
+
+        compute:
+            centres: [0 , 1000, 100 ]
     
-    centroids:
-        # features used for tracking
-        com:                            1
-        geometric_median:               1
-        peak:               
-            upsample: 1     # note, changing this will siginificantly affect compute times
-            filter: lanczos
-
-    pre_subtract:       True
-    # subtract background from image prior to computing features
-    bg:                 median
-    # statistic used for background
-    
-    precision:          0.5
-    # Required positional accuracy in pixels
-    weights:            snr 
-    # Per-source weights for frame offset calculation. Use "snr" for
-    # signal-to-noise weighting.
-
-    cutoffs:
-        edge:           0
-        snr:            3.
-        # Sources with signal-to-noise ratio less than this will not be 
-        # considered when solving for image dither
-        distance:       10
-        # For outlier detection: maximum distance allowed for point measurements
-        # from centre of distribution.
-        saturation:     95
-        # If we know the saturation value of the CCD chip, we discard pixels above
-        # this percentage of the saturation value
-
-    compute:
-        centres: [0 , 1000, 100 ]
-
     # ------------------------------------------------------------------------ #
     table:
         title:          Measured source coordinates
@@ -286,13 +340,7 @@ tracking:
         row_nrs:        True
         max_rows:       25
 
-    progress:
-        bar_format: >-
-            {{desc}: {percentage:3.0f}%{bar}{n_fmt}/{total_fmt}:|green}
-            {rate_fmt:|gold}
-            {elapsed:|cyan} eta {remaining:|cyan}
-        ascii: " ╸━"
-        unit:  " frames"
+        # unit:  " frames"
     
     # ------------------------------------------------------------------------ #
     plot:   True
@@ -364,5 +412,65 @@ tracking:
                 ec:         darkgreen
                 zorder:     100
 
+        
 # ---------------------------------------------------------------------------- #
 phot:   
+    folder:         phot/
+
+# ---------------------------------------------------------------------------- #
+
+lightcurves:
+    folder:         $PHOT/lightcurves/
+    
+    raw:
+        filename:   $LIGHTCURVES/by_file/raw/$HDU.raw.txt
+        title:      Raw ragged-aperture light curve for {}.
+
+    flagged:
+        filename:   $LIGHTCURVES/by_file/raw/$HDU.oflag.txt
+        title:      Flagged ragged-aperture light curve for {}.
+        params:
+            nwindow:    1000
+            noverlap:   50%
+            kmax:       0.1%
+
+    diff0:
+        filename:   $LIGHTCURVES/by_file/diff/$HDU.diff0.txt
+        title:      Differential (0th order) ragged-aperture light curve for {}.
+
+    concat:
+        filename:   $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
+
+    decor:
+        filename:   $LIGHTCURVES/nightly/decor/$DATE.decor.txt
+        title:      Differential (smoothed) ragged-aperture light curve for {}.
+
+        params:
+            nwindow:        1000
+            noverlap:       10%
+            smoothing:      0.1
+
+    # -------------------------------------------------------------------- #
+    plots:
+        # overwrite:      True
+        plims:      [-0.1, 99.99]
+        xlabel:     
+            top:    Time (UTC)
+            bottom: Δt (s)
+        ylabel:     Relative Flux
+
+        subplotspec:
+            top:    0.81
+            bottom: 0.1
+            left:   0.065
+            right:  0.94
+
+
+        by_file:
+            raw:        1
+            flagged:    1
+            diff0:      1
+
+        nightly:
+            diff0:      1
+            decor:      1

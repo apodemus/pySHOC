@@ -26,6 +26,7 @@ WELCOME_BANNER = ''
 if CONFIG.console.banner.pop('show', True):
     WELCOME_BANNER = make_banner(**CONFIG.console.banner)
 
+
 # # overwrite tracking default config
 # tracking.CONFIG = CONFIG.tracking
 # tracking.CONFIG['filenames'] = CONFIG.tracking.filenames
@@ -93,14 +94,25 @@ class FolderTree(AttributeAutoComplete):
     files for pipeline data products.
     """
 
-    def __init__(self, root, output=None, folders=CONFIG.folders, **output_files):
+    @classmethod
+    def from_config(cls, root, output, config):
+        kws = dict(files=dict(config.info),
+                   folders=dict(config.folders))
+        kws['files'].pop('folder')
+
+        search = ('files', 'filename'), ('folders', 'folder')
+        for key, term in search.items():
+            kws[key].update(config.filter(lambda keys: term in keys))
+
+        return cls(root, output, **kws)
+
+    def __init__(self, root, output=None, folders=None, **files):
         #
         self.root = Path(root).resolve()
 
         #
-        folders = dict(folders)
-        output_root_default = folders.pop('output_root')
-        output = output or (self.root / output_root_default)
+        folders = dict(folders or {})
+        output = output or (self.root / folders.pop('output'))
 
         substitutions = {f'${name.upper()}': loc
                          for name, loc in folders.items()}
@@ -112,7 +124,7 @@ class FolderTree(AttributeAutoComplete):
         self.folders = dicts.AttrReadItem(vars(self))
 
         # files
-        self.files = prefix_paths(output_files, output, substitutions)
+        self.files = prefix_paths(files, output, substitutions)
         for alias, filename in self.files.items():
             setattr(self, alias, filename)
 

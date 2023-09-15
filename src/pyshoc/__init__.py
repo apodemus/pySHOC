@@ -31,4 +31,4 @@ register_hdu(shocHDU)
 
 
 # initialize calibration database
-calDB = CalDB(CONFIG.caldb)
+calDB = CalDB(CONFIG.calibration.folder)

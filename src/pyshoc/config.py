@@ -1,15 +1,12 @@
 
 # std
+from recipes import op
 import os
 import pwd
-from pathlib import Path
-
-# third-party
-import yaml
 
 # local
 import motley
-from recipes.dicts import AttrReadItem, DictNode
+from recipes.config import ConfigNode
 
 
 # ---------------------------------------------------------------------------- #
@@ -20,19 +17,12 @@ def get_username():
 # ---------------------------------------------------------------------------- #
 
 
-class ConfigNode(DictNode, AttrReadItem):
-    pass
+CONFIG = ConfigNode.load_module(__file__)
 
-
-CONFIG = ConfigNode(
-    **yaml.load((Path(__file__).parent / 'config.yaml').read_text(),
-                Loader=yaml.FullLoader)
-)
-#
 
 # load cmasher if needed
 plt = CONFIG.plotting
-for cmap in (plt.cmap, plt.segments.contours.cmap, plt.mosaic.cmap):
+for cmap in CONFIG.filtered(op.contained('cmap').within).values():
     if cmap.startswith('cmr.'):
         import cmasher
         break
@@ -42,16 +32,21 @@ for cmap in (plt.cmap, plt.segments.contours.cmap, plt.mosaic.cmap):
 if CONFIG.remote.username is None:
     CONFIG.remote['username'] = get_username()
 
+
 # uppercase logging level
-for cfg in CONFIG.logging.values():
+for sink, cfg in CONFIG.logging.items():
+    if sink == 'folder':
+        continue
     cfg['level'] = cfg.level.upper()
 del cfg
+
+
 
 # stylize log repeat handler
 CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
 
 # stylize progressbar
-prg = CONFIG.tracking.progress
+prg = CONFIG.console.progress
 prg['bar_format'] = motley.stylize(prg.bar_format)
 del prg
 

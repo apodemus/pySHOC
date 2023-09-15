@@ -155,7 +155,7 @@ def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
     samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
 
     #
-    image_grid, = plot_sample_images(run, samples, paths, None, paths.thumbs,
+    image_grid, = plot_sample_images(run, samples, paths.samples, None, paths.thumbs,
                                      overwrite=overwrite)
     if ui:
         ui.add_tab('Overview', paths.thumbs.name, fig=image_grid.figure)
@@ -200,10 +200,10 @@ def get_sample_images(run, detection=True, show_cutouts=False):
 
 def _get_hdu_samples(hdu, detection, show_cutouts):
 
-    stat = CONFIG.samples.stat
-    min_depth = CONFIG.samples.min_depth
-    n_intervals = CONFIG.samples.n_intervals
-    subset = CONFIG.samples.subset
+    stat = CONFIG.samples.params.stat
+    min_depth = CONFIG.samples.params.min_depth
+    n_intervals = CONFIG.samples.params.n_intervals
+    subset = CONFIG.samples.params.subset
 
     for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
         # Source detection. Reporting happens below.
@@ -251,7 +251,7 @@ def plot_thumbnails(samples, ui, thumbs, overwrite):
     # filenames, images = zip(*(map(dict.items, samples.values())))
     image_grid = plot_image_grid(images, use_blit=False,
                                  titles=list(samples.keys()),
-                                 **CONFIG.plotting.thumbnails)
+                                 **CONFIG.samples.plots.thumbnails)
 
     if not thumbs.exists() or overwrite:
         image_grid.figure.savefig(thumbs)  # image_grid.save ??
@@ -263,7 +263,7 @@ def plot_thumbnails(samples, ui, thumbs, overwrite):
 
 
 def get_filename_template(ext):
-    cfg = CONFIG.samples
+    cfg = CONFIG.samples.params
     if ext := ext.lstrip('.'):
         _j_k = '.{j}-{k}' if (cfg.n_intervals > 1) or cfg.subset else ''
         return f'{{stem}}{_j_k}.{ext}'
@@ -271,7 +271,7 @@ def get_filename_template(ext):
 
 
 def _plot_sample_images(run, samples, path, ui, overwrite,
-                        delay=CONFIG.plotting.delay):
+                        delay=CONFIG.plotting.gui.delay):
 
     filename_template = get_filename_template(CONFIG.samples.save_as)
     #
@@ -313,8 +313,8 @@ def plot_image(fig, *indices, image, save_as=None):
     # image = samples[indices]
     logger.debug('Plotting image {}', image)
     display, art = image.plot(fig=fig.figure,
-                              regions=CONFIG.plotting.segments.contours,
-                              labels=CONFIG.plotting.segments.labels,
+                              regions=CONFIG.samples.plots.contours,
+                              labels=CONFIG.samples.plots.labels,
                               coords='pixel',
                               use_blit=False)
 
@@ -498,7 +498,7 @@ def register(run, paths, samples_cal, overwrite):
 def plot_overview(reg, run, ui, paths):
 
     # mosaic
-    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.plotting.mosaic)
+    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.registration.plots.mosaic)
     ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
     mosaic.fig.savefig(paths.output / paths.mosaic, bbox_inches='tight')
 
@@ -515,7 +515,7 @@ def plot_overview(reg, run, ui, paths):
     ui.add_tab('Overview', 'Drizzle', fig=ff._figure)
     filename = paths.plots / paths.drizzle.with_suffix('.png').name
 
-    if CONFIG.plotting.delay:
+    if CONFIG.plotting.gui.delay:
         logger.info('Plotting delayed: Adding plot callback for drizzle.')
         ui['Overview'].add_callback(plot_drizzle, ff=ff, save_as=None)
         # atexit.register(save_fig, ff._figure, filename) # ERROR
