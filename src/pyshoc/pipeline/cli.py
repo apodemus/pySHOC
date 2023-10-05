@@ -17,8 +17,8 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
-from . import (APPERTURE_SYNONYMS, SUPPORTED_APERTURES, FolderTree,
-               _prefix_relative_path, logging, main as pipeline)
+from ..config import PathConfig, _prefix_relative_path
+from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
 
 def check_files_exist(files_or_folder):
@@ -121,16 +121,17 @@ def setup(root, output, use_cache):
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
 
-    paths = FolderTree(root, output, CONFIG.folders, **CONFIG.files)
-    paths.create()
+    # path helper
+    paths = PathConfig.from_config(root, output, CONFIG)
+    paths.create(ignore='calibration')
 
     # add log file sink
-    logfile = paths.logs / 'main.log'
+    logfile = paths.files.logging
     logger.add(logfile, colorize=False, **CONFIG.logging.file)
     atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory
-    rcParams['savefig.directory'] = paths.plots
+    rcParams['savefig.directory'] = paths.folders.plotting
 
     # set detection algorithm
     if algorithm := CONFIG.detection.pop('algorithm', None):
@@ -141,9 +142,9 @@ def setup(root, output, use_cache):
     # shocHDU.detection.__call__.__cache__.disable()
     if use_cache:
         enable_local_caching({
-            # get_hdu_image_products: paths.cache / 'image-samples.pkl'
-            shocHDU.get_sample_image:              paths.cache / 'sample-images.pkl',
-            shocHDU.detection._algorithm.__call__: paths.cache / 'source-regions.pkl'
+            # get_hdu_image_products: paths.folders.cache / 'image-samples.pkl'
+            shocHDU.get_sample_image:              paths.folders.cache / 'sample-images.pkl',
+            shocHDU.detection._algorithm.__call__: paths.folders.cache / 'source-regions.pkl'
         })
 
     return paths

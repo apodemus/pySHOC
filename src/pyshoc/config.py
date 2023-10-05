@@ -1,29 +1,43 @@
 
 # std
-from recipes import op
 import os
+import re
 import pwd
+import itertools as itt
+from pathlib import Path
+
+# third-party
+from loguru import logger
 
 # local
 import motley
+from recipes import dicts
+from recipes.string import sub
 from recipes.config import ConfigNode
+from recipes.functionals import always, negate
 
 
 # ---------------------------------------------------------------------------- #
+REGEX_TMP = re.compile('\$([A-Z]+)')
+
+
+def _get_template_keys(path):
+    return REGEX_TMP.findall(str(path))
+
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
+
 # ---------------------------------------------------------------------------- #
-
-
 CONFIG = ConfigNode.load_module(__file__)
 
 
 # load cmasher if needed
 plt = CONFIG.plotting
-for cmap in CONFIG.filtered(op.contained('cmap').within).values():
+for cmap in CONFIG.find('cmap').filtered(values=None).flatten().values():
     if cmap.startswith('cmr.'):
+        # load the cmasher colormaps into the matplotlib registry
         import cmasher
         break
 
@@ -34,16 +48,18 @@ if CONFIG.remote.username is None:
 
 
 # uppercase logging level
+
 for sink, cfg in CONFIG.logging.items():
-    if sink == 'folder':
+    if sink == 'filename':
         continue
     cfg['level'] = cfg.level.upper()
 del cfg
 
 
-
 # stylize log repeat handler
 CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
+CONFIG.console.cutouts['title'] = motley.stylize(CONFIG.console.cutouts.pop('title'))
+
 
 # stylize progressbar
 prg = CONFIG.console.progress
@@ -52,3 +68,142 @@ del prg
 
 # make config read-only
 CONFIG.freeze()
+
+# ---------------------------------------------------------------------------- #
+# Get file / folder tree for config
+# PATHS = get_paths(CONFIG)
+
+_section_aliases = dict(registration='registry',
+                        plotting='plots')
+
+
+# ---------------------------------------------------------------------------- #
+def resolve_paths(files, folders, output, ):
+
+    # path $ substitutions
+    folders['output'] = ''
+    substitutions = resolve_path_template_keys(folders, **_section_aliases)
+
+    # Convert folders to absolute paths
+    folders = folders.map(sub, substitutions).map(_prefix_relative_path, output)
+
+    # convert filenames to absolute paths where necessary
+    files = _resolve_files(files, folders)
+
+    return files, folders
+
+
+def _resolve_files(files, folders):
+    # find config sections where 'filename' given as relative path, and
+    # there is also a 'folder' given in the same group. Prefix the filename
+    # with the folder path.
+
+    # sub internal path refs
+    substitutions = _get_folder_refs(folders, **_section_aliases)
+    files = files.map(sub, substitutions).map(Path)
+    for keys, path in files.filtered(values=negate(Path.is_absolute)).flatten().items():
+        section, *_ = keys
+        files[keys] = folders[section] / path
+
+    return files
+
+
+def resolve_path_template_keys(folders, **aliases):
+    return _resolve_path_template_keys(_get_folder_refs(folders, **aliases))
+
+
+def _resolve_path_template_keys(subs):
+    return dict(zip(subs, (sub(v, subs) for v in subs.values())))
+
+
+def _get_folder_refs(folders, **aliases):
+    return {f'${aliases.get(name, name).upper()}': str(loc).rstrip('/')
+            for name, loc in folders.items()}
+
+
+def _prefix_relative_path(path, prefix):
+    return o if (o := Path(path)).is_absolute() else (prefix / path).resolve()
+
+
+def _is_special(path):
+    return ('$HDU' in (s := str(path))) or ('$DATE' in s)
+
+
+def _ignore_any(ignore):
+
+    if isinstance(ignore, str):
+        ignore = [ignore]
+
+    if not (ignore := list(ignore)):
+        return always(True)
+
+    def wrapper(keys):
+        return all(key not in ignore for key in keys)
+
+    return wrapper
+
+
+class PathConfig(ConfigNode):  # AttributeAutoComplete
+    """
+    Filesystem tree helper. Attributes point to the full system folders and
+    files for pipeline data products.
+    """
+    @classmethod
+    def from_config(cls, root, output, config):
+
+        # input / output root paths
+        root = Path(root).resolve()
+        output = root / output
+
+        # split folder / filenames from config
+        # create root node
+        node = cls()
+        attrs = [('files', 'filename'), ('folders', 'folder')]
+        remapped_keys = dicts.DictNode()
+        # catch both singular and plural form keywords
+        for (key, term), s in itt.product(attrs, ('', 's')):
+            found = config.find(term + s,  True, remapped_keys[key])
+            for keys, val in found.flatten().items():
+                node[(key, *keys)] = val
+
+        # resolve files / folders
+        node['files'], node['folders'] = resolve_paths(node.files, node.folders, output)
+
+        # update config!
+        for (kind, *orignal), new in remapped_keys.flatten().items():
+            config[tuple(orignal)] = node[(kind, *new)]
+
+        # add root
+        node.folders['root'] = root
+
+        # isolate the file template patterns
+        templates = node.files.filtered(values=lambda v: '$' in str(v))
+        for keys, tmp in templates.map(_get_template_keys).flatten().items():
+            node[('patterns', tmp[0], *keys)] = str(templates[keys])
+
+        # make readonly
+        node.freeze()
+
+        return node
+
+    # def __repr__(self):
+    #     return dicts.pformat(self, rhs=self._relative_to_output)
+
+    # def _relative_to_output(self, path):
+    #     print('ROOT', self._root(), '-' * 88, sep='\n')
+    #     out = self._root().folders.output
+    #     return f'/{path.relative_to(out)}' if out in path.parents else path
+
+    def create(self, ignore=()):
+        logger.debug('Checking for missing folders in output tree.')
+
+        node = self.filtered(_ignore_any(ignore))
+        required = {*node.folders.values(),
+                    *map(Path.parent.fget, node.files.flatten().values())}
+        required = set(filter(negate(_is_special), required))
+        required = set(filter(negate(Path.exists), required))
+
+        logger.info('The following folders will be created: {}', required)
+        for path in required:
+            logger.debug('Creating folder: {}', path)
+            path.mkdir()

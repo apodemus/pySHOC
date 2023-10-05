@@ -17,12 +17,12 @@ from .config import CONFIG
 
 # ---------------------------------------------------------------------------- #
 # names
-
 METRIC_NAMES = ('1.9m', '1.0m')
 IMPERIAL_NAMES = ('74in', '40in')
+_prefer_metric = CONFIG.preferences.metric_names
 
 NAME_EQUIVALENTS = _REMAPPED_NAMES = \
-    dict(zip(*(IMPERIAL_NAMES, METRIC_NAMES)[::(-1, 1)[CONFIG.metric_names]]))
+    dict(zip(*(IMPERIAL_NAMES, METRIC_NAMES)[::(-1, 1)[_prefer_metric]]))
 _INV_NAMES = invert(_REMAPPED_NAMES)
 _74, _40 = _INV_NAMES
 NAME_EQUIVALENTS.update(
@@ -37,7 +37,7 @@ FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer
 
 # ---------------------------------------------------------------------------- #
 
-def get_tel(name, metric=CONFIG.metric_names):
+def get_tel(name, metric=_prefer_metric):
     """
     Get standardized telescope name from description.
 
@@ -80,7 +80,7 @@ def get_tel(name, metric=CONFIG.metric_names):
                          f'use one of the following\n: {KNOWN_NAMES}')
 
     name = NAME_EQUIVALENTS.get(nr, name)
-    return name if metric == CONFIG.metric_names else _INV_NAMES[name]
+    return name if metric == _prefer_metric else _INV_NAMES[name]
 
 
 def get_fov(telescope, unit='arcmin', focal_reducer=False):

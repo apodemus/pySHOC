@@ -113,6 +113,7 @@ def config():
             ('obstools', True),
             ('obstools.phot', 'TRACE'),
             ('recipes', True),
+            ('mpl_multitab', True),
             ('recipes.io.utils', False),
             ('motley.formatter', False),
             ('scrawl.moves.machinery', False)

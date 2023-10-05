@@ -1,30 +1,31 @@
 # ---------------------------------------------------------------------------- #
-# prefer SI based naming convention for telescopes eg: "1.9m" over "74in" 
-metric_names:           True
-empty_filter_string:    ∅
+# prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
+preferences:
+    metric_names:           True
+    empty_filter_string:    ∅
 
 # ---------------------------------------------------------------------------- #
-# Folder structure for pipeline results
-# The folder paths defined above can be accessed below by eg $NAME for the `folders.name` field
+# Folder structure for pipeline results.
+
+# Folder locations can be templated by using $ references in paths eg: $SECTION/
+# substitutes the value of "folder" keyword under "section" header.
+# Additionally, $HDU can be used for substitution the base name of the fits file
+# eg: "20210410.0030", and $DATE for nightly results folder eg. "2021-04-10"
+
 folders:
-    # root folder name default (if not provided by user at cli)
-    # The folder structure defined here will be created inside `output_root`
-    output:     .pyshoc
-    cache:      .cache
-    # Location of calibration database
-    # ~/.config/pyshoc/caldb
-    # caldb:          /media/Oceanus/work/Observing/data/SHOC/calibration/
-    # remaining folder structure defined per section below
-    
-    # # The folder structure defined here will be created inside `output_root`
-    # info:           info
-    # logs:           $INFO/logs
-    # plots:          plots
-    # sample_images:  $PLOTS/sample_images
-    # registry:       reg
-    # phot:           phot/
-    # tracking:       $PHOT/tracking/$HDU
-    # lightcurves:    $PHOT/lightcurves
+    output:     .pyshoc # root folder name default (if not provided by user at cli)
+    cache:      .cache  # cache location (relative to output)
+
+# Remaining folder structures is defined per section below.
+# These are the default locations relative to the output folder above:
+#     info:           info/
+#     logs:           $INFO/logs
+#     plots:          plots/
+#     sample_images:  $PLOTS/sample_images
+#     registry:       reg/
+#     phot:           phot/
+#     tracking:       $PHOT/tracking/$HDU
+#     lightcurves:    $PHOT/lightcurves
 
 # ---------------------------------------------------------------------------- #
 remote:
@@ -33,36 +34,6 @@ remote:
     username:           Null
 
 
-# ---------------------------------------------------------------------------- #
-# logging
-logging:
-    folder:         $INFO/logs
-    # file sink
-    file:
-        level:      debug
-        rotation:   2Mb
-        format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
-            {time:HH:mm:ss!UTC}|
-            {name}.{function}:{line:d}|
-            {level.name}: {message}
-        
-    # Console logging sink
-    console:
-        level: debug
-        catch: False
-        format: >- # -  chomping indicator strips end newlines
-            {elapsed:s|Bb}|
-            {{{name}.{function}:s|green}:{line:d|orange}: <52}|
-            {{level.name}: {message}:|{style}}
-        section: |
-
-            {0:━<{width}}
-            {{level.name}: {message}:|B,teal}
-            {0:━<{width}}
-        repeats: |
-            { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
-
-    
 # ---------------------------------------------------------------------------- #
 # console info styling
 console:
@@ -105,9 +76,41 @@ console:
             bg:     lightgreen
             fg:     [darkslategrey, B]
 
+
+# ---------------------------------------------------------------------------- #
+# logging
+logging:
+    filename:         $INFO/logs/main.log
+    # file sink
+    file:
+        level:      debug
+        rotation:   2Mb
+        format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
+            {time:HH:mm:ss!UTC}|
+            {name}.{function}:{line:d}|
+            {level.name}: {message}
+        
+    # Console logging sink
+    console:
+        level: debug
+        catch: False
+        format: >- # -  chomping indicator strips end newlines
+            {elapsed:s|Bb}|
+            {{{name}.{function}:s|green}:{line:d|orange}: <52}|
+            {{level.name}: {message}:|{style}}
+        section: |
+
+            {0:━<{width}}
+            {{level.name}: {message}:|B,teal}
+            {0:━<{width}}
+        repeats: |
+            { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
+
+    
+
 # ---------------------------------------------------------------------------- #
 # plotting
-plotting: &plotting
+plotting: #&plotting
     folder:         plots
 
     # GUI
@@ -138,60 +141,26 @@ calibration:
     #     filename_format: {obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}
 
 # ---------------------------------------------------------------------------- #
+# Information / Overview data products
 info:
     folder:         info
+    filenames:
+        # campaign info
+        summary:        campaign-files.xlsx
+        products:       data-products.xlsx
+        obslog:         observing-log.tex
+        headers:        headers/$HDU.txt
 
-    # campaign info
-    summary:        $INFO/campaign-files.xlsx
-    products:       $INFO/data-products.xlsx
-    obslog:         $INFO/observing-log.tex
-    headers:        $INFO/headers/$HDU.txt
-
-    # remote file retrieval
-    remote:         $INFO/remote-files.txt
-    rsync_script:   $INFO/rsync-remote.sh
-    
-    # image registration (wcs)
-    # registry: &reg 
-        # file:       $REGISTRY/registry.pkl
-        # params:     $REGISTRY/params.npy
-    # reg: *reg       # alias
-    # drizzle:        $REGISTRY/drizzle.fits
-
-    # image plots
-    # thumbs:         $PLOTS/thumbnails.png
-    # thumbs_cal:     $PLOTS/thumbnails-cal.png
-    # mosaic:         $PLOTS/mosaic.png
-
-    # # source tracking data files
-    # tracking:
-    #     measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
-    #     coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
-    #     frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
-    #     source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
-    #     feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
-    #     source_weights:     $TRACKING/source-weights.dat  # nsources  
-
-    # lightcurves:
-    #     raw:                $LIGHTCURVES/by_file/raw/$HDU.raw.txt
-    #     flagged:            $LIGHTCURVES/by_file/raw/$HDU.oflag.txt
-    #     diff0:              $LIGHTCURVES/by_file/diff/$HDU.diff0.txt
-
-    #     nightly:
-    #         diff0:              $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
-    #         decor:              $LIGHTCURVES/nightly/decor/$DATE.decor.txt
-
-
-# aliases
-# filenames: *filenames
-
+        # remote file retrieval
+        remote:         remote-files.txt
+        rsync_script:   rsync-remote.sh
 
 
 # ---------------------------------------------------------------------------- #
-# sampled image stats
+# Sample image statistics 
 samples:
-    folder:             $PLOTS/sample_images
-    filename:           $HDU{.$FRAMES}?.png
+    folder:             $PLOTS/samples
+    filename:           $HDU$FRAMES.png
 
     params:
         stat:               median
@@ -213,15 +182,17 @@ samples:
 
         # Sample thumbnails plot config
         thumbnails:
-            filename: $PLOTS/thumbnails.png
-            figsize: [9, 7.5]
-            title_kws:
-                color:      w
-                size:       xx-small
-                fontweight: bold
-        
-        thumbs_cal:
-            filename: $PLOTS/thumbnails-cal.png
+            raw:
+                filename: $PLOTS/thumbnails.png
+                figsize: [9, 7.5]
+                title_kws:
+                    color:      w
+                    size:       xx-small
+                    fontweight: bold
+            
+            calibrated:
+                filename: $PLOTS/thumbnails-cal.png
+                overwrite: Null
 
 
 # ---------------------------------------------------------------------------- #
@@ -246,10 +217,10 @@ detect:          *source_detection #
 # image registration (wcs)
 registration: &image_registration
 
-    folder:         reg
+    folder:         $PHOT/reg
     filenames:  
-        registry:   $REGISTRY/registry.pkl
-        params:     $REGISTRY/params.npy
+        registry:   registry.pkl
+        params:     params.npy
     
     params:
         survey:         dss
@@ -259,7 +230,7 @@ registration: &image_registration
         # sigma_fallback: 10
 
     drizzle: 
-        filename:       $REGISTRY/drizzle.fits
+        filename:       drizzle.fits
         pixfrac:        0.5
     
     plots:
@@ -278,12 +249,12 @@ tracking:
     # source tracking data files
     folder:     $PHOT/tracking/$HDU
     filenames:  
-        measurements:       $TRACKING/centroids.dat       # (n, nstats, nsources, 2)
-        coords:             $TRACKING/coords.dat          # (nsources, 2) structured ['xy', 'std']
-        frame_info:         $TRACKING/frame-info.dat      # (n, 2)        structured
-        source_info:        $TRACKING/source-info.dat     # (n, nsources) structured
-        feature_weights:    $TRACKING/feature-weights.dat # (nstats, 1, 1)
-        source_weights:     $TRACKING/source-weights.dat  # nsources  
+        measurements:       centroids.dat       # (n, nstats, nsources, 2)
+        coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
+        frame_info:         frame-info.dat      # (n, 2)        structured
+        source_info:        source-info.dat     # (n, nsources) structured
+        feature_weights:    feature-weights.dat # (nstats, 1, 1)
+        source_weights:     source-weights.dat  # nsources  
 
     # ------------------------------------------------------------------------ #
     params:
@@ -294,7 +265,6 @@ tracking:
         centroids:
             # features used for tracking
             com:                            1
-            geometric_median:               1
             peak:               
                 upsample: 1     # note, changing this will siginificantly affect compute times
                 filter: lanczos
@@ -423,11 +393,11 @@ lightcurves:
     folder:         $PHOT/lightcurves/
     
     raw:
-        filename:   $LIGHTCURVES/by_file/raw/$HDU.raw.txt
+        filename:   by_file/raw/$HDU.raw.txt
         title:      Raw ragged-aperture light curve for {}.
 
     flagged:
-        filename:   $LIGHTCURVES/by_file/raw/$HDU.oflag.txt
+        filename:   by_file/raw/$HDU.oflag.txt
         title:      Flagged ragged-aperture light curve for {}.
         params:
             nwindow:    1000
@@ -435,14 +405,14 @@ lightcurves:
             kmax:       0.1%
 
     diff0:
-        filename:   $LIGHTCURVES/by_file/diff/$HDU.diff0.txt
+        filename:   by_file/diff/$HDU.diff0.txt
         title:      Differential (0th order) ragged-aperture light curve for {}.
-
+        
     concat:
-        filename:   $LIGHTCURVES/nightly/diff/$DATE.diff0.txt
+        filename:   nightly/diff/$DATE.diff0.txt
 
     decor:
-        filename:   $LIGHTCURVES/nightly/decor/$DATE.decor.txt
+        filename:   nightly/decor/$DATE.decor.txt
         title:      Differential (smoothed) ragged-aperture light curve for {}.
 
         params:

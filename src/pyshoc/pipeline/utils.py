@@ -1,7 +1,12 @@
 
 # std
+from pathlib import Path
+import sys
 import time
 import numbers
+
+# third-party
+from matplotlib.figure import Figure
 
 # local
 from recipes.pprint.nrs import TIME_DIVISORS, ymdhms
@@ -10,10 +15,27 @@ from recipes.pprint.nrs import TIME_DIVISORS, ymdhms
 from .logging import logger
 
 
-def save_fig(fig, filename):
+def get_figure(ui=None, *keys, **kws):
+    if ui:
+        tab = ui.add_tab(*keys, fig=kws)
+        return tab.figure
+
+    if plt := sys.modules.get('matplotlib.pyplot'):
+        return plt.figure(**kws)
+
+    return Figure(**kws)
+
+
+def save_figure(fig, filename, overwrite=False):
     if filename:
-        logger.info('Saving image: {}', filename)
-        fig.savefig(filename)
+        filename = Path(filename)
+        if not filename.exists() or overwrite:
+            logger.info('Saving image: {}', filename)
+            fig.savefig(filename)
+
+
+# alias
+save_fig = save_figure
 
 
 def human_time(age):
@@ -21,6 +43,7 @@ def human_time(age):
     fill = (' ', ' ', ' ', 0, 0, 0)
 
     if not isinstance(age, numbers.Real):
+        # print(type(age))
         return '--'
 
     mags = 'yMdhms'

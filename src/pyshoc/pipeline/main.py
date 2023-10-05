@@ -5,8 +5,8 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 
 # std
 import sys
-import atexit
 import itertools as itt
+from pathlib import Path
 from collections import defaultdict
 
 # third-party
@@ -26,15 +26,20 @@ from obstools.image import SkyImage
 from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
 from recipes import io
+from recipes.utils import not_null
+from recipes.shell import is_interactive
+from recipes.decorators import update_defaults
 from recipes.decorators.reporting import trace
+from recipes.functionals.partial import PlaceHolder
 from recipes.string import remove_prefix, shared_prefix
 
 # relative
 from .. import CONFIG, shocCampaign
-from . import lightcurve as lc, products
+from . import products, lightcurves as lc
 from .calibrate import calibrate
+from .plotting import PlotTask
 from .logging import logger, config as config_logging
-from .utils import save_fig
+
 
 # ---------------------------------------------------------------------------- #
 # logging config
@@ -50,7 +55,7 @@ rcParams.update({'font.size': 14,
 
 # ---------------------------------------------------------------------------- #
 
-CONSOLE_CUTOUTS_TITLE = motley.stylize(CONFIG.console.cutouts.pop('title'))
+CONSOLE_CUTOUTS_TITLE = CONFIG.console.cutouts.pop('title')
 
 # ---------------------------------------------------------------------------- #
 
@@ -133,49 +138,6 @@ def check_required_info(run, telescope, target):
 # data
 
 
-def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
-
-    # get results from previous run
-    overview, data_products = products.get_previous(run, paths)
-
-    showfile = str
-    if str(paths.headers).startswith(str(paths.root)):
-        def showfile(h): return h.relative_to(paths.root)
-
-    # write fits headers to text
-    for hdu in run:
-        headfile = products.resolve_path(paths.headers, hdu)
-        if not headfile or overwrite:
-            headfile = paths.headers / txtfile
-            logger.info('Writing fits header to text at {}.', showfile(headfile))
-            hdu.header.totextfile(headfile, overwrite=overwrite)
-
-    # thumbs = ''
-    # if overwrite or not products['Images']['Overview']:
-    samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
-
-    #
-    image_grid, = plot_sample_images(run, samples, paths.samples, None, paths.thumbs,
-                                     overwrite=overwrite)
-    if ui:
-        ui.add_tab('Overview', paths.thumbs.name, fig=image_grid.figure)
-
-    return samples, overview, data_products
-
-    # source regions
-    # if not any(products['Images']['Source Regions']):
-    #     sample_images = products['Images']['Samples']
-
-
-def get_intervals(hdu, subset, n_intervals):
-    n = hdu.nframes
-    if subset:
-        yield slice(*int2tup(subset)).indices(n)[:2]
-        return
-
-    yield from mit.pairwise(range(0, n + 1, n // n_intervals))
-
-
 def get_sample_images(run, detection=True, show_cutouts=False):
 
     # sample = delayed(get_sample_image)
@@ -208,7 +170,8 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
     for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
         # Source detection. Reporting happens below.
         # NOTE: caching enabled for line below in `setup`
-        image = SkyImage.from_hdu(hdu, stat, min_depth, (j, k),
+        image = SkyImage.from_hdu(hdu,
+                                  stat, min_depth, (j, k),
                                   **{**detection, 'report': False})
 
         if show_cutouts and i == 0 and image.seg:
@@ -222,44 +185,42 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
         yield (j, k), image
 
 
+def get_intervals(hdu, subset, n_intervals):
+    n = hdu.nframes
+    if subset:
+        yield slice(*int2tup(subset)).indices(n)[:2]
+        return
+
+    yield from mit.pairwise(range(0, n + 1, n // n_intervals))
+
+
 # ---------------------------------------------------------------------------- #
 # plotting
 
-def plot_sample_images(run, samples, paths, ui=None, thumbs=None,
-                       overwrite=True, delay=CONFIG.plotting.delay):
-    returns = []
+
+def plot_sample_images(run, samples, path_template=None, overwrite=True,
+                       thumbnails=None, ui=None):
+
+    return tuple(_iplot_sample_images(run, samples, path_template, overwrite,
+                                      thumbnails, ui))
+
+
+def _iplot_sample_images(run, samples, path_template, overwrite,
+                         thumbnails, ui):
 
     if ui:
         logger.info('Adding sample images to ui: {}', ui)
-        delay = False if ui is None else delay
-        figures = _plot_sample_images(run, samples, paths.sample_images,
-                                      ui, overwrite, delay)
-        returns.append(list(figures))
+
+    yield list(
+        _plot_sample_images(run, samples, path_template, overwrite, ui)
+    )
 
     # plot thumbnails for sample image from first portion of each data cube
-    if thumbs:
-        returns.append(plot_thumbnails(samples, ui, thumbs, overwrite))
+    if not_null(thumbnails, except_=[{}]):
+        if thumbnails is True:
+            thumbnails = {}
 
-    return returns
-
-
-def plot_thumbnails(samples, ui, thumbs, overwrite):
-
-    # portion = mit.chunked(sample_images, len(run))
-    images, = zip(*map(dict.values, samples.values()))
-
-    # filenames, images = zip(*(map(dict.items, samples.values())))
-    image_grid = plot_image_grid(images, use_blit=False,
-                                 titles=list(samples.keys()),
-                                 **CONFIG.samples.plots.thumbnails)
-
-    if not thumbs.exists() or overwrite:
-        image_grid.figure.savefig(thumbs)  # image_grid.save ??
-
-    if ui:
-        ui.add_tab('Overview', thumbs.name, fig=image_grid.figure)
-
-    return image_grid
+        yield plot_thumbnails(samples, ui, **{'overwrite': overwrite, **thumbnails})
 
 
 def get_filename_template(ext):
@@ -270,66 +231,63 @@ def get_filename_template(ext):
     return ''
 
 
-def _plot_sample_images(run, samples, path, ui, overwrite,
-                        delay=CONFIG.plotting.gui.delay):
+def _plot_sample_images(run, samples, path_template, overwrite, ui):
 
-    filename_template = get_filename_template(CONFIG.samples.save_as)
-    #
+    o = PlaceHolder
     for hdu in run:
         # grouping
         year, day = str(hdu.t.date_for_filename).split('-', 1)
 
         for (j, k), image in samples[hdu.file.name].items():
-
-            filename = path / filename_template.format(stem=hdu.file.stem, j=j, k=k)
-
             # add tab to ui
             key = [year, day, hdu.file.nr]
-
             if j and k and (j, k) != (0, hdu.nframes):
                 key.append('{j}-{k}'.format(j=j, k=k))
 
-            fig = ui.add_tab('Samples', *key)
-
             # plot
-            if filename.exists() and not overwrite:
-                filename = None
+            filename = products.resolve_path(path_template, hdu, j, k)
+            task = PlotTask(ui, ('Samples', *key),
+                                  filename, overwrite)
+            yield task(plot_image)(o, image=image)
 
-            if delay:
-                logger.info('Plotting delayed: Adding plot callback for {}', key)
-                ui['Samples'].add_callback(plot_image, image=image)
-                atexit.register(save_fig, fig.figure, filename)
-            else:
-                logger.info('Plotting sample image {}', key)
-                plot_image(fig, image=image, save_as=filename)
-
-            yield fig
 
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
 
 
-def plot_image(fig, *indices, image, save_as=None):
+def plot_thumbnails(samples, ui, filename=None, overwrite=False, **kws):
+
+    # portion = mit.chunked(sample_images, len(run))
+    images, = zip(*map(dict.values, samples.values()))
+
+    # filenames, images = zip(*(map(dict.items, samples.values())))
+    task = PlotTask(ui, ('Overview', getattr(filename, 'name')),
+                          filename, overwrite)
+    return task(plot_image_grid)(images,
+                                    use_blit=False,
+                                    titles=list(samples.keys()),
+                                    **kws)
+
+
+def plot_image(fig, *indices, image):
 
     # image = samples[indices]
     logger.debug('Plotting image {}', image)
+
     display, art = image.plot(fig=fig.figure,
                               regions=CONFIG.samples.plots.contours,
                               labels=CONFIG.samples.plots.labels,
                               coords='pixel',
                               use_blit=False)
 
-    save_fig(art.image.axes.figure, save_as)
     return art
 
 
-def plot_drizzle(fig, *indices, ff, save_as):
+def plot_drizzle(fig, *indices, ff):
     logger.info('Plotting drizzle image.')
 
     if not indices or indices[-1] == 'Drizzle':
         ff.show_colorscale(cmap=CONFIG.plotting.cmap)
         fig.tight_layout()
-
-    save_fig(fig, save_as)
 
 
 def save_samples_fits(samples, wcss, path, overwrite):
@@ -345,37 +303,20 @@ def save_samples_fits(samples, wcss, path, overwrite):
                 header.update(wcs.to_header())
                 fits.writeto(filename, image.data, header)
 
-# ---------------------------------------------------------------------------- #
-
-
-def write_rsync_script(run, paths, username=CONFIG.remote.username,
-                       server=CONFIG.remote.server):
-
-    remotes = list(map(str, run.calls.get_server_path(None)))
-    prefix = f'{server}:{shared_prefix(remotes)}'
-    filelist = paths.info / 'remote-files.txt'
-    io.write_lines(filelist, [remove_prefix(_, prefix) for _ in remotes])
-
-    outfile = paths.info / 'rsync-remote.sh'
-    outfile.write_text(
-        f'sudo rsync -arvzh --info=progress2 '
-        f'--files-from={filelist!s} --no-implied-dirs '
-        f'{username}@{prefix} {paths.output!s}'
-    )
 
 # ---------------------------------------------------------------------------- #
-# main
-
+# Setup / Load data
 
 def init(paths, telescope, target, overwrite):
-    run = shocCampaign.load(paths.root, obstype='object')
+    files, folders = paths.files.info, paths.folders
+    run = shocCampaign.load(folders.root, obstype='object')
 
     # update info if given
     info = check_required_info(run, telescope, target)
     logger.debug('User input from CLI: {}', info)
     if info:
         if info['target'] == '.':
-            info['target'] = paths.root.name.replace('_', ' ')
+            info['target'] = folders.root.name.replace('_', ' ')
             logger.info('Using target name from root directory name: {!r}',
                         info['target'])
 
@@ -385,11 +326,30 @@ def init(paths, telescope, target, overwrite):
 
     # write script for remote data retrieval
     if (CONFIG.remote.write_rsync_script and
-            (overwrite or not (paths.remote.exists() or paths.rsync_script.exists()))):
+            (overwrite or not (files.remote.exists() or files.rsync_script.exists()))):
         write_rsync_script(run, paths)
 
     return run, info
 
+
+def write_rsync_script(run, paths, username=CONFIG.remote.username,
+                       server=CONFIG.remote.server):
+
+    remotes = list(map(str, run.calls.get_server_path(None)))
+    prefix = f'{server}:{shared_prefix(remotes)}'
+    filelist = paths.folders.info / 'remote-files.txt'
+    io.write_lines(filelist, [remove_prefix(_, prefix) for _ in remotes])
+
+    outfile = paths.folders.info / 'rsync-remote.sh'
+    outfile.write_text(
+        f'sudo rsync -arvzh --info=progress2 '
+        f'--files-from={filelist!s} --no-implied-dirs '
+        f'{username}@{prefix} {paths.folders.output!s}'
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# Preview
 
 def preview(run, paths, info, ui, overwrite):
     logger.section('Overview')
@@ -400,7 +360,7 @@ def preview(run, paths, info, ui, overwrite):
                 daily.pformat(titled=repr))
 
     # write observation log latex table
-    paths.obslog.write_text(
+    paths.files.info.obslog.write_text(
         run.tabulate.to_latex(
             style='table',
             caption=f'SHOC observations of {info["target"]}.',
@@ -409,12 +369,51 @@ def preview(run, paths, info, ui, overwrite):
     )
 
     # write summary spreadsheet
-    run.tabulate.to_xlsx(paths.summary)
+    run.tabulate.to_xlsx(paths.files.info.summary)
     logger.info('The table above is available in spreadsheet format at:\n'
-                '{!s:}', paths.summary)
+                '{!s:}', paths.files.info.summary)
 
     # Sample images prior to calibration and header info
     return compute_preview(run, paths, ui, overwrite)
+
+
+def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
+
+    # get results from previous run
+    overview, data_products = products.get_previous(run, paths)
+
+    # write fits headers to text
+    headers_to_txt(run, paths, overwrite)
+
+    # thumbs = ''
+    # if overwrite or not products['Images']['Overview']:
+    samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
+
+    thumbnails = plot_thumbnails(samples, ui,
+                                 **{'overwrite': overwrite,
+                                    **CONFIG.samples.plots.thumbnails.raw})
+    # source regions
+    # if not any(products['Images']['Source Regions']):
+    #     sample_images = products['Images']['Samples']
+    return overview, data_products, samples, thumbnails
+
+
+def headers_to_txt(run, paths, overwrite):
+    
+    showfile = str
+    if str(paths.files.info.headers).startswith(str(paths.folders.output)):
+        def showfile(h): return h.relative_to(paths.folders.output)
+
+    for hdu in run:
+        headfile = products.resolve_path(paths.files.info.headers, hdu)
+        if not headfile.exists() or overwrite:
+            logger.info('Writing fits header to text at {}.', showfile(headfile))
+            hdu.header.totextfile(headfile, overwrite=overwrite)
+
+
+
+# ---------------------------------------------------------------------------- #
+# Calibrate
 
 
 def calibration(run, overwrite):
@@ -433,17 +432,21 @@ def calibration(run, overwrite):
     # sample_images_cal, segments = \
 
 
+# ---------------------------------------------------------------------------- #
+# Image Registration
+
 def registration(run, paths, ui, plot, show_cutouts, overwrite):
     logger.section('Image Registration (WCS)')
 
+    files = paths.files.registration
     # None in [hdu.wcs for hdu in run]
-    if do_reg := (overwrite or not paths.reg.file.exists()):
+    if do_reg := (overwrite or not files.registry.exists()):
         # Sample images (after calibration)
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
     else:
-        logger.info('Loading image registry from file: {}.', paths.reg.file)
-        reg = io.deserialize(paths.reg.file)
-        reg.params = np.load(paths.reg.params)
+        logger.info('Loading image registry from file: {}.', files.registry)
+        reg = io.deserialize(files.registry)
+        reg.params = np.load(files.params)
 
         # retrieve samples from register
         # TODO: get from fits?
@@ -454,15 +457,16 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
 
     if plot:
-        plot_sample_images(run, samples_cal, paths, ui,
-                           paths.thumbs_cal, overwrite)
+        cfg = CONFIG.samples.plots.thumbnails
+        plot_sample_images(run, samples_cal, paths.files.samples.filename, overwrite,
+                           {**cfg.raw, **cfg.calibrated}, ui)
 
     # align
     if do_reg:
         reg = register(run, paths, samples_cal, overwrite)
 
     if plot:
-        plot_overview(reg, run, ui, paths)
+        plot_overview(run, reg, paths, ui, overwrite)
 
     return reg
 
@@ -477,9 +481,10 @@ def register(run, paths, samples_cal, overwrite):
     # TODO region files
 
     # save
-    logger.info('Saving image registry at: {}.', paths.reg.file)
-    reg.params = np.load(paths.reg.params)
-    io.serialize(paths.reg.file, reg)
+    files = paths.files.registration
+    logger.info('Saving image registry at: {}.', files.registry)
+    reg.params = np.load(files.params)
+    io.serialize(files.registry, reg)
     # np.save(paths.reg.params, reg.params)
 
     # reg.plot_clusters(nrs=True)
@@ -487,20 +492,25 @@ def register(run, paths, samples_cal, overwrite):
     # Build image WCS
     wcss = reg.build_wcs(run)
     # save samples fits
-    save_samples_fits(samples_cal, wcss, paths.sample_images, overwrite)
+    save_samples_fits(samples_cal, wcss, paths.files.samples, overwrite)
 
     # Drizzle image
-    reg.drizzle(paths.drizzle, CONFIG.drizzle.pixfrac)
+    reg.drizzle(files.drizzle, CONFIG.registration.drizzle.pixfrac)
 
     return reg
 
 
-def plot_overview(reg, run, ui, paths):
+def plot_overview(run, reg, paths, ui, overwrite):
 
-    # mosaic
-    mosaic = reg.mosaic(names=run.files.stems, **CONFIG.registration.plots.mosaic)
-    ui.add_tab('Overview', 'Mosaic', fig=mosaic.fig)
-    mosaic.fig.savefig(paths.output / paths.mosaic, bbox_inches='tight')
+    kws = dict(CONFIG.registration.plots.mosaic)
+    filename = kws.pop('filename')
+    task = PlotTask(ui, ('Overview', 'Mosaic'),
+                          filename, overwrite)
+
+    task(reg.mosaic)(names=run.files.stems, **kws)
+
+    # Create mosaic plot
+    # mosaic = reg.mosaic(names=run.files.stems, **kws)
 
     # txt, arrows = mos.mark_target(
     #     run[0].target,
@@ -510,26 +520,25 @@ def plot_overview(reg, run, ui, paths):
     #     text_offset=(4, 5), size=12, fontweight='bold'
     # )
 
+    o = PlaceHolder()
+
     # drizzle
-    ff = apl.FITSFigure(str(paths.drizzle))
-    ui.add_tab('Overview', 'Drizzle', fig=ff._figure)
-    filename = paths.plots / paths.drizzle.with_suffix('.png').name
+    filename = paths.files.registration.drizzle
+    task = PlotTask(ui, ('Overview', 'Drizzle'),
+                          filename.with_suffix('.png'),
+                          overwrite)
 
-    if CONFIG.plotting.gui.delay:
-        logger.info('Plotting delayed: Adding plot callback for drizzle.')
-        ui['Overview'].add_callback(plot_drizzle, ff=ff, save_as=None)
-        # atexit.register(save_fig, ff._figure, filename) # ERROR
-    else:
-        plot_drizzle(ff._figure, ff=ff, save_as=filename)
+    task(plot_drizzle)(o, ff=apl.FITSFigure(str(filename)))
 
 
-def _track(hdu, seg, labels, coords, path, dilate=CONFIG.tracking.dilate,
-           njobs=CONFIG.tracking.njobs, overwrite=False):
+# ---------------------------------------------------------------------------- #
+@update_defaults(CONFIG.tracking.params)
+def _track(hdu, seg, labels, coords, path, overwrite=False, dilate=0, njobs=-1):
 
     logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
                 hdu.file.name)
 
-    if CONFIG.tracking.circularize:
+    if CONFIG.tracking.params.circularize:
         seg = seg.circularize()
 
     tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
@@ -566,11 +575,13 @@ def track(run, reg, paths, overwrite=False):
     logger.info('Sources: {} span all observations.', spanning)
 
     image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
+    folder_pattern = paths.folders.tracking
+    filenames = paths.files.tracking
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
         missing_files = {
             key: path
-            for key, path in paths.tracking.items()
-            if not products.resolve_path(paths.folders.tracking, hdu).exists()
+            for key, path in filenames.items()
+            if not products.resolve_path(folder_pattern, hdu).exists()
         }
         if overwrite or missing_files:
             logger.info('Launching tracker for {}.', hdu.file.name)
@@ -584,14 +595,15 @@ def track(run, reg, paths, overwrite=False):
     return spanning
 
 
-def lightcurves(run, paths, plot=True, overwrite=False):
+def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
     lcs = lc.extract(run, paths, overwrite)
-    
+
     if plot:
-        for x in lcs.items():
-            lc.plot(x, filename_template=None, overwrite=False, delay=True, **kws)
-3
+        for diff, db in lcs.items():
+            plot_lcs(db, ui, filename_template=None, overwrite=False, delay=True)
+            break
+
     # for hdu in run:
     #     lc.io.load_raw(hdu, products.resolve_path(paths.lightcurves.raw, hdu),
     #                 overwrite)
@@ -599,6 +611,45 @@ def lightcurves(run, paths, plot=True, overwrite=False):
     # for step in ['flagged', 'diff0', 'decor']:
     #     file = paths.lightcurves[step]
     #     load_or_compute(file, overwrite, LOADERS[step], (hdu, file))
+
+
+def plot_lcs(lcs, ui=None, filename_template=None, overwrite=False, **kws):
+
+    # ui = MplMultiTab(title='Light curves', pos='N')
+
+    tab = 'Light curves'
+
+    filenames = {}
+    o = PlaceHolder()
+    for date, ts in lcs.items():
+        filenames[date] = filename = Path(str(filename_template).format(date=date))
+        year, day = date.split('-', 1)
+
+        task = PlotTask(ui, (tab, year, day),
+                              filename, overwrite)
+
+        task(lc.plot)(o, ts, **kws)
+
+    #     if ui:
+    #         fig = ui.add_tab(tab, year, day,
+    #                          fig={'figsize': (12, 6)}).figure
+    #     # else:
+    #     #     fig =
+
+    #     if not delay:
+    #         fig = _plot_ts(fig, ts, filename, overwrite, **kws)
+
+    # if ui and delay:  #
+    #     ui[tab].add_callback(_plot_ts_ui, ui=ui,
+    #                          lcs=lcs, filenames=filenames,
+    #                          overwrite=overwrite, **kws)
+
+    return ui
+
+
+# def _plot_ts_ui(fig, indices, ui, lcs, filenames, overwrite, **kws):
+#     date = '-'.join(ui.tabs.tab_text(indices)[-2:])
+#     return lc.plot(fig, lcs[date], filenames[date], overwrite, **kws)
 
 
 @trace
@@ -609,16 +660,21 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # GUI
     ui = None
     if plot:
-        app = QtWidgets.QApplication(sys.argv)
-        ui = MplMultiTab(title=CONFIG.gui.title, pos=CONFIG.gui.pos)
+        if not is_interactive():
+            app = QtWidgets.QApplication(sys.argv)
+        #
+        ui = MplMultiTab(title=CONFIG.plotting.gui.title,
+                         pos=CONFIG.plotting.gui.pos)
 
     # ------------------------------------------------------------------------ #
-    # Load data
+    # Setup / Load data
     run, info = init(paths, telescope, target, overwrite)
 
     # ------------------------------------------------------------------------ #
     # Preview
-    samples, overview, data_products = preview(run, paths, info, ui, overwrite)
+    overview, data_products, samples, thumbnails = preview(
+        run, paths, info, ui, overwrite
+    )
 
     # ------------------------------------------------------------------------ #
     # Calibrate
@@ -633,7 +689,9 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     reg = registration(run, paths, ui, plot, show_cutouts, overwrite)
 
     # Write data products spreadsheet
-    products.write_xlsx(run, paths)
+    products.write_xlsx(run, paths, overview)
+    
+    raise SystemError()
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
@@ -642,7 +700,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # ------------------------------------------------------------------------ #
     # Photometry
     logger.section('Photometry')
-    lcs = lightcurves(run, paths, overwrite)
+    lcs = lightcurves(run, paths, ui, plot, overwrite)
     # paths.lightcurves
 
     # phot = PhotInterface(run, reg, paths.phot)
@@ -653,10 +711,11 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     if plot:
         logger.section('Launching GUI')
         ui.show()
-        # app.exec_()
-        sys.exit(app.exec_())
 
-    # from IPython import embed
-    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':676")
+        if not is_interactive():
+            sys.exit(app.exec_())
+
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':676")
 
 # %%

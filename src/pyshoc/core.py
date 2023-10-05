@@ -1028,16 +1028,21 @@ class TableHelper(AttrTable):
 
     def to_xlsx(self, path):
         tabulate = AttrTable.from_columns({
-            'file.name':          Column('filename', align='<'),
-            'timing.t0.datetime': Column('Time', '[UTC]', fmt='YYYY-MM-DD HH:MM:SS'),
-            'timing.exp':         Column('Exposure', '[s]', fmt='0.???'),
+            'file.name':          Column('filename',
+                                         align='<'),
+            'timing.t0.datetime': Column('Time', '[UTC]',
+                                         fmt='YYYY-MM-DD HH:MM:SS',
+                                         align='<'),
+            'timing.exp':         Column('Exposure', '[s]',
+                                         fmt='0.?????',
+                                         align='<'),
             'timing.duration':    Column(convert=lambda t: t.value / 86400,
                                          fmt='[HH]"ʰ"MM"ᵐ"SS"ˢ"', unit='[hms]',
                                          total=True),
             'telescope':          ...,
             'filters.name':       Column('Filter'),
             'camera':             ...,
-            'readout.mode':       Column(convert=str),
+            'readout.mode':       Column(convert=str, align='<'),
             # 'nframes':            Column('n', total=True),
             # 'binning':            Column('bin', unit='y, x', header_level=1),
             'binning.y':          ...,
@@ -1051,12 +1056,8 @@ class TableHelper(AttrTable):
 
         tabulate.parent = self.parent
         return tabulate.to_xlsx(path,
-                                align={'filename': '<',
-                                       'mode': '<',
-                                       'binning': '>',
-                                       ...: '^'},
-                                header_formatter=str.title,
-                                )
+                                align={...: '^'},
+                                header_formatter=str.title)
         # widths={'binning': 5})
 
         # tabulate = AttrTable.from_spec({
