@@ -1,10 +1,8 @@
 
 
 # std
-import re
 import itertools as itt
 from pathlib import Path
-from string import Template
 from collections import defaultdict
 
 # third-party
@@ -17,6 +15,7 @@ from motley.table import Table
 from recipes import cosort, string
 from recipes.dicts.node import DictNode
 from recipes.tree import FileSystemNode
+from recipes.functionals.partial import placeholder
 
 # relative
 from .. import CONFIG
@@ -104,10 +103,10 @@ def get_previous(run, paths):
         lambda: _overview_table_vstack(overview, paths),
 
         # hdu products
-        lambda: _hdu_products_table(run, paths.patterns['HDU'], output),
+        lambda: _hdu_products_table(run, paths),
 
         # nightly data products
-        lambda: _nightly_products_table(run, paths.patterns['DATE'], output)
+        lambda: _nightly_products_table(run, paths)
     )
 
     return overview, products
@@ -165,54 +164,49 @@ def _overview_table_vstack(overview, paths):
     return motley.utils.vstack.from_dict(tables, vspace=0)
 
 
-# class XNode(Node):
-#     _join_names = '/'.join
-
-#     @staticmethod
-#     def _get_name(path):
-#         return f'{path.name}{"/" * path.is_dir()}'
-
-
-def _sort_cols(keys):
-    for i, x in enumerate(('info', 'samples', 'tracking', 'lightcurves')):
-        if x in keys:
-            return i
-    return 99
-
-
-def _resolve_desired_hdu_products(run, filename_patterns):
+def _resolve_by_file(run, templates):
     # sort rows
     stems, _ = cosort(run.files.stems, run.attrs('t.date'))
-    patterns = filename_patterns.flatten()
+    return _resolve_by(stems, templates, 'HDU', FRAMES='')
+
+
+def _resolve_by_date(run, templates):
+    # sort rows
+    dates = sorted(set(run.attrs('date_for_filename')))
+    return _resolve_by(dates, templates, 'DATE')
+
+
+def _resolve_by(items, templates, key, **kws):
+
     rows = defaultdict(list)
-    for pattern in patterns.values():
-        tmp = Template(pattern)
-        for stem in stems:
-            rows[stem].append(Path(tmp.substitute(HDU=stem, FRAMES='')))
+    for tmp in templates.values():
+        for row in items:
+            rows[row].append(
+                Path(tmp.substitute(**{key: row, **kws}))
+            )
 
-    # sections, rows
-    return list(patterns.keys()), rows
+    return rows
 
 
-def _hdu_products_table(run, filename_patterns, output):
+def _get_column_header(base, keys, paths):
+    section, *_ = keys
+    rpath = paths.folders[section].relative_to(paths.folders.output)
+    return (CONFIG[section].get('title', ''),
+            f'{rpath.parent}/',
+            f'{rpath.name}/',
+            Path(paths.templates[(base, *keys)].template).name)
 
-    section_titles = dict(samples='Sample Images',
-                          lightcurves='Light Curves',
-                          tracking='Tracking Data')
 
-    sections, desired_files = _resolve_desired_hdu_products(run, filename_patterns)
+def _hdu_products_table(run, paths):
 
-    # table = defaultdict(list)
-    patterns = filename_patterns.flatten()
-    headers = []
-    for section in sorted(sections, key=_sort_cols):
-        path = Path(patterns[section])
-        rpath = path.parent.relative_to(output)
-        header = (section_titles.get(section[0], ''),
-                  f'{rpath.parent}/', f'{rpath.name}/', path.name)
-        # table[header] = desired_files[section]
-        headers.append(header)
+    # resolve required data products (paths) from campaign and folder config
+    templates = paths.templates['HDU'].flatten()
+    desired_files = _resolve_by_file(run, templates)
+    headers = [_get_column_header('HDU', s, paths) for s in templates.keys()]
 
+    # from IPython import embed
+    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':208")
+    
     # Sort columns
     return Table(list(desired_files.values()),
                  title='HDU Data Products',
@@ -221,33 +215,24 @@ def _hdu_products_table(run, filename_patterns, output):
                  formatter=lambda f: human_time(get_file_age(f)),
                  align='<',
                  col_groups_align='<',
-                 subtitle=motley.format('{Output folder: {:|darkgreen}/:|B}', output),
+                 subtitle=motley.format('{Output folder: {:|turquoise}/:|B}', paths.folders.output),
                  subtitle_align='<',
                  subtitle_style=('_'),
                  **CONFIG.console.products
                  )
 
 
-def _nightly_products_table(run, filename_patterns, output):
+def _nightly_products_table(run, paths):
 
-    dates = sorted(set(run.attrs('date_for_filename')))
-    section_titles = {}
+    templates = paths.templates['DATE'].flatten()
+    desired_files = _resolve_by_date(run, templates)
+    headers = [_get_column_header('DATE', s, paths) for s in templates.keys()]
 
-    cols = defaultdict(list)
-    for keys, pattern in filename_patterns.flatten().items():
-        path = Path(pattern)
-        rpath = path.parent.relative_to(output)
-
-        header = (section_titles.get(keys[0], ''), f'{rpath.parent}/', f'{rpath.name}/', path.name)
-        for date in dates:
-            filename = Path(Template(pattern).substitute(DATE=date))
-            cols[header].append(get_file_age(filename))
-
-    return Table(cols,
+    return Table(list(desired_files.values()),
                  title='Nightly Data Products',
-                 row_headers=dates,
-                 col_groups=cols.keys(),
-                 formatter=human_time,
+                 row_headers=desired_files.keys(),
+                 col_groups=headers,
+                 formatter=lambda f: human_time(get_file_age(f)),
                  align='<',
                  col_groups_align='<',
                  **CONFIG.console.products
@@ -293,7 +278,9 @@ def hyperlink_name(path):
 
 def write_xlsx(run, paths, overview, filename=None):
 
-    sections, desired_files = _resolve_desired_hdu_products(run, paths.patterns['HDU'])
+    templates = paths.templates['HDU'].flatten()
+    desired_files = _resolve_by_file(run, templates)
+    # sort
     run = run[list(desired_files.keys())]
 
     out = DictNode()
@@ -306,19 +293,19 @@ def write_xlsx(run, paths, overview, filename=None):
         [[(paths.folders.plotting / _) for _ in overview['plotting']]] * len(run)
 
     #
-    sections = [(section.title(), name) for section, name in sections]
+    sections = [(section.title(), name) for section, name in templates]
     sections[sections.index(('Info', 'headers'))] = ('FITS', 'headers')
     sections[sections.index(('Samples', 'filename'))] = ('Images', 'samples')
 
     sort = ('FITS', 'Images', 'Tracking', 'Lightcurves').index
-    sections, headers, *data = cosort(*zip(*sections), *desired_files.values(), 
-                                    key=sort)
-    
+    sections, headers, *data = cosort(*zip(*sections), *desired_files.values(),
+                                      key=sort)
     sections = zip(sections, headers)
-    out.update(dict(zip(sections, zip(*data))))
+    d = dict(zip(sections, zip(*data)))
+    out.update(d)
 
-    out['Light Curves']  = out.pop('Lightcurves')
-    
+    out['Light Curves'] = out.pop('Lightcurves')
+
     # Images
     # out['Images']['Source Regions'] = list(match(run, paths.source_regions.iterdir()))
 

@@ -11,18 +11,23 @@ from loguru import logger
 
 # local
 import motley
-from recipes import dicts
 from recipes.string import sub
+from recipes import cosort, dicts, op
 from recipes.config import ConfigNode
 from recipes.functionals import always, negate
+from recipes.functionals.partial import partial, placeholder as o
 
-
+from string import Template
 # ---------------------------------------------------------------------------- #
 REGEX_TMP = re.compile('\$([A-Z]+)')
 
 
-def _get_template_keys(path):
-    return REGEX_TMP.findall(str(path))
+class Template(Template):
+
+    def get_identifiers(self):
+        # NOTE: python 3.11 has Template.get_identifiers
+        _, keys, *_ = zip(*self.pattern.findall(self.template))
+        return keys
 
 
 def get_username():
@@ -178,8 +183,11 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
 
         # isolate the file template patterns
         templates = node.files.filtered(values=lambda v: '$' in str(v))
-        for keys, tmp in templates.map(_get_template_keys).flatten().items():
-            node[('patterns', tmp[0], *keys)] = str(templates[keys])
+        # sort sections
+        section_order = ('info', 'samples', 'tracking', 'lightcurves')
+        templates = templates.sorted(section_order).map(str).map(Template)
+        for section, tmp in templates.flatten().items():
+            node[('templates', tmp.get_identifiers()[0], *section)] = tmp
 
         # make readonly
         node.freeze()
