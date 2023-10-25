@@ -1,34 +1,24 @@
 
 # std
 import os
-import re
 import pwd
 import itertools as itt
 from pathlib import Path
+from string import Template
 
 # third-party
 from loguru import logger
 
 # local
 import motley
+from recipes import dicts
 from recipes.string import sub
-from recipes import cosort, dicts, op
 from recipes.config import ConfigNode
 from recipes.functionals import always, negate
-from recipes.functionals.partial import partial, placeholder as o
+from recipes.functionals.partial import placeholder as o
 
-from string import Template
+
 # ---------------------------------------------------------------------------- #
-REGEX_TMP = re.compile('\$([A-Z]+)')
-
-
-class Template(Template):
-
-    def get_identifiers(self):
-        # NOTE: python 3.11 has Template.get_identifiers
-        _, keys, *_ = zip(*self.pattern.findall(self.template))
-        return keys
-
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
@@ -147,6 +137,18 @@ def _ignore_any(ignore):
 
     return wrapper
 
+
+# ---------------------------------------------------------------------------- #
+
+class Template(Template):
+
+    def get_identifiers(self):
+        # NOTE: python 3.11 has Template.get_identifiers
+        _, keys, *_ = zip(*self.pattern.findall(self.template))
+        return keys
+
+
+# ---------------------------------------------------------------------------- #
 
 class PathConfig(ConfigNode):  # AttributeAutoComplete
     """
