@@ -321,15 +321,16 @@ def save_samples_fits(samples, wcss, path, overwrite):
 # Setup / Load data
 
 def init(paths, telescope, target, overwrite):
-    files, folders = paths.files.info, paths.folders
-    run = shocCampaign.load(folders.root, obstype='object')
+    root = paths.folders.root
+
+    run = shocCampaign.load(root, obstype='object')
 
     # update info if given
     info = check_required_info(run, telescope, target)
     logger.debug('User input from CLI: {}', info)
     if info:
         if info['target'] == '.':
-            info['target'] = folders.root.name.replace('_', ' ')
+            info['target'] = root.name.replace('_', ' ')
             logger.info('Using target name from root directory name: {!r}',
                         info['target'])
 
@@ -338,8 +339,8 @@ def init(paths, telescope, target, overwrite):
         run.attrs.set(repeat(info))
 
     # write script for remote data retrieval
-    if (CONFIG.remote.write_rsync_script and
-            (overwrite or not (files.remote.exists() or files.rsync_script.exists()))):
+    if ((files := paths.files.remote).get('rsync_script') and
+            (overwrite or not all((f.exists() for f in files.values())))):
         write_rsync_script(run, paths)
 
     return run, info
@@ -350,10 +351,10 @@ def write_rsync_script(run, paths, username=CONFIG.remote.username,
 
     remotes = list(map(str, run.calls.get_server_path(None)))
     prefix = f'{server}:{shared_prefix(remotes)}'
-    filelist = paths.folders.info / 'remote-files.txt'
+    filelist = paths.files.remote.rsync_script
     io.write_lines(filelist, [remove_prefix(_, prefix) for _ in remotes])
 
-    outfile = paths.folders.info / 'rsync-remote.sh'
+    outfile = paths.files.remote.rsync_files
     outfile.write_text(
         f'sudo rsync -arvzh --info=progress2 '
         f'--files-from={filelist!s} --no-implied-dirs '

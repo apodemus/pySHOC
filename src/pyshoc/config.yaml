@@ -29,7 +29,9 @@ folders:
 
 # ---------------------------------------------------------------------------- #
 remote:
-    write_rsync_script: True
+    filenames:       
+        rsync_script:           $INFO/rsync-remote.sh
+        rsync_files:            $INFO/remote-files.txt
     server:             astro.cape.saao.ac.za
     username:           Null
 
@@ -146,8 +148,10 @@ info:
     folder:         info
     filenames:
         # campaign info
-        summary:        campaign-files.xlsx
-        products:       data-products.xlsx
+        campaign : info.xlsx::Campaign
+        products : info.xlsx::Products
+        # campaign:       campaign-files.xlsx
+        # products:       data-products.xlsx
         obslog:         observing-log.tex
         headers:        headers/$HDU.txt
 
@@ -159,6 +163,7 @@ info:
 # ---------------------------------------------------------------------------- #
 # Sample image statistics 
 samples:
+    title:              Sample Images # for tables
     folder:             $PLOTS/samples
     filename:           $HDU$FRAMES.png
 
@@ -189,7 +194,9 @@ samples:
                     color:      w
                     size:       xx-small
                     fontweight: bold
-            
+                plims:  [0.25, 99.9]
+                
+
             calibrated:
                 filename: $PLOTS/thumbnails-cal.png
                 overwrite: Null
@@ -245,6 +252,8 @@ registration: &image_registration
 # ---------------------------------------------------------------------------- #
 # source tracking 
 tracking:
+    # tables
+    title:      'Tracking Data'
     # ------------------------------------------------------------------------ #
     # source tracking data files
     folder:     $PHOT/tracking/$HDU
@@ -390,6 +399,7 @@ phot:
 # ---------------------------------------------------------------------------- #
 
 lightcurves:
+    title:          Light Curves
     folder:         $PHOT/lightcurves/
     
     raw:
