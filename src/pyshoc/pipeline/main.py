@@ -30,14 +30,14 @@ from recipes.utils import not_null
 from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
 from recipes.decorators.reporting import trace
-from recipes.functionals.partial import PlaceHolder
+from recipes.functionals.partial import PlaceHolder as o
 from recipes.string import remove_prefix, shared_prefix
 
 # relative
 from .. import CONFIG, shocCampaign
 from . import products, lightcurves as lc
 from .calibrate import calibrate
-from .plotting import PlotTask
+from .plotting import PlotFactory
 from .logging import logger, config as config_logging
 
 
@@ -231,24 +231,34 @@ def get_filename_template(ext):
     return ''
 
 
+def _plot_image(image, *args, **kws):
+    return image.plot(image, *args, **kws)
+
+
 def _plot_sample_images(run, samples, path_template, overwrite, ui):
 
-    o = PlaceHolder
+    factory = PlotFactory(ui)   # static args
+    task = factory(_plot_image)(fig=o,
+                                regions=CONFIG.samples.plots.contours,
+                                labels=CONFIG.samples.plots.labels,
+                                coords='pixel',
+                                use_blit=False)
+
     for hdu in run:
         # grouping
         year, day = str(hdu.t.date_for_filename).split('-', 1)
 
         for (j, k), image in samples[hdu.file.name].items():
+            # get filename
+            filename = products.resolve_path(path_template, hdu, j, k)
+
             # add tab to ui
-            key = [year, day, hdu.file.nr]
-            if j and k and (j, k) != (0, hdu.nframes):
-                key.append('{j}-{k}'.format(j=j, k=k))
+            key = ('Sample Images', year, day, hdu.file.nr)
+            if frames := remove_prefix(hdu.file.stem, filename.stem):
+                key.append(frames)
 
             # plot
-            filename = products.resolve_path(path_template, hdu, j, k)
-            task = PlotTask(ui, ('Samples', *key),
-                                  filename, overwrite)
-            yield task(plot_image)(o, image=image)
+            yield factory.add_task(task, key, filename, overwrite, image=image)
 
 
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
@@ -260,32 +270,35 @@ def plot_thumbnails(samples, ui, filename=None, overwrite=False, **kws):
     images, = zip(*map(dict.values, samples.values()))
 
     # filenames, images = zip(*(map(dict.items, samples.values())))
-    task = PlotTask(ui, ('Overview', getattr(filename, 'name')),
-                          filename, overwrite)
-    return task(plot_image_grid)(images,
-                                    use_blit=False,
+    factory = PlotFactory(ui)
+    task = factory(plot_image_grid)(images,
+                                    fig=o,
                                     titles=list(samples.keys()),
+                                    use_blit=False,
                                     **kws)
 
+    factory.add_task(task, ('Overview', getattr(filename, 'name')),
+                     filename, overwrite)
 
-def plot_image(fig, *indices, image):
 
-    # image = samples[indices]
-    logger.debug('Plotting image {}', image)
+# def plot_image(fig, *indices, image):
 
-    display, art = image.plot(fig=fig.figure,
-                              regions=CONFIG.samples.plots.contours,
-                              labels=CONFIG.samples.plots.labels,
-                              coords='pixel',
-                              use_blit=False)
+#     # image = samples[indices]
+#     logger.debug('Plotting image {}', image)
 
-    return art
+#     display, art = image.plot(fig=fig.figure,
+#                               regions=CONFIG.samples.plots.contours,
+#                               labels=CONFIG.samples.plots.labels,
+#                               coords='pixel',
+#                               use_blit=False)
+
+#     return art
 
 
 def plot_drizzle(fig, *indices, ff):
-    logger.info('Plotting drizzle image.')
-
+    # logger.info('POOP drizzle image: {} {}', fig, indices)
     if not indices or indices[-1] == 'Drizzle':
+        logger.info('Plotting drizzle image: {} {}', fig, indices)
         ff.show_colorscale(cmap=CONFIG.plotting.cmap)
         fig.tight_layout()
 
@@ -369,9 +382,12 @@ def preview(run, paths, info, ui, overwrite):
     )
 
     # write summary spreadsheet
-    run.tabulate.to_xlsx(paths.files.info.summary)
+    path = paths.files.info.campaign
+    filename, *sheet = str(path).split('::')
+
+    run.tabulate.to_xlsx(filename, *sheet)
     logger.info('The table above is available in spreadsheet format at:\n'
-                '{!s:}', paths.files.info.summary)
+                '{!s:}', filename)
 
     # Sample images prior to calibration and header info
     return compute_preview(run, paths, ui, overwrite)
@@ -399,7 +415,7 @@ def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
 
 
 def headers_to_txt(run, paths, overwrite):
-    
+
     showfile = str
     if str(paths.files.info.headers).startswith(str(paths.folders.output)):
         def showfile(h): return h.relative_to(paths.folders.output)
@@ -409,7 +425,6 @@ def headers_to_txt(run, paths, overwrite):
         if not headfile.exists() or overwrite:
             logger.info('Writing fits header to text at {}.', showfile(headfile))
             hdu.header.totextfile(headfile, overwrite=overwrite)
-
 
 
 # ---------------------------------------------------------------------------- #
@@ -504,10 +519,9 @@ def plot_overview(run, reg, paths, ui, overwrite):
 
     kws = dict(CONFIG.registration.plots.mosaic)
     filename = kws.pop('filename')
-    task = PlotTask(ui, ('Overview', 'Mosaic'),
-                          filename, overwrite)
-
-    task(reg.mosaic)(names=run.files.stems, **kws)
+    factory = PlotFactory(ui)
+    task = factory(reg.mosaic)(names=run.files.stems, **kws)
+    factory.add_task(task, ('Overview', 'Mosaic'), filename, overwrite)
 
     # Create mosaic plot
     # mosaic = reg.mosaic(names=run.files.stems, **kws)
@@ -520,19 +534,16 @@ def plot_overview(run, reg, paths, ui, overwrite):
     #     text_offset=(4, 5), size=12, fontweight='bold'
     # )
 
-    o = PlaceHolder()
-
     # drizzle
     filename = paths.files.registration.drizzle
-    task = PlotTask(ui, ('Overview', 'Drizzle'),
-                          filename.with_suffix('.png'),
-                          overwrite)
-
-    task(plot_drizzle)(o, ff=apl.FITSFigure(str(filename)))
+    ff = apl.FITSFigure(str(filename))
+    task = factory(plot_drizzle)(o, ff=ff)
+    factory.add_task(task, ('Overview', 'Drizzle'),
+                     filename.with_suffix('.png'), overwrite, ff._figure)
 
 
 # ---------------------------------------------------------------------------- #
-@update_defaults(CONFIG.tracking.params)
+@ update_defaults(CONFIG.tracking.params)
 def _track(hdu, seg, labels, coords, path, overwrite=False, dilate=0, njobs=-1):
 
     logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
@@ -615,41 +626,20 @@ def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
 def plot_lcs(lcs, ui=None, filename_template=None, overwrite=False, **kws):
 
-    # ui = MplMultiTab(title='Light curves', pos='N')
+    factory = PlotFactory(ui)
+    task = factory(lc.plot)(o, **kws)
 
-    tab = 'Light curves'
+    section = 'Light curves'
 
     filenames = {}
-    o = PlaceHolder()
     for date, ts in lcs.items():
         filenames[date] = filename = Path(str(filename_template).format(date=date))
         year, day = date.split('-', 1)
-
-        task = PlotTask(ui, (tab, year, day),
-                              filename, overwrite)
-
-        task(lc.plot)(o, ts, **kws)
-
-    #     if ui:
-    #         fig = ui.add_tab(tab, year, day,
-    #                          fig={'figsize': (12, 6)}).figure
-    #     # else:
-    #     #     fig =
-
-    #     if not delay:
-    #         fig = _plot_ts(fig, ts, filename, overwrite, **kws)
-
-    # if ui and delay:  #
-    #     ui[tab].add_callback(_plot_ts_ui, ui=ui,
-    #                          lcs=lcs, filenames=filenames,
-    #                          overwrite=overwrite, **kws)
-
+        factory.add_task(task,
+                                (section, year, day),
+                                filename, overwrite, None,
+                                ts)
     return ui
-
-
-# def _plot_ts_ui(fig, indices, ui, lcs, filenames, overwrite, **kws):
-#     date = '-'.join(ui.tabs.tab_text(indices)[-2:])
-#     return lc.plot(fig, lcs[date], filenames[date], overwrite, **kws)
 
 
 @trace
@@ -690,8 +680,6 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # Write data products spreadsheet
     products.write_xlsx(run, paths, overview)
-    
-    raise SystemError()
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
