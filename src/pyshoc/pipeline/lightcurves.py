@@ -92,7 +92,7 @@ def _get_save_meta_stack(campaign):
 
 def _get_plot_config(grouping, step):
 
-    kws, specific = CONFIG.plots.split(('by_file', 'nightly'))
+    kws, specific = CONFIG.plots.split(('by_file', 'by_date'))
     specific = specific[grouping][step]
 
     if specific is False:
@@ -115,7 +115,7 @@ def _get_plot_config(grouping, step):
 #     fig = get_figure(ui, key, **figkws)
 
 #     if ui and delay and not fig.plot:
-#         ui[key].add_callback(plotter, (fig, ts, filename, overwrite), **kws)
+#         ui[key].add_task(plotter, (fig, ts, filename, overwrite), **kws)
 #     else:
 #         plotter(fig, ts, filename, overwrite, **kws)
 
@@ -276,7 +276,7 @@ def diff0_phot(hdu, paths, overwrite=False, plot=False):
 
     return load_or_compute(
         # load
-        resolve_path(paths.files.lightcurves.diff0, hdu), overwrite,
+        resolve_path(paths.files.lightcurves.diff0.filename, hdu), overwrite,
         # compute
         delayed(_diff0_phot)(hdu, paths, meta=meta, overwrite=overwrite),
         # save
@@ -305,20 +305,23 @@ def _diff0_phot(hdu, paths, c=1, meta=None, overwrite=False):
 
 def concat_phot(campaign, paths, overwrite=False, plot=False):
     #
-    save = _get_save_meta(campaign[0], title=CONFIG['diff0'].title)
+    cfg = CONFIG.find('concat')
+    title, = cfg.find('title').flatten().values()
+    save = _get_save_meta(campaign[0], title=title)
+
     info = save['meta']['Observing info']
     info.pop('File')
     info['Files'] = ', '.join(campaign.files.names)
 
     return load_or_compute(
         # load
-        resolve_path(paths.files.lightcurves.diff0, campaign[0]), overwrite,
+        resolve_path(paths.files.lightcurves.diff0.concat, campaign[0]), overwrite,
         # compute
         delayed(_concat_phot)(campaign, paths, overwrite, plot),
         # save
         save,
         # plot
-        _get_plot_config('nightly', 'diff0')
+        _get_plot_config('by_date', 'diff0')
     )
 
 
@@ -373,7 +376,7 @@ def decor(ts, campaign, paths, overwrite, **kws):
         # save
         save,
         # plot
-        _get_plot_config('nightly', 'decor')
+        _get_plot_config('by_date', 'decor')
     )
 
     return TimeSeries(bjd, rflux.T, rsigma.T)
@@ -434,11 +437,3 @@ def tv_window_smooth(t, x, nwindow, noverlap, smoothing):
         r = r[:n]
 
     return np.ma.array(r)
-
-
-# LOADERS = {
-#     'raw':      load_raw,
-#     'flagged':  load_flagged,
-#     # 'diff0':    diff0_phot,
-#     # 'decor':    load_decor
-# }

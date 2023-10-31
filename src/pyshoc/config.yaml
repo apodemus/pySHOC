@@ -222,6 +222,7 @@ detection: &source_detection
 detect:          *source_detection #
 # source_detection:   *source_detection #
 
+
 # ---------------------------------------------------------------------------- #
 # image registration (wcs)
 registration: &image_registration
@@ -250,6 +251,7 @@ registration: &image_registration
 
 # alias
 # reg: *image_registration
+
 
 # ---------------------------------------------------------------------------- #
 # source tracking 
@@ -393,13 +395,13 @@ tracking:
                 ec:         darkgreen
                 zorder:     100
 
-        
+
 # ---------------------------------------------------------------------------- #
 phot:   
     folder:         phot/
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
 lightcurves:
     title:          Light Curves
     folder:         $PHOT/lightcurves/
@@ -417,15 +419,16 @@ lightcurves:
             kmax:       0.1%
 
     diff0:
-        filename:   by_file/diff/$HDU.diff0.txt
         title:      Differential (0th order) ragged-aperture light curve for {}.
-        
-    concat:
-        filename:   nightly/diff/$DATE.diff0.txt
+        filename:   by_file/diff/$HDU.diff0.txt
+
+        concat:
+            title:      Nightly differential (0th order) ragged-aperture light curve for {}.
+            filename:   by_date/diff/$DATE.diff0.txt
 
     decor:
-        filename:   nightly/decor/$DATE.decor.txt
-        title:      Differential (smoothed) ragged-aperture light curve for {}.
+        title:      Nightly differential (smoothed) ragged-aperture light curve for {}.
+        filename:   by_date/decor/$DATE.decor.txt
 
         params:
             nwindow:        1000
@@ -453,6 +456,6 @@ lightcurves:
             flagged:    1
             diff0:      1
 
-        nightly:
+        by_date:
             diff0:      1
             decor:      1
