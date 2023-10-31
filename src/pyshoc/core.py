@@ -1026,7 +1026,7 @@ class TableHelper(AttrTable):
         table = worker(**kws).replace('\n    ', f'\n{" " * indent}')
         return '\n'.join(map(str.rstrip,  table.splitlines()))
 
-    def to_xlsx(self, path):
+    def to_xlsx(self, path, sheet=None, overwrite=False):
         tabulate = AttrTable.from_columns({
             'file.name':          Column('filename',
                                          align='<'),
@@ -1055,7 +1055,7 @@ class TableHelper(AttrTable):
         )
 
         tabulate.parent = self.parent
-        return tabulate.to_xlsx(path,
+        return tabulate.to_xlsx(path, sheet, overwrite=overwrite,
                                 align={...: '^'},
                                 header_formatter=str.title)
         # widths={'binning': 5})

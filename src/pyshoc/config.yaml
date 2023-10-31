@@ -142,18 +142,20 @@ calibration:
     # flats:
     #     filename_format: {obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}
 
+
 # ---------------------------------------------------------------------------- #
 # Information / Overview data products
 info:
     folder:         info
     filenames:
-        # campaign info
-        campaign : info.xlsx::Campaign
-        products : info.xlsx::Products
-        # campaign:       campaign-files.xlsx
-        # products:       data-products.xlsx
-        obslog:         observing-log.tex
+        # pipeline summary info
         headers:        headers/$HDU.txt
+        obslog:         observing-log.tex
+        # spreadsheet
+        campaign :      info.xlsx::Campaign                 # campaign-files.xlsx
+        products :
+            by_file:        info.xlsx::Products by File     # data-products.xlsx
+            by_date :       info.xlsx::Products by Date
 
         # remote file retrieval
         remote:         remote-files.txt

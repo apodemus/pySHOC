@@ -1,12 +1,10 @@
 
 
 # std
-import itertools as itt
 from pathlib import Path
 from collections import defaultdict
 
 # third-party
-import more_itertools as mit
 from loguru import logger
 
 # local
@@ -15,7 +13,6 @@ from motley.table import Table
 from recipes import cosort, string
 from recipes.dicts.node import DictNode
 from recipes.tree import FileSystemNode
-from recipes.functionals.partial import placeholder
 
 # relative
 from .. import CONFIG
@@ -92,7 +89,7 @@ def get_previous(run, paths):
         paths.folders.filtered(('info', 'plotting', 'registration')).items()
     }
 
-    # _TODO = overview['info'].pop(f'{paths.files.info.headers.parent.name}/')
+    #
     _sample_plots = overview['plotting'].pop(f'{paths.folders.samples.name}/')
 
     #
@@ -166,7 +163,7 @@ def _overview_table_vstack(overview, paths):
 
 def _resolve_by_file(run, templates):
     # sort rows
-    stems, _ = cosort(run.files.stems, run.attrs('t.date'))
+    stems, _ = cosort(run.files.stems, run.attrs('t.t0'))
     return _resolve_by(stems, templates, 'HDU', FRAMES='')
 
 
@@ -184,7 +181,6 @@ def _resolve_by(items, templates, key, **kws):
             rows[row].append(
                 Path(tmp.substitute(**{key: row, **kws}))
             )
-
     return rows
 
 
@@ -204,9 +200,6 @@ def _hdu_products_table(run, paths):
     desired_files = _resolve_by_file(run, templates)
     headers = [_get_column_header('HDU', s, paths) for s in templates.keys()]
 
-    # from IPython import embed
-    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':208")
-    
     # Sort columns
     return Table(list(desired_files.values()),
                  title='HDU Data Products',
@@ -242,28 +235,6 @@ def _nightly_products_table(run, paths):
 # ---------------------------------------------------------------------------- #
 
 
-def match(run, filenames, reference=None, empty=''):
-    if isinstance(filenames, Path) and filenames.is_dir():
-        filenames = filenames.iterdir()
-
-    return list(_match(run, filenames, reference, empty))
-
-
-def _match(run, filenames, reference, empty):
-
-    incoming = {stem: list(vals) for stem, vals in
-                itt.groupby(sorted(mit.collapse(filenames)), Path.stem.fget)}
-
-    if reference is None:
-        _, reference = cosort(run.attrs('t.t0'), run.files.stems)
-
-    for base in reference:
-        yield incoming.get(base, empty)
-
-
-# ---------------------------------------------------------------------------- #
-
-
 def hyperlink_ext(path):
     if path.exists():
         return (f'=HYPERLINK("{path}", "{path.suffix[1:]}")')
@@ -280,8 +251,9 @@ def write_xlsx(run, paths, overview, filename=None):
 
     templates = paths.templates['HDU'].flatten()
     desired_files = _resolve_by_file(run, templates)
+
     # sort
-    run = run[list(desired_files.keys())]
+    # run = run[list(desired_files.keys())]
 
     out = DictNode()
     files = 'files'
@@ -292,14 +264,14 @@ def write_xlsx(run, paths, overview, filename=None):
     out['Images', 'Overview'] = \
         [[(paths.folders.plotting / _) for _ in overview['plotting']]] * len(run)
 
-    #
-    sections = [(section.title(), name) for section, name in templates]
+    # CONFIG[section].get('title', section.title())
+    sections = [(section.title(), name) for section, name, *_ in templates]
     sections[sections.index(('Info', 'headers'))] = ('FITS', 'headers')
     sections[sections.index(('Samples', 'filename'))] = ('Images', 'samples')
 
-    sort = ('FITS', 'Images', 'Tracking', 'Lightcurves').index
+    order = ('FITS', 'Images', 'Tracking', 'Lightcurves')
     sections, headers, *data = cosort(*zip(*sections), *desired_files.values(),
-                                      key=sort)
+                                      key=order.index)
     sections = zip(sections, headers)
     d = dict(zip(sections, zip(*data)))
     out.update(d)
@@ -325,19 +297,25 @@ def write_xlsx(run, paths, overview, filename=None):
 
     # write
     # header_formatter=str.title
-    tbl.to_xlsx(filename or paths.files.info.products,
-                formats=';;;[Blue]@',
-                widths={'base': 14,
-                        files: 5,
-                        'headers': 7,
-                        'Overview': 4,
-                        'samples': 7,
-                        # 'Source Regions': 10,
-                        ...: 7},
-                align={'base': '<',
-                       'Overview': dict(horizontal='center',
-                                        vertical='center',
-                                        text_rotation=90),
-                       ...: dict(horizontal='center',
-                                 vertical='center')},
-                merge_unduplicate=('data', 'headers'))
+    filename = filename or paths.files.info.products.by_file
+    filename, *sheet = str(filename).split('::')
+    # sheet = sheet[0] if sheet else None
+
+    tbl.to_xlsx(
+        filename, *sheet, overwrite=True,
+        formats=';;;[Blue]@',
+        widths={'base': 14,
+                files: 5,
+                'headers': 7,
+                'Overview': 4,
+                'samples': 7,
+                # 'Source Regions': 10,
+                ...: 7},
+        align={'base': '<',
+               'Overview': dict(horizontal='center',
+                                vertical='center',
+                                text_rotation=90),
+               ...: dict(horizontal='center',
+                         vertical='center')},
+        merge_unduplicate=('data', 'headers')
+    )

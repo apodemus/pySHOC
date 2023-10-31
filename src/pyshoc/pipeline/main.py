@@ -383,12 +383,12 @@ def preview(run, paths, info, ui, overwrite):
     )
 
     # write summary spreadsheet
-    path = paths.files.info.campaign
-    filename, *sheet = str(path).split('::')
+    path = str(paths.files.info.campaign)
+    filename, *sheet = path.split('::')
 
-    run.tabulate.to_xlsx(filename, *sheet)
+    run.tabulate.to_xlsx(filename, *sheet, overwrite=True)
     logger.info('The table above is available in spreadsheet format at:\n'
-                '{!s:}', filename)
+                '{!s:}', path)
 
     # Sample images prior to calibration and header info
     return compute_preview(run, paths, ui, overwrite)
