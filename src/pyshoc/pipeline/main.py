@@ -696,9 +696,23 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # Launch the GUI
     if plot:
         logger.section('Launching GUI')
+        ui.set_focus('Overview', 'Mosaic')
         ui.show()
 
         if not is_interactive():
+            # sys.exit(app.exec_())
+            app.exec_()
+
+        # Run incomplete plotting tasks
+        getter = op.AttrVector('plot.func.filename', default=None)
+        tabs = list(ui.tabs._leaves())
+        filenames, tabs = cofilter(getter.map(tabs), tabs)
+        unsaved, tabs = map(list, cofilter(negate(Path.exists), filenames, tabs))
+        if n := len(unsaved):
+            logger.info('Now running {} incomplete tasks:', n)
+            for tab in tabs:
+                tab.run_task()
+
     # ------------------------------------------------------------------------ #
     logger.section('Finalize')
 
