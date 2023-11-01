@@ -679,9 +679,6 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     reg = registration(run, paths, ui, plot, show_cutouts, overwrite)
 
-    # Write data products spreadsheet
-    products.write_xlsx(run, paths, overview)
-
     # ------------------------------------------------------------------------ #
     # Source Tracking
     spanning = track(run, reg, paths)
@@ -702,9 +699,13 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         ui.show()
 
         if not is_interactive():
-            sys.exit(app.exec_())
+    # ------------------------------------------------------------------------ #
+    logger.section('Finalize')
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':676")
+    # get results from this run
+    overview, data_products = products.get_previous(run, paths)
 
-# %%
+    # Write data products spreadsheet
+    products.write_xlsx(run, paths, overview)
+    # This updates spreadsheet with products computed above
+    

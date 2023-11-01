@@ -163,7 +163,7 @@ def _overview_table_vstack(overview, paths):
 
 def _resolve_by_file(run, templates):
     # sort rows
-    stems, _ = cosort(run.files.stems, run.attrs('t.t0'))
+    stems = run.sort_by('t.t0').files.stems
     return _resolve_by(stems, templates, 'HDU', FRAMES='')
 
 
@@ -235,19 +235,38 @@ def _nightly_products_table(run, paths):
 # ---------------------------------------------------------------------------- #
 
 
-def hyperlink_ext(path):
+def _hyperlink(path, target):
     if path.exists():
-        return (f'=HYPERLINK("{path}", "{path.suffix[1:]}")')
+        return (f'=HYPERLINK("{path}", "{target}")')
     return '--'
 
 
 def hyperlink_name(path):
-    if path.exists():
-        return (f'=HYPERLINK("{path}", "{path.name}")')
-    return '--'
+    return _hyperlink(path, path.name)
 
 
-def write_xlsx(run, paths, overview, filename=None):
+def hyperlink_ext(path):
+    return hyperlink_exts(path, 1)
+
+
+def hyperlink_exts(path, tail=0, strip=''):
+    ext = ''.join(path.suffixes[-tail:]).lstrip(strip) if path.exists() else ''
+    return _hyperlink(path, ext)
+
+
+def write_xlsx(run, paths, overview):
+
+    # HDU
+    filename, *sheet = str(paths.files.info.products.by_file).split('::')
+    _write_hdu_products_xlsx(run, paths, overview, filename, *sheet)
+
+    # DATE
+    filename, *sheet = str(paths.files.info.products.by_date).split('::')
+    return _write_nightly_products_xlsx(run, paths, filename, *sheet)
+
+
+def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
+                             overwrite=True):
 
     templates = paths.templates['HDU'].flatten()
     desired_files = _resolve_by_file(run, templates)
@@ -257,12 +276,12 @@ def write_xlsx(run, paths, overview, filename=None):
 
     out = DictNode()
     files = 'files'
-    out['FITS', 'base'] = run.files.stems
+    out['FITS', 'HDU'] = run.files.stems
     out['FITS', files] = run.files.paths
 
     # duplicate Overview images so that they get merged below
-    out['Images', 'Overview'] = \
-        [[(paths.folders.plotting / _) for _ in overview['plotting']]] * len(run)
+    out['Images', 'Overview'] = [[(paths.folders.plotting / _)
+                                  for _ in overview['plotting']]] * len(run)
 
     # CONFIG[section].get('title', section.title())
     sections = [(section.title(), name) for section, name, *_ in templates]
@@ -287,7 +306,7 @@ def write_xlsx(run, paths, overview, filename=None):
 
     # create table
     tbl = Table.from_dict(out,
-                          title='Data Products',
+                          title='HDU Data Products',
                           convert={Path: hyperlink_ext,
                                    'files': hyperlink_ext,
                                    'Overview': hyperlink_name
@@ -297,25 +316,66 @@ def write_xlsx(run, paths, overview, filename=None):
 
     # write
     # header_formatter=str.title
-    filename = filename or paths.files.info.products.by_file
-    filename, *sheet = str(filename).split('::')
+
     # sheet = sheet[0] if sheet else None
 
-    tbl.to_xlsx(
-        filename, *sheet, overwrite=True,
-        formats=';;;[Blue]@',
-        widths={'base': 14,
+    return tbl.to_xlsx(
+        filename, sheet, overwrite=overwrite,
+        formats={'HDU': str,
+                 ...: ';;;[Blue]@'},
+        widths={'HDU': 14,
                 files: 5,
                 'headers': 7,
                 'Overview': 4,
                 'samples': 7,
                 # 'Source Regions': 10,
                 ...: 7},
-        align={'base': '<',
+        align={'HDU': '<',
                'Overview': dict(horizontal='center',
                                 vertical='center',
                                 text_rotation=90),
                ...: dict(horizontal='center',
                          vertical='center')},
         merge_unduplicate=('data', 'headers')
+    )
+
+
+def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
+                                 overwrite=True):
+
+    templates = paths.templates['DATE'].flatten()
+    desired_files = _resolve_by_date(run, templates)
+
+    # col_titles = dict(diff0='Differential',
+    #                   decor='Decorrelated')
+    headers = []
+    for s in templates.keys():
+        head, *_pathinfo, last = _get_column_header('DATE', s, paths)
+        # ''.join((*_pathinfo, last))
+        headers.append((head, s[1]))
+
+    *groups, headers = zip((*[''] * (len(headers[0]) - 1), 'DATE'), *headers)
+
+    tbl = Table(
+        [(b, *f) for b, f in desired_files.items()],
+        title='Nightly Data Products',
+        col_groups=list(zip(*groups)),
+        col_headers=headers,
+        formatters={'DATE': str,
+                    ...: hyperlink_ext},
+        too_wide=False
+        #  align='<',
+        #  col_groups_align='<',
+        #  **CONFIG.console.products
+    )
+
+    return tbl.to_xlsx(
+        filename, sheet, overwrite=overwrite,
+        formats={'DATE': str,
+                 ...: ';;;[Blue]@'},
+        widths={'DATE': 10,
+                ...: 12},
+        align={'DATE': '<',
+               ...: dict(horizontal='center',
+                         vertical='center')}
     )

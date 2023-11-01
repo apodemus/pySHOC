@@ -28,6 +28,7 @@ folders:
 #     lightcurves:    $PHOT/lightcurves
 
 # ---------------------------------------------------------------------------- #
+# scripts for remote file retrieval
 remote:
     filenames:       
         rsync_script:           $INFO/rsync-remote.sh
@@ -120,24 +121,25 @@ logging:
             motley.table.xlsx:          True
             scrawl.moves.machinery:     False
 
+
 # ---------------------------------------------------------------------------- #
-# plotting
-plotting: #&plotting
-    folder:         plots
+# Information / Overview data products
+info:
+    folder:         info
+    filenames:
+        # pipeline summary info
+        headers:        headers/$HDU.txt
+        obslog:         observing-log.tex
+        # spreadsheet
+        campaign :      info.xlsx::Campaign Info                 # campaign-files.xlsx
+        products :
+            by_file:        info.xlsx::Data Products by File     # data-products.xlsx
+            by_date :       info.xlsx::Data Products by Date
 
-    # GUI
-    gui: 
-        title:      pySHOC Photometry Pipeline GUI
-        pos :       N
-        delay:      True
+        # remote file retrieval
+        remote:         remote-files.txt
+        rsync_script:   rsync-remote.sh
 
-    #
-    cmap:           cmr.voltage
-
-
-# aliases
-# plots: *plotting
-# plotting: *plotting
 
 # ---------------------------------------------------------------------------- #
 calibration:
@@ -154,22 +156,22 @@ calibration:
 
 
 # ---------------------------------------------------------------------------- #
-# Information / Overview data products
-info:
-    folder:         info
-    filenames:
-        # pipeline summary info
-        headers:        headers/$HDU.txt
-        obslog:         observing-log.tex
-        # spreadsheet
-        campaign :      info.xlsx::Campaign                 # campaign-files.xlsx
-        products :
-            by_file:        info.xlsx::Products by File     # data-products.xlsx
-            by_date :       info.xlsx::Products by Date
+# plotting
+plotting: #&plotting
+    folder:         plots
 
-        # remote file retrieval
-        remote:         remote-files.txt
-        rsync_script:   rsync-remote.sh
+    # GUI
+    gui: 
+        title:      pySHOC Photometry Pipeline GUI
+        pos :       N
+        delay:      True
+
+    #
+    cmap:           cmr.voltage
+
+# aliases
+# plots: *plotting
+# plotting: *plotting
 
 
 # ---------------------------------------------------------------------------- #
@@ -257,7 +259,7 @@ registration: &image_registration
         mosaic:
             filename:   $PLOTS/mosaic.png
             cmap:       cmr.chroma
-            alpha:      0.35
+            alpha:      0.5
 
 # alias
 # reg: *image_registration
@@ -340,7 +342,6 @@ tracking:
     plots:
         centroids:
             com:              [r, +, "Centre of Mass"]
-            geometric_median: [g, o, "Projected\n Geometric Median"]
             peak:             [m, ^, "Peak"]
             avg:              [k, x, "Weighted Centroid"] 
              # NOTE: avg sould be last
