@@ -2,13 +2,13 @@
 # std
 import sys
 from pathlib import Path
-from IPython import embed
 
 # third-party
 from loguru import logger
 from matplotlib.figure import Figure
 
 # local
+from recipes.pprint import callers
 from recipes.logging import LoggingMixin
 from recipes.functionals.partial import Partial, PartialAt
 
@@ -50,41 +50,58 @@ save_fig = save_figure
 
 # ---------------------------------------------------------------------------- #
 
-
 class PlotTask(LoggingMixin, PartialAt):
 
     def __init__(self, ui, args, kws):
         self.ui = ui
         super().__init__(args, kws)
 
-    def __wrapper__(self, func, figure, key, filename, overwrite, *args, **kws):
+    def __wrapper__(self, func, figure, key, *args, **kws):
 
-        self.logger.info('Plotting tab {} with {!r} at figure {}.',
-                         key, func.__name__, figure)
+        self.logger.opt(lazy=True).info(
+            'Plotting tab {0[0]} with {0[1]} at figure: {0[2]}.',
+            lambda: (self.ui.tabs.tab_text(key), callers.describe(func), figure))
 
         # Fill dynamic parameter values
         if self.nfree:
-            args = self._get_args((figure, *args))
+            args = (*self._get_args((figure, )), *args)
             kws = self._get_kws(kws)
         if self._keywords:
-            args = self._get_args(args)
-            kws = self._get_kws({list(self._keywords).pop(): figure})
+            args = (*self.args, *args)
+            kws = {**self._get_kws({list(self._keywords).pop(): figure}), **kws}
 
-        func_creates_figure = not (self.nfree or self._keywords)
-        # We will have generated a figure to fill the tab in the ui, we have to
-        # replace it after the task executes with the actual figure we want in
-        # our tab.
+        self.logger.opt(lazy=True).info(
+            'Invoking call for plot task: {}',
+            lambda: callers.pformat(func, args, kws)
+        )
 
         # plot
         art = func(*args, **kws)
 
-        if func_creates_figure:
+        if not (self.nfree or self._keywords):
+            # We will have generated a figure to fill the tab in the ui, we have
+            # to replace it after the task executes with the actual figure we
+            # want in our tab.
             figure = art.fig
             mgr = self.ui[tuple(key)]._parent()
             mgr.replace_tab(key[-1], figure, focus=True)
 
+        return figure, art
+
+
+class _SaveTask:
+    def __init__(self, task, filename=None, overwrite=False):
+        self.task = task
+        self.filename = filename
+        self.overwrite = overwrite
+
+    def __call__(self, figure, key, *args, **kws):
+    
+        # run
+        figure, art = self.task(figure, key, *args, **kws)
+
         # save
-        save_fig(figure, filename, overwrite)
+        save_fig(figure, self.filename, self.overwrite)
 
         return art
 
@@ -109,23 +126,21 @@ class PlotFactory(LoggingMixin, Partial):
         # # after the task executes with the actual fgure we want in our tab
         figure = get_figure(self.ui, *key, fig=figure)
 
+        _task = _SaveTask(task, filename, overwrite)
+
         if self.delay:
             # Future task
             self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
                              key, task)
 
-            # self.ui[key]._parent().add_callback(
-            #   task, filename, overwrite, *args, **kws)
             tab = self.ui[key]
-            tab.add_callback(task, filename, overwrite, *args, **kws)
-            parent = tab._parent()
-            parent._cid = parent.tabs.currentChanged.connect(parent._on_change)
+            tab.add_task(_task, *args, **kws)
 
-            return task
+            return _task
 
         # execute task
         self.logger.debug('Plotting immediate: {}.', self.key)
-        return task(figure, key, filename, overwrite, *args, **kws)
+        return _task(figure, key, *args, **kws)
 
 
 # ---------------------------------------------------------------------------- #
