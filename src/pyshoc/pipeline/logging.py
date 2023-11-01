@@ -21,7 +21,7 @@ from .. import CONFIG
 
 
 # ---------------------------------------------------------------------------- #
-cfg = CONFIG.logging.console
+cfg = CONFIG.logging
 
 # ---------------------------------------------------------------------------- #
 # Capture warnings
@@ -45,14 +45,14 @@ def markup_to_list(tags):
 
 
 level_formats = {
-    level.name: motley.stylize(cfg.format,
+    level.name: motley.stylize(cfg.console.format,
                                level=level,
                                style=markup_to_list(level.color))
     for level in logger._core.levels.values()
 }
 
 # custom level for sectioning
-level_formats['SECTION'] = motley.stylize(cfg.section, '',
+level_formats['SECTION'] = motley.stylize(cfg.console.section, '',
                                           width=get_terminal_size()[0])
 logger.level('SECTION', no=15)
 Logger = type(logger)
@@ -108,23 +108,14 @@ def config():
     return logger.configure(
         # disable logging for motley.formatter, since it is being used here to
         # format the log messages and will thus recurse infinitely.
-        activation=[
-            ('pyshoc', True),
-            ('obstools', True),
-            ('obstools.phot', 'TRACE'),
-            ('recipes', True),
-            ('mpl_multitab', True),
-            ('recipes.io.utils', False),
-            ('motley.formatter', False),
-            ('scrawl.moves.machinery', False)
-        ],
+        activation=list(cfg.activation.items()),
 
         # File sink is added by pipeline.cli.setup once output path is known
         handlers=[{
             # console handler
-            'sink':     RepeatMessageHandler(template=cfg.repeats),
-            'level':    cfg.level,
-            'catch':    cfg.catch,
+            'sink':     RepeatMessageHandler(template=cfg.console.repeats),
+            'level':    cfg.console.level,
+            'catch':    cfg.console.catch,
             'colorize': False,
             'format':   formatter,
             # 'filter':   filter_console

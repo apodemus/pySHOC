@@ -108,7 +108,17 @@ logging:
         repeats: |
             { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
 
-    
+    # library activation
+    activation: 
+            pyshoc:                     True
+            obstools:                   True
+            obstools.phot:              TRACE
+            recipes:                    True
+            mpl_multitab:               True
+            recipes.io.utils:           False
+            motley.formatter:           False
+            motley.table.xlsx:          True
+            scrawl.moves.machinery:     False
 
 # ---------------------------------------------------------------------------- #
 # plotting

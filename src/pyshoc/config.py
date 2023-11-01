@@ -43,11 +43,8 @@ if CONFIG.remote.username is None:
 
 
 # uppercase logging level
-
-for sink, cfg in CONFIG.logging.items():
-    if sink == 'filename':
-        continue
-    cfg['level'] = cfg.level.upper()
+for sink, cfg in CONFIG.logging.filtered(('file', 'console')).items():
+    CONFIG.logging[sink, 'level'] = cfg.level.upper()
 del cfg
 
 

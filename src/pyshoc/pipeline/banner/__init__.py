@@ -88,8 +88,8 @@ def make_banner(format, subtitle='', width=None, **style):
 
     logo = motley.justify(color_logo(fg=style.pop('fg', '')), '^', width)
     x = logo.rindex('\n')
-    y = x - next(string.where(logo[x - 1::-1], op.ne, ' '))
-    logo = ''.join((logo[:y], '🪐', logo[y+2:]))
+    y = x - next(string.where(logo[(x - 1)::-1], op.ne, ' '))
+    logo = ''.join((logo[:y], '🪐', logo[(y + 2):]))
     return motley.banner(
         over_starfield(motley.format(format, **locals(), version=__version__)),
         width, **style
