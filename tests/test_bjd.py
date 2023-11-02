@@ -259,7 +259,8 @@ def light_time_terms_spice(t, coords, origin='barycentric'):
     xyz_obj = precess(coords, t, 0).cartesian.xyz.to_value()
 
     # return xyz_earth, xyz_sun, xyz_obj
-    return (romer_delay(xyz_earth, xyz_obj), einstein_delay(t.tt.jd),
+    return (romer_delay(xyz_earth, xyz_obj), 
+            einstein_delay(t.tt.jd),
             shapiro_delay(xyz_earth, xyz_sun, xyz_obj))
 
 

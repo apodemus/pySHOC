@@ -23,6 +23,7 @@ from recipes.oo import Null
 from recipes.dicts import invert
 from recipes.logging import LoggingMixin
 
+
 # import spiceypy as spice
 
 # TODO: backends = {'astropy', 'astroutils', 'spice'}
@@ -94,8 +95,8 @@ class UnknownPointing(Exception):
 
 class _UnknownTime(Null):
 
-    # __array_interface__ = dict(shape=(1, ), typestr='O', version=3) 
-    
+    # __array_interface__ = dict(shape=(1, ), typestr='O', version=3)
+
     def __str__(self):
         return motley.red('??')
 
@@ -372,10 +373,20 @@ class Date(time.Time):
             warnings.filterwarnings("error")
             return self.strftime('%Y-%m-%d')
 
+    __str__ = __repr__
+
     def __format__(self, spec):
         if self.shape == () and ('d' in spec):
             return self.strftime('%Y%m%d')
         return super().__format__(spec)
+
+    # @property
+    # def year(self):
+    #     return self.ymdhms[0]
+
+    # @property
+    # def month(self):
+    #     return self.ymdhms[1]
 
     # def __add__(self, other):
     #     t = super().__add__(other)
@@ -465,10 +476,7 @@ class shocTiming(LoggingMixin):
     # TODO: option to do flux weighted time stamps!!
 
     def __new__(cls, hdu):
-        kls = shocTiming
-        if 'Old' in hdu.__class__.__name__:
-            kls = shocTimingOld
-
+        kls = shocTimingOld if 'Old' in hdu.__class__.__name__ else shocTiming
         return super().__new__(kls)
 
     def __getnewargs__(self):
@@ -557,6 +565,16 @@ class shocTiming(LoggingMixin):
         """Reset all lazy properties.  Will work for subclasses"""
         for key, _ in inspect.getmembers(self.__class__, is_lazy):
             self.__dict__.pop(key, None)
+
+    @property
+    def date_for_filename(self):
+        if self.date is UnknownTime:
+            return
+
+        if (self.t0 - self.date).to('s').value < 9 * 60 * 60:
+            return self.date - TimeDelta(1, format='jd')
+
+        return self.date
 
     @lazyproperty
     def t0(self):

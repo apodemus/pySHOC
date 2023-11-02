@@ -32,27 +32,19 @@ RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 #                                for w in filter(None, words)))
 
 
-def morph(dic, parent):
-    for name, branch in dic.items():
-        morph(branch, bash.BraceExpressionNode(name, parent))
+def _split_filenames(names):
+    for file in names:
+        if (mo := RGX_FILENAME.match(file)):
+            yield mo.groups()
+            continue
+
+        raise ValueError('Filename does not have YYYYMMDD.nnn pattern')
 
 
 def get_tree_ymd(names, depth=-1):
-    tree = DictNode()
-    for file in names:
-        mo = RGX_FILENAME.match(file)
-        if mo is None:
-            raise ValueError('Filename does not have YYYYMMDD.nnn pattern')
-
-        parts = mo.groups()
-        node = tree
-        for part in parts:
-            node = node[part]
-
-    root = bash.BraceExpressionNode('')
-    morph(tree, root)
-    root.collapse(depth)
-    return root
+    tree = bash.BraceExpressionNode.from_list(_split_filenames(names))
+    tree.collapse(depth)
+    return tree
 
 # ---------------------------------------------------------------------------- #
 

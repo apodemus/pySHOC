@@ -17,7 +17,7 @@ from scipy import stats
 from astropy.io import fits
 from astropy.time import Time
 from astropy.utils import lazyproperty
-from astropy.coordinates import EarthLocation, SkyCoord
+from astropy.coordinates import SkyCoord
 
 # local
 from scrawl.image import plot_image_grid
@@ -37,11 +37,12 @@ from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
-from recipes.string import (named_items, remove_prefix, strings, sub,
-                            indent as indented)
+from recipes.string import named_items, strings, sub, indent as indented
 
 # relative
+from .config import CONFIG
 from .utils import str2tup
+from .tel_info import tel_info, get_tel
 from .printing import BraceContract
 from .readnoise import readNoiseTables
 from .timing import Trigger, shocTiming
@@ -65,40 +66,16 @@ SERIAL_NRS = [5982, 6448]
 SERVER_NAMES = {'SHOC2': 'shd',
                 'SHOC1': 'sha'}
 
-# ------------------------------ Telescope info ------------------------------ #
-# TODO: data table in telinfo module:
-# from obstools.telinfo import TelInfo; TelInfo[1.9].fov
-
-# Field of view of telescopes in arcmin
-FOV = {'1.9m':     (1.29, 1.29),
-       '1.0m':     (2.85, 2.85),
-       'lesedi':   (5.7, 5.7)}
-FOV_REDUCED = {'74':    (2.79, 2.79)}  # with focal reducer
+PIXEL_SIZE = 13e-6  # m
 
 # Diffraction limits for shoc in pixels assuming
 # green light:  λ = 5e-7
-PIXEL_SIZE = 13e-6  # m
-# FRATIOS = {'1.9m': 4.85 }
+
+# F_RATIOS = {'1.9m': 4.85 }
 DIFF_LIMS = {'1.9m':   1.22 * 5e-7 * 4.85 / PIXEL_SIZE}
 #    '1.0m':  ,
 #    'lesedi':,
 #    'salt':  }
-
-# Exact GPS locations of telescopes
-TEL_GEO_LOC = {'1.9m':   (20.81167,  -32.462167, 1822),
-               '1.0m':   (20.81,     -32.379667, 1810),
-               'lesedi': (20.8105,   -32.379667, 1811),
-               'salt':   (20.810808, -32.375823, 1798)}
-LOCATIONS = {tel: EarthLocation.from_geodetic(*geo)
-             for tel, geo in TEL_GEO_LOC.items()}
-
-# names
-# PREFER_METRIC_NAMES = True
-_74, _40 = ('1.9m', '1.0m')  # if PREFER_METRIC_NAMES else ('74in', '40in')
-TEL_NAME_EQUIVALENT = {'74': _74, '1.9': _74,
-                       '40': _40, '1.0': _40, '1': _40}
-KNOWN_TEL_NAMES = [*LOCATIONS, *TEL_NAME_EQUIVALENT]
-
 
 # ----------------------------- module constants ----------------------------- #
 
@@ -107,7 +84,6 @@ OBSTYPE_EQUIVALENT = {'bias':    'dark',
                       'skyflat': 'flat'}
 KNOWN_OBSTYPE = {*CALIBRATION_NAMES, *OBSTYPE_EQUIVALENT, 'object'}
 
-EMPTY_FILTER_NAME = '∅'
 
 # Attributes for matching calibration frames
 ATT_EQUAL_DARK = ('camera', 'binning',  # subrect
@@ -148,93 +124,6 @@ def apply_stack(func, *args, **kws):  # TODO: move to proc
     return func(*args, **kws)
 
 
-def get_tel(name, metric=True):
-    """
-    Get standardized telescope name from description.
-
-    Parameters
-    ----------
-    name : str or int
-        Telescope name (see Examples).
-
-    Returns
-    -------
-    str
-        Standardized telescope name.
-
-    Examples
-    --------
-    >>> get_tel(74)
-    '1.9m'
-    >>> get_tel(1.9)
-    '1.9m'
-    >>> get_tel('1.9 m', metric=False)
-    '74in'
-    >>> get_tel(1)
-    '1.0m'
-    >>> get_tel('40     in')
-    '1.0m'
-    >>> get_tel('LESEDI')
-    'lesedi'
-
-    Raises
-    ------
-    ValueError
-        If name is unrecognised.
-    """
-
-    # sanitize name:  strip "units" (in,m), lower case
-    nr = str(name).rstrip('inm ').lower()
-
-    if nr not in KNOWN_TEL_NAMES:
-        raise ValueError(f'Telescope name {name!r} not recognised. Please '
-                         f'use one of the following\n: {KNOWN_TEL_NAMES}')
-
-    if nr in TEL_NAME_EQUIVALENT:
-        return TEL_NAME_EQUIVALENT[nr]
-
-    return name
-
-
-def get_fov(telescope, unit='arcmin', focal_reducer=False):
-    """
-    Get telescope field of view
-
-    Parameters
-    ----------
-    telescope
-    focal_reducer
-    unit
-
-    Returns
-    -------
-
-    Examples
-    --------
-    >>> get_fov(1)               # 1.0m telescope
-    >>> get_fov(1.9)             # 1.9m telescope
-    >>> get_fov(74)              # 1.9m
-    >>> get_fov('74in')          # 1.9m
-    >>> get_fov('40 in')         # 1.0m
-    """
-
-    telescope = get_tel(telescope)
-    fov = (FOV_REDUCED if focal_reducer else FOV)[telescope]
-
-    # at this point we have the FoV in arcmin
-    # resolve units
-    if unit in ('arcmin', "'"):
-        factor = 1
-    elif unit in ('arcsec', '"'):
-        factor = 60
-    elif unit.startswith('deg'):
-        factor = 1 / 60
-    else:
-        raise ValueError(f'Unknown unit {unit}')
-
-    return np.multiply(fov, factor)
-
-
 def slice_size(s):
     if isinstance(s, slice):
         return s.stop - s.start
@@ -249,11 +138,6 @@ def slice_sizes(l):
     return list(map(slice_size, l))
 
 # ------------------------------ Helper classes ------------------------------ #
-
-# class yxTuple(tuple):
-#     def __init__(self, *args):
-#         assert len(self) == 2
-#         self.y, self.x = self
 
 
 class Binning:
@@ -297,7 +181,7 @@ class Filters:
         A = self.get(a)
         # sloan filters usually in wheel B. Keep consistency here when assigning
         if (b is None) and A.islower():
-            self.A = EMPTY_FILTER_NAME
+            self.A = CONFIG.empty_filter_string
             self.B = A
         else:
             self.A = A
@@ -306,10 +190,10 @@ class Filters:
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return EMPTY_FILTER_NAME
+            return CONFIG.empty_filter_string
         if long:
             return long.split(' - ')[0]
-        return (long or EMPTY_FILTER_NAME)
+        return (long or CONFIG.empty_filter_string)
 
     def __members(self):
         return self.A, self.B
@@ -318,7 +202,7 @@ class Filters:
         return f'{self.__class__.__name__}{self.__members()}'
 
     # def __format__(self, spec):
-    #     return next(filter(EMPTY_FILTER_NAME.__ne__, self), '')
+    #     return next(filter(CONFIG.empty_filter_string.__ne__, self), '')
 
     def __str__(self):
         return self.name
@@ -337,10 +221,10 @@ class Filters:
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(EMPTY_FILTER_NAME.strip, self), EMPTY_FILTER_NAME)
+        return next(filter(CONFIG.empty_filter_string.strip, self), CONFIG.empty_filter_string)
 
     def to_header(self, header):
-        _remap = {EMPTY_FILTER_NAME: 'Empty'}
+        _remap = {CONFIG.empty_filter_string: 'Empty'}
         for name, val in self.__dict__.items():
             header[f'FILTER{name}'] = _remap.get(val, val)
 
@@ -511,9 +395,7 @@ class shocHDU(ImageHDU, Messenger):
             return super().__new__(cls)
 
         # assign class based on obstype and age
-        obstype = (obstype or '').lower()
-        if not obstype:
-            obstype = header.get('OBSTYPE', '')
+        obstype = (obstype or '').lower() or header.get('OBSTYPE', '')
 
         # check if all the new keywords are present
         # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
@@ -551,8 +433,9 @@ class shocHDU(ImageHDU, Messenger):
 
         #
         self.camera = f'SHOC{SERIAL_NRS.index(header["SERNO"]) + 1}'
-        self.location = LOCATIONS.get(self.telescope)
+        self.location = getattr(tel_info.get(self.telescope), 'loc', None)
         self._coords = None     # placeholder
+        self._wcs = None
         # # field of view
         # self.fov = self.get_fov()
 
@@ -633,8 +516,9 @@ class shocHDU(ImageHDU, Messenger):
 
     @telescope.setter
     def telescope(self, telescope):
-        tel = self.header['TELESCOP'] = get_tel(telescope)
-        self.location = LOCATIONS.get(tel)
+        tel = tel_info[telescope]
+        self.header['TELESCOP'] = tel.name
+        self.location = tel.loc
 
     @property
     def target(self):
@@ -650,16 +534,23 @@ class shocHDU(ImageHDU, Messenger):
     @property
     def diffraction_limit(self):
         # diffraction limit 1.9m
-        return DIFF_LIMS.get(self.telescope, None)
+        return DIFF_LIMS.get(self.telescope)
 
-    def get_server_path(self):
+    def get_server_path(self, server=CONFIG.remote.server):
         if None in (self.file.path, self.telescope):
             return
 
         year, month, day, *_ = tuple(self.t.t0.ymdhms)
-        return Path(f'astro:/data/{self.telescope}/{SERVER_NAMES[self.camera]}/'
-                    f'{year}/{month:0>2d}{day:0>2d}/'
-                    f'{self.file.name}')
+        tel = get_tel(self.telescope, metric=False)
+
+        path = (f'/data/{tel}/{SERVER_NAMES[self.camera]}/'
+                f'{year}/{month:0>2d}{day:0>2d}/'
+                f'{self.file.name}')
+
+        if server:
+            path = f'{server}{path}'
+
+        return Path(path)
 
     def _get_coords(self):
         """
@@ -806,7 +697,7 @@ class shocHDU(ImageHDU, Messenger):
     # def set_calibrators(self)
 
     def get_fov(self):
-        fov = get_fov(self.telescope)
+        fov = tel_info[self.telescope].fov
         # scale by fractional size of subframe image
         full_frame = np.floor_divide(1028, tuple(self.binning))
         return fov * (slice_size(self.subrect) / full_frame)
@@ -974,17 +865,14 @@ class shocHDU(ImageHDU, Messenger):
     # ------------------------------------------------------------------------ #
 
     def get_save_name(self, name_format=None, ext='fits'):
-        # TODO: at filename helper?
-        name_format = name_format or self.filename_format
-
         if self.file.path:
             return self.file.path
 
-        if name_format:
+        if (name_format := name_format or self.filename_format):
             # get attribute values and replace unwnated characters for filename
             fmt = name_format.replace('{', '{0.')
             name = sub(fmt.format(self), {' ': '-', "'": '', ': ': ''})
-            return f"{name}.{ext.lstrip('.')}"
+            return f'{name}.{ext.lstrip(".")}'
 
     # @expose.args()
     def save(self, filename=None, folder=None, name_format=None,
@@ -1138,18 +1026,23 @@ class TableHelper(AttrTable):
         table = worker(**kws).replace('\n    ', f'\n{" " * indent}')
         return '\n'.join(map(str.rstrip,  table.splitlines()))
 
-    def to_xlsx(self, path):
+    def to_xlsx(self, path, sheet=None, overwrite=False):
         tabulate = AttrTable.from_columns({
-            'file.name':          Column('filename', align='<'),
-            'timing.t0.datetime': Column('Time', '[UTC]', fmt='YYYY-MM-DD HH:MM:SS'),
-            'timing.exp':         Column('Exposure', '[s]', fmt='0.???'),
+            'file.name':          Column('filename',
+                                         align='<'),
+            'timing.t0.datetime': Column('Time', '[UTC]',
+                                         fmt='YYYY-MM-DD HH:MM:SS',
+                                         align='<'),
+            'timing.exp':         Column('Exposure', '[s]',
+                                         fmt='0.?????',
+                                         align='<'),
             'timing.duration':    Column(convert=lambda t: t.value / 86400,
                                          fmt='[HH]"ʰ"MM"ᵐ"SS"ˢ"', unit='[hms]',
                                          total=True),
             'telescope':          ...,
             'filters.name':       Column('Filter'),
             'camera':             ...,
-            'readout.mode':       Column(convert=str),
+            'readout.mode':       Column(convert=str, align='<'),
             # 'nframes':            Column('n', total=True),
             # 'binning':            Column('bin', unit='y, x', header_level=1),
             'binning.y':          ...,
@@ -1162,13 +1055,9 @@ class TableHelper(AttrTable):
         )
 
         tabulate.parent = self.parent
-        return tabulate.to_xlsx(path,
-                                align={'filename': '<',
-                                       'mode': '<',
-                                       'binning': '>',
-                                       ...: '^'},
-                                header_formatter=str.title,
-                                )
+        return tabulate.to_xlsx(path, sheet, overwrite=overwrite,
+                                align={...: '^'},
+                                header_formatter=str.title)
         # widths={'binning': 5})
 
         # tabulate = AttrTable.from_spec({
@@ -1234,7 +1123,7 @@ class LatexWriter:
                 row_nrs=1,
                 frame=False,
                 hlines=False,
-                col_head_props=None,
+                col_head_style=None,
                 borders={...: '& ', -1: r'\\'},
                 summary=dict(footer=True, n_cols=1, bullets='', align='<',
                              pillars=['t0'], fmt=summary_fmt),
@@ -1442,7 +1331,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          },
         row_nrs=1,
         summary=True,
-        title_props=dict(fg=('underline', 'bold'), bg='b'),
+        title_style=dict(fg=('underline', 'bold'), bg='b'),
         too_wide=False,
         footnotes=Trigger.get_flags()
     )
@@ -1485,7 +1374,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # Standardize naming convention for telscopes
         said = False
         for hdu in run:
-            if hdu.telescope and (tel := get_tel(hdu.telescope)) != hdu.telescope:
+            if hdu.telescope and (tel := tel_info[hdu.telescope].name) != hdu.telescope:
                 if not said:
                     cls.logger.info('Switching to metric names for telescopes.')
                     said = True
