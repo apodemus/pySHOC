@@ -10,12 +10,13 @@ from loguru import logger
 # local
 import motley
 from motley.table import Table
-from recipes import cosort, string
+from recipes import cosort, op, string
 from recipes.dicts.node import DictNode
 from recipes.tree import FileSystemNode
 
 # relative
 from .. import CONFIG
+from ..config import Template
 from .utils import get_file_age, human_time
 
 
@@ -86,7 +87,7 @@ def get_previous(run, paths):
     overview = {
         section: products[path].as_dict()
         for section, path in
-        paths.folders.filtered(('info', 'plotting', 'registration')).items()
+        paths.folders.select(('info', 'plotting', 'registration')).items()
     }
 
     #
@@ -164,22 +165,22 @@ def _overview_table_vstack(overview, paths):
 def _resolve_by_file(run, templates):
     # sort rows
     stems = run.sort_by('t.t0').files.stems
-    return _resolve_by(stems, templates, 'HDU', FRAMES='')
+    return _get_desired_products(templates, stems, 'HDU', FRAMES='')
 
 
 def _resolve_by_date(run, templates):
     # sort rows
     dates = sorted(set(run.attrs('date_for_filename')))
-    return _resolve_by(dates, templates, 'DATE')
+    return _get_desired_products(templates, dates, 'DATE')
 
 
-def _resolve_by(items, templates, key, **kws):
+def _get_desired_products(templates, items, key, **kws):
 
     rows = defaultdict(list)
     for tmp in templates.values():
-        for row in items:
-            rows[row].append(
-                Path(tmp.substitute(**{key: row, **kws}))
+        for val in items:
+            rows[val].append(
+                Path(tmp.substitute(**{key: val, **kws}))
             )
     return rows
 
@@ -265,14 +266,40 @@ def write_xlsx(run, paths, overview):
     return _write_nightly_products_xlsx(run, paths, filename, *sheet)
 
 
+def _get_templates(paths, key):
+
+    def _append(k, ext):
+        return (*k[:-1],
+                *([k[-1]] if k[-1] != 'filename' else ()),
+                ext)
+
+    def _prepend(k, pre):
+        return (pre, *k)
+
+    def _png_expected(k):
+        attr = {'HDU': 'by_file',
+               'DATE': 'by_date'}[key]
+        return CONFIG.lightcurves.plots[attr].get(k[0])
+
+    #
+    tmp = paths.templates[key].copy()
+    txt = tmp.pop('lightcurves').map(op.AttrGetter('template'))
+
+    png = txt.map(str.replace, '.txt', '.png').transform(_append, 'png')
+    png = png.select(_png_expected)
+    png = png.transform(_prepend, 'lightcurves')
+    txt = txt.transform(_prepend, 'lightcurves').transform(_append, 'txt')
+
+    return DictNode({**tmp.flatten(),
+                     **txt.map(Template).flatten(),
+                     **png.map(Template).flatten()}).flatten()
+
+
 def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
                              overwrite=True):
 
-    templates = paths.templates['HDU'].flatten()
+    templates = _get_templates(paths, 'HDU')
     desired_files = _resolve_by_file(run, templates)
-
-    # sort
-    # run = run[list(desired_files.keys())]
 
     out = DictNode()
     files = 'files'
@@ -287,13 +314,10 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
     sections = [(section.title(), name) for section, name, *_ in templates]
     sections[sections.index(('Info', 'headers'))] = ('FITS', 'headers')
     sections[sections.index(('Samples', 'filename'))] = ('Images', 'samples')
-
-    order = ('FITS', 'Images', 'Tracking', 'Lightcurves')
-    sections, headers, *data = cosort(*zip(*sections), *desired_files.values(),
-                                      key=order.index)
-    sections = zip(sections, headers)
-    d = dict(zip(sections, zip(*data)))
-    out.update(d)
+    # order = ('FITS', 'Images', 'Tracking', 'Lightcurves')
+    # sections, headers, *data = cosort(*zip(*sections), *desired_files.values(),
+    #                                   key=order.index)
+    out.update(dict(zip(sections, zip(*desired_files.values()))))
 
     out['Light Curves'] = out.pop('Lightcurves')
 
@@ -317,42 +341,36 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
     # write
     # header_formatter=str.title
 
-    # sheet = sheet[0] if sheet else None
-
     return tbl.to_xlsx(
         filename, sheet, overwrite=overwrite,
         formats={'HDU': str,
-                 ...: ';;;[Blue]@'},
-        widths={'HDU': 14,
-                files: 5,
-                'headers': 7,
+                 ...:   ';;;[Blue]@'},
+        widths={'HDU':      14,
+                files:      5,
+                'headers':  7,
                 'Overview': 4,
-                'samples': 7,
-                # 'Source Regions': 10,
-                ...: 7},
+                'samples':  7,
+                ...:        7},
         align={'HDU': '<',
                'Overview': dict(horizontal='center',
                                 vertical='center',
                                 text_rotation=90),
                ...: dict(horizontal='center',
                          vertical='center')},
-        merge_unduplicate=('data', 'headers')
+        merge_unduplicate=('Overview', 'headers')
     )
 
 
 def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
                                  overwrite=True):
 
-    templates = paths.templates['DATE'].flatten()
+    templates = _get_templates(paths, 'DATE')
     desired_files = _resolve_by_date(run, templates)
 
     # col_titles = dict(diff0='Differential',
     #                   decor='Decorrelated')
-    headers = []
-    for s in templates.keys():
-        head, *_pathinfo, last = _get_column_header('DATE', s, paths)
-        # ''.join((*_pathinfo, last))
-        headers.append((head, s[1]))
+    headers = [(CONFIG[section].get('title', ''), step)
+               for section, step, *_ in templates.keys()]
 
     *groups, headers = zip((*[''] * (len(headers[0]) - 1), 'DATE'), *headers)
 
@@ -364,9 +382,6 @@ def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
         formatters={'DATE': str,
                     ...: hyperlink_ext},
         too_wide=False
-        #  align='<',
-        #  col_groups_align='<',
-        #  **CONFIG.console.products
     )
 
     return tbl.to_xlsx(
@@ -374,7 +389,7 @@ def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
         formats={'DATE': str,
                  ...: ';;;[Blue]@'},
         widths={'DATE': 10,
-                ...: 12},
+                ...: 6},
         align={'DATE': '<',
                ...: dict(horizontal='center',
                          vertical='center')}
