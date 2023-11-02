@@ -30,7 +30,8 @@ CONFIG = ConfigNode.load_module(__file__)
 
 # load cmasher if needed
 plt = CONFIG.plotting
-for cmap in CONFIG.find('cmap').filtered(values=None).flatten().values():
+
+for cmap in CONFIG.select('cmap').filtered(values=None).flatten().values():
     if cmap.startswith('cmr.'):
         # load the cmasher colormaps into the matplotlib registry
         import cmasher
@@ -43,7 +44,7 @@ if CONFIG.remote.username is None:
 
 
 # uppercase logging level
-for sink, cfg in CONFIG.logging.filtered(('file', 'console')).items():
+for sink, cfg in CONFIG.logging.select(('file', 'console')).items():
     CONFIG.logging[sink, 'level'] = cfg.level.upper()
 del cfg
 
@@ -93,7 +94,7 @@ def _resolve_files(files, folders):
     # sub internal path refs
     substitutions = _get_folder_refs(folders, **_section_aliases)
     files = files.map(sub, substitutions).map(Path)
-    for keys, path in files.filtered(values=negate(Path.is_absolute)).flatten().items():
+    for keys, path in files.filtered(values=Path.is_absolute).flatten().items():
         section, *_ = keys
         files[keys] = folders[section] / path
 
@@ -127,10 +128,10 @@ def _ignore_any(ignore):
         ignore = [ignore]
 
     if not (ignore := list(ignore)):
-        return always(True)
+        return always(False)
 
     def wrapper(keys):
-        return all(key not in ignore for key in keys)
+        return any(key in ignore for key in keys)
 
     return wrapper
 
@@ -181,7 +182,7 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         node.folders['root'] = root
 
         # isolate the file template patterns
-        templates = node.files.filtered(values=lambda v: '$' in str(v))
+        templates = node.files.select(values=lambda v: '$' in str(v))
         # sort sections
         section_order = ('info', 'samples', 'tracking', 'lightcurves')
         templates = templates.sorted(section_order).map(str).map(Template)
