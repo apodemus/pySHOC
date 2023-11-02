@@ -23,20 +23,55 @@ from scrawl.image import ImageDisplay
 from .. import CONFIG, MATCH, calDB, shocCampaign
 
 
+# ---------------------------------------------------------------------------- #
 COLOURS = CONFIG.console.colors
 
 
+# ---------------------------------------------------------------------------- #
+
 def calibrate(run, path=None, overwrite=False):
+    """
+    Calibrate the observing campaign in `run`. 
+    
+    Master calibration frames are search for, first by checking if any of the
+    `run`'s constituent `hdu`s are flagged as calibration files in the fits
+    headers. Failing that, we search the file system folder in `path` if
+    provided. If available, previously computed master calibration frames will
+    be preferred unless `overwrite=True`, in which case they will be recomputed
+    from raw files (if found). Once the master frames are located/computed,
+    calibration frames are set on the `run`'s constituent `hdu`s by this
+    routine, arithmetic is done when accessing the frames by slicing
+    `hdu.calibrated` attribute.
+
+    Parameters
+    ----------
+    run : pyshoc.shocCampaign
+        Observing run containing multiple `hdu`s (fits files).
+    path : Path-like, optional
+        File system location for searching for calibration frames, by default
+        None.
+    overwrite : bool, optional
+        Whether to force new compute, by default False
+
+    Returns
+    -------
+    gobj: pyshoc.shocObsGroup
+        Observing campaign grouped by calibration groups.
+    master_dark: pyshoc.shocObsGroup
+        Grouped master dark frames.
+    master_flats: pyshoc.shocObsGroup
+        Grouped master flat frames.
+    """
 
     gobj = run.select_by(obstype='object')
-    raw_flats, master_flats = find_cal(run, 'flat', path, overwrite)
-    raw_darks, master_dark = find_cal(run.join(raw_flats), 'dark', path, overwrite)
+    raw_flats, master_flats = find(run, 'flat', path, overwrite)
+    raw_darks, master_dark = find(run.join(raw_flats), 'dark', path, overwrite)
 
     if raw_darks:
         master_dark.update(compute_masters(raw_darks, 'dark', path, overwrite))
 
     if raw_flats:
-        # Have raw flat field cubes. 
+        # Have raw flat field cubes.
         # debias flats
         # check = [hdu.data[0,0,0] for hdu in raw_flats.to_list()]
         raw_flats.group_by(master_dark).set_calibrators(dark=master_dark)
@@ -55,8 +90,8 @@ def calibrate(run, path=None, overwrite=False):
     return gobj, master_dark, master_flats
 
 
-def split_cal(run, kind):
-    """split off the calibration frames"""
+def split(run, kind):
+    """Split off the calibration frames."""
 
     # get calibrators in run
     grp = run.group_by('obstype')
@@ -88,11 +123,11 @@ def split_cal(run, kind):
     return cal, grp.to_list()
 
 
-def find_cal(run, kind, path=None, ignore_masters=False):
+def find(run, kind, path=None, ignore_masters=False):
 
     attrs = attx, attc = MATCH[kind]
     gid = (*attx, *attc)
-    cal, run = split_cal(run, kind)
+    cal, run = split(run, kind)
     gcal = cal.group_by(*attx)
     need = set(run.required_calibration(kind))  # instrumental setups
 
