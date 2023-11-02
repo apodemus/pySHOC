@@ -7,8 +7,7 @@ import re
 
 # local
 from pyxides.pprint import PrettyPrinter
-from recipes import bash
-from recipes.dicts import DictNode
+from recipes.shell import bash
 from recipes.logging import LoggingMixin
 
 

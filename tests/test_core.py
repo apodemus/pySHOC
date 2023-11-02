@@ -13,16 +13,16 @@ from collections import defaultdict
 # third-party
 import pytest
 import numpy as np
+from pyshoc.header import Header
+from pyshoc.timing import UnknownTimeException
+from pyshoc.core import (shocCampaign, shocDarkHDU, shocDarkMaster,
+                         shocFlatHDU, shocFlatMaster, shocHDU, shocOldDarkHDU,
+                         shocOldFlatHDU)
 
 # local
-from recipes.testing import Expected, Throws, expected, mock, logger
-from pyshoc.header import Header
-from pyshoc.core import (shocCampaign, shocHDU, shocDarkHDU, shocFlatHDU,
-                       shocDarkMaster, shocFlatMaster,
-                       shocOldDarkHDU, shocOldFlatHDU)
-from pyshoc.timing import UnknownTimeException
+from recipes.testing import Expected, Throws, expected, mock
 
-logger.setLevel(10)
+
 # TODO: old + new data all modes!!!
 # TODO: all combinations of science, bias, dark, flats (+ masters)
 # TODO:
@@ -114,7 +114,7 @@ class TestHDU:
     def test_timing(self, dataset):
         hdu = dataset[0]
         t = hdu.t
-        for attr, p in inspect.getmembers(type(t), is_property):
+        for attr, p in inspect.getmembers(type(t), inspect.is_property):
             getattr(t, attr)
 
     # TODO:
