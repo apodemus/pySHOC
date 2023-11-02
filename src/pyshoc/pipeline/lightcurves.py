@@ -18,7 +18,7 @@ from tsa.outliers import WindowOutlierDetection
 from recipes.array import fold
 from recipes.config import ConfigNode
 from recipes import dicts, io, pprint as ppr
-from recipes.functionals.partial import PlaceHolder
+from recipes.functionals.partial import PlaceHolder as o
 from recipes.decorators import delayed, update_defaults
 
 # relative
@@ -64,7 +64,6 @@ def load_or_compute(path, overwrite, worker, save, plot):
         if not isinstance(data, TimeSeries):
             data = TimeSeries(*data)
 
-        o = PlaceHolder()
         task = PlotTask(**init)
         task(plotter)(o, data, **kws)
 
@@ -213,14 +212,14 @@ def load_memmap(hdu, filename):
 
 
 def load_flagged(hdu, paths, overwrite=False, plot=False):
-
+    files = paths.files
     return load_or_compute(
         # load
-        resolve_path(paths.files.lightcurves.flagged, hdu), overwrite,
+        resolve_path(files.lightcurves.flagged, hdu), overwrite,
         # compute
         delayed(_flag_outliers)(hdu,
-                                resolve_path(paths.files.tracking.source_info, hdu),
-                                resolve_path(paths.files.lightcurves.raw, hdu),
+                                resolve_path(files.tracking.source_info, hdu),
+                                resolve_path(files.lightcurves.raw, hdu),
                                 overwrite),
         # save
         _get_save_meta(hdu, title=CONFIG['flagged'].title),
@@ -344,8 +343,7 @@ def extract(run, paths, overwrite=False, plot=False):
     logger.info('Extracting lightcurves for {!r}', run[0].target)
 
     lightcurves = dicts.DictNode()
-    nightly = run.group_by('t.date_for_filename').sorted()
-    for date, obs in nightly.items():
+    for date, obs in run.group_by('date_for_filename').sorted().items():
         date = str(date)
         # year, day = date.split('-', 1)
         bjd, rflux, rsigma = concat_phot(obs, paths, overwrite, plot)

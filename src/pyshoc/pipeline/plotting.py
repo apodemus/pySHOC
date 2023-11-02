@@ -84,7 +84,7 @@ class PlotTask(LoggingMixin, PartialAt):
             # want in our tab.
             figure = art.fig
             mgr = self.ui[tuple(key)]._parent()
-            mgr.replace_tab(key[-1], figure, focus=True)
+            mgr.replace_tab(key[-1], figure, focus=False)
 
         return figure, art
 
@@ -126,12 +126,14 @@ class PlotFactory(LoggingMixin, Partial):
         # # after the task executes with the actual fgure we want in our tab
         figure = get_figure(self.ui, *key, fig=figure)
 
+        self.logger.debug('Task will save figure {} at {}, {}.', 
+                          figure, filename, f'{overwrite = }')
         _task = _SaveTask(task, filename, overwrite)
 
         if self.delay:
             # Future task
             self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
-                             key, task)
+                             key, _task)
 
             tab = self.ui[key]
             tab.add_task(_task, *args, **kws)
@@ -139,7 +141,7 @@ class PlotFactory(LoggingMixin, Partial):
             return _task
 
         # execute task
-        self.logger.debug('Plotting immediate: {}.', self.key)
+        self.logger.debug('Plotting immediate: {}.', key)
         return _task(figure, key, *args, **kws)
 
 

@@ -25,13 +25,15 @@ from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
-from recipes import io
+from recipes import io, op
+from recipes.iter import cofilter
 from recipes.utils import not_null
+from recipes.functionals import negate
 from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
 from recipes.decorators.reporting import trace
-from recipes.functionals.partial import PlaceHolder as o
 from recipes.string import remove_prefix, shared_prefix
+from recipes.functionals.partial import PlaceHolder as o
 
 # relative
 from .. import CONFIG, shocCampaign
@@ -244,7 +246,7 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
                                 coords='pixel',
                                 use_blit=False)
 
-    for hdu in run:
+    for hdu in run.sort_by('t.t0'):
         # grouping
         year, day = str(hdu.t.date_for_filename).split('-', 1)
 
@@ -365,7 +367,7 @@ def write_rsync_script(run, paths, username=CONFIG.remote.username,
 # ---------------------------------------------------------------------------- #
 # Preview
 
-def preview(run, paths, info, ui, overwrite):
+def preview(run, paths, info, ui, plot, overwrite):
     logger.section('Overview')
 
     # Print summary table
@@ -391,10 +393,10 @@ def preview(run, paths, info, ui, overwrite):
                 '{!s:}', path)
 
     # Sample images prior to calibration and header info
-    return compute_preview(run, paths, ui, overwrite)
+    return compute_preview(run, paths, ui, plot, overwrite)
 
 
-def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
+def compute_preview(run, paths, ui, plot, overwrite, show_cutouts=False):
 
     # get results from previous run
     overview, data_products = products.get_previous(run, paths)
@@ -406,9 +408,11 @@ def compute_preview(run, paths, ui, overwrite, show_cutouts=False):
     # if overwrite or not products['Images']['Overview']:
     samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
 
-    thumbnails = plot_thumbnails(samples, ui,
-                                 **{'overwrite': overwrite,
-                                    **CONFIG.samples.plots.thumbnails.raw})
+    thumbnails = None
+    if plot:
+        thumbnails = plot_thumbnails(samples, ui,
+                                     **{'overwrite': overwrite,
+                                        **CONFIG.samples.plots.thumbnails.raw})
     # source regions
     # if not any(products['Images']['Source Regions']):
     #     sample_images = products['Images']['Samples']
@@ -430,7 +434,6 @@ def headers_to_txt(run, paths, overwrite):
 
 # ---------------------------------------------------------------------------- #
 # Calibrate
-
 
 def calibration(run, overwrite):
     logger.section('Calibration')
@@ -544,7 +547,7 @@ def plot_overview(run, reg, paths, ui, overwrite):
 
 
 # ---------------------------------------------------------------------------- #
-@ update_defaults(CONFIG.tracking.params)
+@update_defaults(CONFIG.tracking.params)
 def _track(hdu, seg, labels, coords, path, overwrite=False, dilate=0, njobs=-1):
 
     logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
@@ -606,15 +609,22 @@ def track(run, reg, paths, overwrite=False):
     logger.info('Source tracking complete.')
     return spanning
 
+# def plot_lc():
+
 
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
     lcs = lc.extract(run, paths, overwrite)
 
-    if plot:
-        for diff, db in lcs.items():
-            plot_lcs(db, ui, filename_template=None, overwrite=False, delay=True)
-            break
+    if not plot:
+        return
+
+    for step, db in lcs.items():
+        # get path template
+        tmp = paths.templates['DATE'].lightcurves[step]
+        tmp = getattr(tmp, 'concat', tmp)
+        #
+        plot_lcs(db, step, ui, tmp, overwrite=False)
 
     # for hdu in run:
     #     lc.io.load_raw(hdu, products.resolve_path(paths.lightcurves.raw, hdu),
@@ -625,21 +635,22 @@ def lightcurves(run, paths, ui, plot=True, overwrite=False):
     #     load_or_compute(file, overwrite, LOADERS[step], (hdu, file))
 
 
-def plot_lcs(lcs, ui=None, filename_template=None, overwrite=False, **kws):
+def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws):
 
+    section = CONFIG.lightcurves.title
     factory = PlotFactory(ui)
     task = factory(lc.plot)(o, **kws)
 
-    section = 'Light curves'
-
     filenames = {}
     for date, ts in lcs.items():
-        filenames[date] = filename = Path(str(filename_template).format(date=date))
+        filenames[date] = filename \
+            = Path(filename_template.substitute(DATE=date)).with_suffix('.png')
         year, day = date.split('-', 1)
         factory.add_task(task,
-                                (section, year, day),
-                                filename, overwrite, None,
-                                ts)
+                         (section, year, day, step),
+                         filename, overwrite, None,
+                         ts)
+
     return ui
 
 
@@ -664,7 +675,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # ------------------------------------------------------------------------ #
     # Preview
     overview, data_products, samples, thumbnails = preview(
-        run, paths, info, ui, overwrite
+        run, paths, info, ui, plot, overwrite
     )
 
     # ------------------------------------------------------------------------ #
@@ -696,6 +707,10 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # Launch the GUI
     if plot:
         logger.section('Launching GUI')
+        # activate tab switching callback (for all tabs)
+        ui.add_task()   # needed to check for tab switch callbacks to run
+        ui[CONFIG.samples.title].link_focus()
+        ui[CONFIG.lightcurves.title].link_focus()
         ui.set_focus('Overview', 'Mosaic')
         ui.show()
 
@@ -722,4 +737,3 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
     # Write data products spreadsheet
     products.write_xlsx(run, paths, overview)
     # This updates spreadsheet with products computed above
-    
