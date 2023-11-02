@@ -11,7 +11,7 @@ import itertools as itt
 from matplotlib import rc
 from IPython.display import display, HTML
 
-from shoc import shocCampaign, shocHDU
+from pyshoc import shocCampaign, shocHDU
 
 # setup logging
 rootlog = logging.getLogger()
@@ -36,7 +36,6 @@ run = shocCampaign.load(root_folder / 'SHOC/raw')
 print(run)
 run.pprint()
 
-raise SystemExit
 
 
 # In[ ]:
@@ -192,7 +191,7 @@ mp.fig
 # In[43]:
 
 
-from scrawl.imagine import ImageDisplay
+from scrawl.image import ImageDisplay
 
 def pixel_transform(i: int):
     # scale images by source counts for source 0 and median subtract
@@ -206,7 +205,7 @@ sidx = reg.source_indices
 g, bs = reg.binned_statistic(image_func=pixel_transform, interpolate=True)
 
 im = ImageDisplay(bs.statistic.T)
-im.imagePlot.set_clim(0, 0.012)
+im.image.set_clim(0, 0.012)
 im.figure.set_size_inches(8, 8)
 im.figure
 

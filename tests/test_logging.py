@@ -1,5 +1,5 @@
 
-from shoc.pipeline.logging import config
+from pyshoc.pipeline.logging import config
 
 logger = config()
 

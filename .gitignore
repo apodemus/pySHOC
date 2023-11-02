@@ -3,10 +3,13 @@
 ###################################
 # old code
 dev
-src/shoc/pipeline/new.py
-src/shoc/pipeline/parse.py
-src/shoc/banner/_banner.txt
-src/shoc/banner/*asciigram.txt
+src/pyshoc/pipeline/new.py
+src/pyshoc/pipeline/parse.py
+src/pyshoc/pipeline/banner/_banner.txt
+src/pyshoc/pipeline/banner/*asciigram.txt
+src/pyshoc/pipeline/logging_test.py
+tests/J0354.py
+src/pyshoc/_lightcurve.py
 
 
 
@@ -23,8 +26,8 @@ tests/j1928.py
 tests/polars.py
 
 
-#########################################
 # Editor temporary/working/backup files #
+#########################################
 .#*
 [#]*#
 *~
@@ -79,13 +82,10 @@ ehthumbs.db
 Icon?
 Thumbs.db
 
-
-
 # Documentation generated files #
 #################################
 # sphinx build directory
 doc/_build
-
 
 # Pytest/Nose generated files #
 ###############################
@@ -96,6 +96,7 @@ doc/_build
 *.py,cover
 cover/
 .noseids
+.hypothesis/
 
 # Conda files #
 ###############
@@ -106,5 +107,7 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
-src/shoc/pipeline/logging_test.py
-tests/J0354.py
+
+# Linters #
+###########
+*.trunk

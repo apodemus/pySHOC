@@ -1,4 +1,4 @@
-from shoc.timing import Date, TimeDelta
+from pyshoc.timing import Date, TimeDelta
 from astropy import time
 import pytest
 

@@ -1,0 +1,139 @@
+
+# ---------------------------------------------------------------------------- #
+# Location of calibration database
+caldb: /media/Oceanus/work/Observing/data/SHOC/calibration/
+
+# ---------------------------------------------------------------------------- #
+# console
+console:
+    banner:
+        show:       True
+        format: |
+            {{now:|B,darkgreen}: <{width:}}
+            {logo}
+            {{subtitle:|B,purple}: >{width}}
+            {{version:|Bk}: >{width}}
+        subtitle:   Photometry Pipeline
+        fg:         [bold, blue]
+        linestyle:  [-, bold]
+        linecolor:  teal
+        width:      Null
+
+    colors:
+        flat: cornflowerblue
+        dark: tan
+
+    cutouts: 
+        title:          "Source image cutouts: {hdu.file.name:|c}"
+        title_align:    <
+        title_props:    [B, _]
+        extend:         2
+        statistics:     [com, flux, areas, roundness]
+
+# ---------------------------------------------------------------------------- #
+# logging
+logging:
+    level: debug
+    format: >-
+        {elapsed:s|Bb}|
+        {{{name}.{function}:s|green}:{line:d|orange}: <52}|
+        {{level.name}: {message}:|{style}}
+    section: |
+
+        {0:━<{width}}
+        {{level.name}: {message}:|B,teal}
+        {0:━<{width}}
+
+# # ---------------------------------------------------------------------------- #
+# caching:
+#     regions:   
+
+# ---------------------------------------------------------------------------- #
+# plotting
+plotting: &plotting
+    cmap:       cmr.voltage
+
+    # samples:
+    segments:
+        contours: 
+            cmap:   cmr.pride
+            lw:     1.5
+
+        labels:
+            offset: [4, 4]
+            size:   10
+            color:  w
+            emboss: [1, k]
+
+    # Sample thumbnails plot config
+    thumbnails:
+        # name: thumbnails.png
+        figsize: [9, 7.5]
+        title_kws:
+            color:      w
+            size:       xx-small
+            fontweight: bold
+
+    mosaic:
+        # name: mosaic.png
+        cmap:   cmr.chroma
+        alpha:  0.35
+
+# aliases
+# plots: *plotting
+# plotting: *plotting
+
+
+# ---------------------------------------------------------------------------- #
+# Data products
+files: &filenames
+    output_root:    .pyshoc
+    summary:        campaign-files.xlsx
+    products:       data-products.xlsx
+    obslog:         observing-log.tex
+    thumbs:         thumbnails.png
+    thumbs_cal:     thumbnails-cal.png
+    reg_params:     reg-params.npy
+    mosaic:         mosaic.png
+# aliases
+# filenames: *filenames
+
+
+# ---------------------------------------------------------------------------- #
+# sampled image stats
+samples:
+    stat:           median
+    min_depth:      5           # seconds
+    n_intervals:    1
+    save_as:        png
+    
+
+# ---------------------------------------------------------------------------- #
+# source detection
+detection: &source_detection
+    algorithm:      sigma_threshold
+    npixels:        5
+    edge_cutoff:    3
+    monolithic:     False
+    roundness:      !!python/tuple [0.25, 1.75]
+    dilate:         0
+    deblend:        True
+    report:
+        cutouts: True
+
+# aliases
+detect:          *source_detection #
+# source_find:        *source_detection #
+# source_detection:   *source_detection #
+
+# ---------------------------------------------------------------------------- #
+# image registration 
+register:
+    survey:         dss
+    fov_stretch:    1.5
+    plot:           False
+    fit_angle:      True
+    # sigma_fallback: 10
+
+# ---------------------------------------------------------------------------- #
+# source tracking 
