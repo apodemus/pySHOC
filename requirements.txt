@@ -1,12 +1,23 @@
+click
+loguru
+tqdm
+
+more_itertools
+pyxides
+
 numpy
 scipy
 astropy
 joblib
-more_itertools
-dataclasses
-pytest
-matplotlib
+
 Pillow
+matplotlib
+aplpy
+cmasher
+mpl_multitab
 
 git+https://github.com/astromancer/recipes
 git+https://github.com/astromancer/motley
+git+https://github.com/astromancer/scrawl
+git+https://github.com/astromancer/obstools
+git+https://github.com/astromancer/tsa
