@@ -14,7 +14,7 @@ pip install pyshoc
 To run the reduction pipeline on a set of fits files (observations of a single 
 source):
 ```shell
-pyshoc /path/to/data
+pyshoc /path/to/data/folder -o /path/to/output/products -tel 74 --target "CTCV J1928-5001"
 ```
 <!-- or equivalently
 ```shell
@@ -46,4 +46,4 @@ pyshoc /path/to/data
 * see [LICENSE](https://github.com/astromancer/pyshoc/blob/master/LICENSE)
 
 ## Version 
-* 0.9.0
+* 1.2.0

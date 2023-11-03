@@ -1,29 +1,28 @@
 
 # Things specific to this project #
 ###################################
-# old code
+# old code / needs integrating
 dev
 src/pyshoc/pipeline/new.py
 src/pyshoc/pipeline/parse.py
 src/pyshoc/pipeline/banner/_banner.txt
 src/pyshoc/pipeline/banner/*asciigram.txt
 src/pyshoc/pipeline/logging_test.py
-tests/J0354.py
 src/pyshoc/_lightcurve.py
+src/pyshoc/nightlog/nightlog.py
+src/pyshoc/foo.py
+src/pyshoc/EMvsCON*
 
-
-
-# needs integrating
 tests/test_pre.py
-tests/mp_test.py
 tests/data
 tests/_pprint.py
 tests/chariklo.py
 tests/ObsLog-Aug2020-2.py
-foo.py
-EMvsCON*
 tests/j1928.py
+tests/J0354.py
 tests/polars.py
+tests/_test*
+
 
 
 # Editor temporary/working/backup files #
