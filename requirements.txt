@@ -1,9 +1,7 @@
 click
 loguru
 tqdm
-
 more_itertools
-pyxides
 
 numpy
 scipy
@@ -16,6 +14,10 @@ aplpy
 cmasher
 mpl_multitab
 
+pyxides
+numpydoc
+decorator
+wcwidth
 git+https://github.com/astromancer/recipes
 git+https://github.com/astromancer/motley
 git+https://github.com/astromancer/scrawl
