@@ -181,7 +181,7 @@ class Filters:
         A = self.get(a)
         # sloan filters usually in wheel B. Keep consistency here when assigning
         if (b is None) and A.islower():
-            self.A = CONFIG.empty_filter_string
+            self.A = CONFIG.preferences.empty_filter_string
             self.B = A
         else:
             self.A = A
@@ -190,10 +190,10 @@ class Filters:
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return CONFIG.empty_filter_string
+            return CONFIG.preferences.empty_filter_string
         if long:
             return long.split(' - ')[0]
-        return (long or CONFIG.empty_filter_string)
+        return (long or CONFIG.preferences.empty_filter_string)
 
     def __members(self):
         return self.A, self.B
@@ -202,7 +202,7 @@ class Filters:
         return f'{self.__class__.__name__}{self.__members()}'
 
     # def __format__(self, spec):
-    #     return next(filter(CONFIG.empty_filter_string.__ne__, self), '')
+    #     return next(filter(CONFIG.preferences.empty_filter_string.__ne__, self), '')
 
     def __str__(self):
         return self.name
@@ -221,10 +221,10 @@ class Filters:
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(CONFIG.empty_filter_string.strip, self), CONFIG.empty_filter_string)
+        return next(filter(CONFIG.preferences.empty_filter_string.strip, self), CONFIG.preferences.empty_filter_string)
 
     def to_header(self, header):
-        _remap = {CONFIG.empty_filter_string: 'Empty'}
+        _remap = {CONFIG.preferences.empty_filter_string: 'Empty'}
         for name, val in self.__dict__.items():
             header[f'FILTER{name}'] = _remap.get(val, val)
 
