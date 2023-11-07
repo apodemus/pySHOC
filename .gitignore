@@ -22,7 +22,7 @@ tests/j1928.py
 tests/J0354.py
 tests/polars.py
 tests/_test*
-
+.travis.yml
 
 
 # Editor temporary/working/backup files #
