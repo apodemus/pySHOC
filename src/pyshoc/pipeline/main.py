@@ -311,12 +311,21 @@ def save_samples_fits(run, samples, wcss, filename_template, overwrite):
     for (file, subs), wcs in zip(samples.items(), wcss):
         hdu = run[file]
         for (j, k), image in subs.items():
-            filename = products.resolve_path(filename_template, hdu, j=j, k=k)
+            filename = products.resolve_path(filename_template, hdu, j, k)
 
-            if filename.exists() or overwrite:
+            if overwrite or not filename.exists():
+                # remove header comment
+                # "  FITS (Flexible Image Transport System) format is defined in 'Astronomy"
+                # which causes write problems
+                del image.meta['COMMENT']
                 header = fits.Header(image.meta)
                 header.update(wcs.to_header())
-                fits.writeto(filename, image.data, header)
+
+                if np.ma.isMA(image.data) and np.ma.is_masked(image.data):
+                    raise NotImplementedError
+
+                fits.writeto(filename, np.array(image.data), header,
+                             overwrite=overwrite)
 
 
 # ---------------------------------------------------------------------------- #

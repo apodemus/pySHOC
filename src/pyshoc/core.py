@@ -40,16 +40,16 @@ from recipes.introspect import get_caller_name
 from recipes.string import named_items, strings, sub, indent as indented
 
 # relative
+from . import headers
 from .config import CONFIG
 from .utils import str2tup
-from .tel_info import tel_info, get_tel
 from .printing import BraceContract
 from .readnoise import readNoiseTables
+from .tel_info import get_tel, tel_info
 from .timing import Trigger, shocTiming
-from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
-from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
 
+# ---------------------------------------------------------------------------- #
 # emit these warnings once only!
 wrn.filterwarnings('once', 'Using telescope pointing coordinates')
 
@@ -221,7 +221,8 @@ class Filters:
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(CONFIG.preferences.empty_filter_string.strip, self), CONFIG.preferences.empty_filter_string)
+        return next(filter(CONFIG.preferences.empty_filter_string.strip, self),
+                    CONFIG.preferences.empty_filter_string)
 
     def to_header(self, header):
         _remap = {CONFIG.preferences.empty_filter_string: 'Empty'}
@@ -401,8 +402,11 @@ class shocHDU(ImageHDU, Messenger):
         # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
         # hierarch keywords, so for SHOC we cannot tell if it's the old format
         # header by checking those.
-        if any(kw not in header for kw in HEADER_KEYS_MISSING_OLD):
+        if any(kw not in header for kw in headers.HEADER_KEYS_MISSING_OLD):
             age = 'Old'
+            
+        if not isinstance(header, fits.header._BasicHeader):
+            headers.convert(header)
 
         # identify calibration files
         age, kind, suffix = '', '', 'HDU'
@@ -415,7 +419,8 @@ class shocHDU(ImageHDU, Messenger):
 
         # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         class_name = f'shoc{age}{kind}{suffix}'
-        cls.logger.trace(f'{class_name=}, {obstype=}')
+        cls.logger.debug('Identified class_name={!r}, obstype={!r}',
+                         class_name, obstype)
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: {!r:}', obstype)
@@ -912,7 +917,7 @@ class shocOldHDU(shocHDU):
         super().__init__(data, header, *args, **kws)
 
         # fix keywords
-        for old, new in KWS_OLD_TO_NEW:
+        for old, new in headers.KWS_OLD_TO_NEW:
             if old in header:
                 self.header.rename_keyword(old, new)
 
@@ -1536,7 +1541,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             raise ValueError('Cannot stack images with different shapes')
 
         # keep only header keywords that are the same in all headers
-        header = headers_intersect(self)
+        header = headers.intersection(self)
         header['FRAME'] = self[0].header['date']  # HACK: need date for flats!
         header['NAXIS'] = 3                  # avoid misidentification as master
         hdu = shocHDU(np.concatenate([_3d(hdu.data) for hdu in self]),
