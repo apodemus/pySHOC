@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------- #
 # prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
+
 preferences:
     metric_names:           True
     empty_filter_string:    ∅
@@ -95,7 +96,7 @@ logging:
         
     # Console logging sink
     console:
-        level: debug
+        level: info
         catch: False
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
@@ -111,21 +112,20 @@ logging:
 
     # library activation
     activation: 
-            pyshoc:                     True
-            obstools:                   True
-            obstools.phot:              TRACE
-            recipes:                    True
-            mpl_multitab:               True
-            recipes.io.utils:           False
-            motley.formatter:           False
-            motley.table.xlsx:          True
-            scrawl.moves.machinery:     False
+            pyshoc:                     1
+            obstools:                   1
+            mpl_multitab:               1
+            recipes:                    1
+            recipes.io.utils:           0
+            motley.formatter:           0
+            motley.table.xlsx:          1
+            scrawl.moves.machinery:     0
 
 
 # ---------------------------------------------------------------------------- #
 # Information / Overview data products
 info:
-    folder:         info
+    folder:         info/
     filenames:
         # pipeline summary info
         headers:        headers/$HDU.txt
@@ -158,7 +158,7 @@ calibration:
 # ---------------------------------------------------------------------------- #
 # plotting
 plotting: #&plotting
-    folder:         plots
+    folder:         plots/
 
     # GUI
     gui: 
@@ -178,7 +178,7 @@ plotting: #&plotting
 # Sample image statistics 
 samples:
     title:              Sample Images # for tables
-    folder:             $PLOTS/samples
+    folder:             $PLOTS/samples/
     filename:           $HDU$FRAMES.png
 
     params:
@@ -239,7 +239,7 @@ detect:          *source_detection #
 # image registration (wcs)
 registration: &image_registration
 
-    folder:         $PHOT/reg
+    folder:         $PHOT/reg/
     filenames:  
         registry:   registry.pkl
         params:     params.npy
@@ -272,7 +272,7 @@ tracking:
     title:      'Tracking Data'
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    folder:     $PHOT/tracking/$HDU
+    folder:     $PHOT/tracking/$HDU/
     filenames:  
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
@@ -340,6 +340,8 @@ tracking:
     # ------------------------------------------------------------------------ #
     plot:   True
     plots:
+        folder:     plots/
+
         centroids:
             com:              [r, +, "Centre of Mass"]
             peak:             [m, ^, "Peak"]
@@ -353,6 +355,9 @@ tracking:
             # fontweight:bold
 
         position:
+        # -------------------------------------------------------------------- #
+            filename:           positions-source$SOURCE.png
+
             figsize:            [12, 6.5]
             legend:             False
             show:               [avg, weights, caption]  #  nulls, pixel
@@ -406,6 +411,12 @@ tracking:
                 ec:         darkgreen
                 zorder:     100
 
+        # -------------------------------------------------------------------- #
+        time_series:
+            filename:       positions-ts.png
+            title:          Time Series
+            figsize:        [12, 5]
+
 
 # ---------------------------------------------------------------------------- #
 phot:   
@@ -436,6 +447,7 @@ lightcurves:
         concat:
             title:      Nightly differential (0th order) ragged-aperture light curve for {}.
             filename:   by_date/diff/$DATE.diff0.txt
+            overwrite:  True
 
     decor:
         title:      Nightly differential (smoothed) ragged-aperture light curve for {}.
@@ -448,20 +460,11 @@ lightcurves:
 
     # -------------------------------------------------------------------- #
     plots:
-        # overwrite:      True
-        plims:      [-0.1, 99.99]
-        xlabel:     
-            top:    Time (UTC)
-            bottom: Δt (s)
-        ylabel:     Relative Flux
+        # ouput format 
+        format:       png
+        # overwrite:    True
 
-        subplotspec:
-            top:    0.81
-            bottom: 0.1
-            left:   0.065
-            right:  0.94
-
-
+        # Which plots to produce
         by_file:
             raw:        1
             flagged:    1
@@ -470,3 +473,24 @@ lightcurves:
         by_date:
             diff0:      1
             decor:      1
+        
+        # plot parametes
+        plims:          [-0.1, 99.99]
+        xlabel:
+            top:        Time (UTC)
+            bottom:     Δt (s)
+        ylabel:         Relative Flux
+
+        subplotspec:
+            top:        0.81
+            bottom:     0.1
+            left:       0.065
+            right:      0.94
+
+
+
+
+
+
+
+

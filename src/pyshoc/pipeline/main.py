@@ -305,13 +305,13 @@ def plot_drizzle(fig, *indices, ff):
         fig.tight_layout()
 
 
-def save_samples_fits(samples, wcss, path, overwrite):
+def save_samples_fits(run, samples, wcss, filename_template, overwrite):
     # save samples as fits with wcs
-    filename_template = get_filename_template('fits')
-    for (stem, subs), wcs in zip(samples.items(), wcss):
-        path = path / stem
+
+    for (file, subs), wcs in zip(samples.items(), wcss):
+        hdu = run[file]
         for (j, k), image in subs.items():
-            filename = path / filename_template.format(stem=stem, j=j, k=k)
+            filename = products.resolve_path(filename_template, hdu, j=j, k=k)
 
             if filename.exists() or overwrite:
                 header = fits.Header(image.meta)
@@ -494,7 +494,7 @@ def register(run, paths, samples_cal, overwrite):
 
     # note: source detections were reported above in `get_sample_images`
     reg = run.coalign_survey(
-        **CONFIG.registration, **{**CONFIG.detection, 'report': False}
+        **CONFIG.registration.params, **{**CONFIG.detection, 'report': False}
     )
 
     # TODO region files
@@ -510,8 +510,10 @@ def register(run, paths, samples_cal, overwrite):
 
     # Build image WCS
     wcss = reg.build_wcs(run)
+
     # save samples fits
-    save_samples_fits(samples_cal, wcss, paths.files.samples, overwrite)
+    save_samples_fits(run, samples_cal, wcss,
+                      paths.files.samples.filename, overwrite)
 
     # Drizzle image
     reg.drizzle(files.drizzle, CONFIG.registration.drizzle.pixfrac)
@@ -547,69 +549,85 @@ def plot_overview(run, reg, paths, ui, overwrite):
 
 
 # ---------------------------------------------------------------------------- #
-@update_defaults(CONFIG.tracking.params)
-def _track(hdu, seg, labels, coords, path, overwrite=False, dilate=0, njobs=-1):
-
-    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
-                hdu.file.name)
-
-    if CONFIG.tracking.params.circularize:
-        seg = seg.circularize()
-
-    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
-    tracker.init_memory(hdu.nframes, path, overwrite=overwrite)
-    tracker.run(hdu.calibrated, njobs=njobs)
-
-    # plot
-    if CONFIG.tracking.plot:
-        def get_filename(name, folder=path / 'plots'):
-            return folder / f'positions-{name.lower().replace(" ", "")}'
-
-        ui, art = tracker.plot.positions(ui=ion)
-        if ion:
-            ui.tabs.save(get_filename)
-        else:
-            for i, j in enumerate(tracker.use_labels):
-                ui[i].savefig(get_filename(f'source{j}'))
-
-        # plot individual features
-        fig = plot_positions_individual(tracker)
-
-        # plot positions time series
-        fig, ax = plt.subplots(figsize=(12, 5))
-        tracker.show.positions_time_series(ax)
-        fig.savefig(plotpath / 'positions-ts.png')
-
-    return tracker, ui
 
 
-def track(run, reg, paths, overwrite=False):
+def track(run, reg, paths, ui, overwrite=False):
 
     logger.section('Source Tracking')
     spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
+    spanning = np.add(spanning, 1)
     logger.info('Sources: {} span all observations.', spanning)
 
-    image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
-    folder_pattern = paths.folders.tracking
     filenames = paths.files.tracking
+    image_labels = itt.islice(zip(reg, reg.labels_per_image), 1, None)
+
     for i, (hdu, (img, labels)) in enumerate(zip(run, image_labels)):
-        missing_files = {
-            key: path
-            for key, path in filenames.items()
-            if not products.resolve_path(folder_pattern, hdu).exists()
-        }
+        missing_files = _tracker_missing_files(filenames, hdu, spanning)
         if overwrite or missing_files:
             logger.info('Launching tracker for {}.', hdu.file.name)
 
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-            tracker, ui = _track(hdu, img.seg, spanning, coords, True)
+            # path = products.resolve_path(paths.folders.tracking, hdu)
+            tracker, ui = _track(hdu, img.seg, spanning, coords, paths, ui)
 
         # return ui
     logger.info('Source tracking complete.')
     return spanning
 
-# def plot_lc():
+
+def _tracker_missing_files(templates, hdu, sources):
+    desired = templates.map(products.resolve_path, hdu)
+    position_plots, files = desired.split('position')
+    missing_files = {
+        key: file for key, path in files.flatten().items()
+        if not (file := products.resolve_path(path, hdu)).exists()
+    }
+
+    _ppk, position_plots = position_plots.flatten().popitem()
+    position_plots = str(position_plots)
+    missing_files.update({
+        (*_ppk, i): position_plots.replace('$SOURCE', str(i))
+        for i in sources
+    })
+    return missing_files
+
+
+@update_defaults(CONFIG.tracking.params)
+def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs=-1):
+
+    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.'),
+                hdu.file.name)
+
+    if (cfg := CONFIG.tracking).params.circularize:
+        seg = seg.circularize()
+
+    base = products.resolve_path(paths.folders.tracking.folder, hdu)
+    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
+    tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
+    tracker.run(hdu.calibrated, njobs=njobs)
+
+    # plot
+    if cfg.plot:
+        tmp, kws = cfg.plots.positions.split('filename')
+        tmp = str(products.resolve_path(tmp, hdu))
+
+        factory = PlotFactory(ui)   # static args
+        task = factory(tracker.plot.positions)(fig=o, **kws)
+
+        year, day = str(hdu.date_for_filename).split('-', 1)
+        tab = (cfg.title, year, day)
+        for j in tracker.use_labels:
+            # plot source location features
+            # factory[(*tab, f'source {j}')] = TaskRunner(task, tmp.format(j), overwrite)
+            factory.add_task(task, (*tab, f'source {j}'), tmp.format(j), overwrite)
+
+        # plot positions displacement time series
+        (filename, title), kws = (cfg.plots.time_series, ('filename', 'title'))
+        task = factory(tracker.plot.displacement_time_series)(ax=o.axes[0], **kws)
+        factory.add_task(task, (*tab, title), filename, overwrite)
+
+    return tracker, ui
 
 
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
@@ -643,7 +661,7 @@ def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws)
 
     filenames = {}
     for date, ts in lcs.items():
-        filenames[date] = filename \
+        filenames[date] = filename\
             = Path(filename_template.substitute(DATE=date)).with_suffix('.png')
         year, day = date.split('-', 1)
         factory.add_task(task,
@@ -692,7 +710,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    spanning = track(run, reg, paths)
+    spanning = track(run, reg, paths, ui)
 
     # ------------------------------------------------------------------------ #
     # Photometry

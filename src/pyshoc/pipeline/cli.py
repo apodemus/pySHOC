@@ -17,7 +17,7 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
-from ..config import PathConfig, _prefix_relative_path
+from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
 
@@ -83,7 +83,7 @@ def get_root(files_or_folder, _level=0):
 
 
 def resolve_output(output, root):
-    out = _prefix_relative_path(output, root)
+    out = _prefix_paths(output, root)
     logger.info('Output root: {}', out)
     return out
 
