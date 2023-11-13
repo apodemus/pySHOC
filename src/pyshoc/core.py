@@ -1779,15 +1779,16 @@ class shocObsGroups(Groups):
             self, attrs, titled=titled, filler_text='NO MATCH', **kws
         )
 
-    def pformat(self, titled=True, braces=False, vspace=1, **kws):
+    def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):
         """
         Run pprint on each group
         """
         tables = self.tabulate(titled=titled, **kws)
-        return vstack.from_dict(tables, not bool(titled), braces, vspace)
+        return vstack.from_dict(tables, not bool(titled), not headers,
+                                braces, vspace)
 
     def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
-        print(self.pformat(titled, braces, vspace, **kws))
+        print(self.pformat(titled, braces, headers, vspace, **kws))
 
     #
     combine = MethodVectorizer('combine')  # , convert=shocCampaign
