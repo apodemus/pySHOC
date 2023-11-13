@@ -1,6 +1,5 @@
 # std
 import re
-import warnings
 import itertools as itt
 from collections import defaultdict
 
@@ -8,12 +7,13 @@ from collections import defaultdict
 import numpy as np
 from loguru import logger
 from astropy.io.fits import Header
-from astropy.io.fits.verify import VerifyWarning
 
 # local
 from motley.table import Table
 from recipes.sets import OrderedSet
 
+# relative
+from .convert import KEYMAP
 
 
 # ---------------------------------------------------------------------------- #
@@ -65,11 +65,7 @@ def intersection(run, merge_histories=False):
         vals = {h[key] for h in headers}
         if len(vals) == 1:
             # all values for this key are identical -- keep
-            with warnings.catch_warnings():
-                # filter stupid HIERARCH warnings of which there seem to be
-                # millions
-                warnings.filterwarnings('ignore', category=VerifyWarning)
-                out[KWS_REMAP.get(key, key)] = vals.pop()
+            out[KEYMAP.get(key, key)] = vals.pop()
         else:
             logger.debug('Header key {} nonunique values: {}', key, list(vals))
 

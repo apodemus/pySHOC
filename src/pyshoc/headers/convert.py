@@ -5,30 +5,39 @@ from loguru import logger
 
 # ---------------------------------------------------------------------------- #
 # A mapping of old to new keywords.
-KEYWORDS = {
+KEYMAP = {
     # old                                   new
-    'HIERARCH EMREALGAIN':                  'EMREALGN',
-    'HIERARCH COUNTCONVERTMODE':            'CNTCVTMD',
-    'HIERARCH COUNTCONVERT':                'CNTCVT',
-    'HIERARCH DETECTIONWAVELENGTH':         'DTNWLGTH',
-    'HIERARCH SENSITIVITY':                 'SNTVTY',
-    'HIERARCH SPURIOUSNOISEFILTER':         'SPSNFLTR',
-    'HIERARCH THRESHOLD':                   'THRSHLD',
-    'HIERARCH PHOTONCOUNTINGENABLED':       'PCNTENLD',
-    'HIERARCH NOTHRESHOLDS':                'NSETHSLD',
-    'HIERARCH PHOTONCOUNTINGTHRESHOLD1':    'PTNTHLD1',
-    'HIERARCH PHOTONCOUNTINGTHRESHOLD2':    'PTNTHLD2',
-    'HIERARCH PHOTONCOUNTINGTHRESHOLD3':    'PTNTHLD3',
-    'HIERARCH PHOTONCOUNTINGTHRESHOLD4':    'PTNTHLD4',
-    'HIERARCH AVERAGINGFILTERMODE':         'AVGFTRMD',
-    'HIERARCH AVERAGINGFACTOR':             'AVGFCTR',
-    'HIERARCH FRAMECOUNT':                  'FRMCNT'
+    'EMREALGAIN':                  'EMREALGN',
+    'COUNTCONVERTMODE':            'CNTCVTMD',
+    'COUNTCONVERT':                'CNTCVT',
+    'DETECTIONWAVELENGTH':         'DTNWLGTH',
+    'SENSITIVITY':                 'SNTVTY',
+    'SPURIOUSNOISEFILTER':         'SPSNFLTR',
+    'THRESHOLD':                   'THRSHLD',
+    'PHOTONCOUNTINGENABLED':       'PCNTENLD',
+    'NOTHRESHOLDS':                'NSETHSLD',
+    'PHOTONCOUNTINGTHRESHOLD1':    'PTNTHLD1',
+    'PHOTONCOUNTINGTHRESHOLD2':    'PTNTHLD2',
+    'PHOTONCOUNTINGTHRESHOLD3':    'PTNTHLD3',
+    'PHOTONCOUNTINGTHRESHOLD4':    'PTNTHLD4',
+    'AVERAGINGFILTERMODE':         'AVGFTRMD',
+    'AVERAGINGFACTOR':             'AVGFCTR',
+    'FRAMECOUNT':                  'FRMCNT'
+}
+
+KEYWORDS = {
+    f'HIERARCH {old}': new
+    for old, new in KEYMAP.items()
 }
 
 
-KWS_REMAP = {
-    old.replace('HIERARCH ', ''): new
-    for old, new in KEYWORDS.items()
+REMOVE = {
+    'PREAMPGAINTEXT',
+    'SPECTROGRAPHSERIAL',
+    'SHAMROCKISACTIVE',
+    'SPECTROGRAPHNAME',
+    'SPECTROGRAPHISACTIVE',
+    'IRIGDATAAVAILABLE'
 }
 
 # ---------------------------------------------------------------------------- #
@@ -55,5 +64,9 @@ def convert(header, forward=True):
             logger.warning('Could not rename keyword {:s} due to the '
                            'following exception \n{}', old, error)
             success = False
-
+    
+    # 
+    for key in REMOVE:
+        header.remove(key, ignore_missing=True)
+    
     return success
