@@ -44,10 +44,12 @@ console:
     banner:
         show:       True
         format: |
-            {{now:|B,darkgreen}: <{width:}}
+            {{python:|B,darkgreen}: <{width}}
+            {{now:|B,darkgreen}: <{width}}
             {logo}
+            
             {{subtitle:|B,purple}: >{width}}
-            {{version:|Bk}: >{width}}
+            {v{version}: >{width}|Bc}
         subtitle:   Photometry Pipeline
         fg:         [bold, blue]
         linestyle:  [-, bold]
@@ -96,8 +98,8 @@ logging:
         
     # Console logging sink
     console:
-        level: info
-        catch: False
+        level:  debug
+        catch:  False
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
             {{{name}.{function}:s|green}:{line:d|orange}: <52}|
@@ -158,13 +160,13 @@ calibration:
 # ---------------------------------------------------------------------------- #
 # plotting
 plotting: #&plotting
-    folder:         plots/
+    folder:         $INFO/plots/
 
     # GUI
     gui: 
         title:      pySHOC Photometry Pipeline GUI
         pos :       N
-        delay:      True
+        delay:      False
 
     #
     cmap:           cmr.voltage
@@ -220,6 +222,8 @@ samples:
 # source detection
 detection: &source_detection
     algorithm:      sigma_threshold
+    snr:            3
+
     npixels:        5
     edge_cutoff:    3
     edge_fraction:  0.5
@@ -227,6 +231,7 @@ detection: &source_detection
     roundness:      Null    # !!python/tuple [0.5, 1.75]
     dilate:         2
     deblend:        True
+
     report:
         cutouts: True
 
@@ -239,7 +244,7 @@ detect:          *source_detection #
 # image registration (wcs)
 registration: &image_registration
 
-    folder:         $PHOT/reg/
+    folder:         reg/
     filenames:  
         registry:   registry.pkl
         params:     params.npy
@@ -247,9 +252,10 @@ registration: &image_registration
     params:
         survey:         dss
         fov_stretch:    1.65
-        plot:           False
         fit_angle:      True
-        # sigma_fallback: 10
+        
+    # plot:
+    #     ['', 'clusters']
 
     drizzle: 
         filename:       drizzle.fits
@@ -260,6 +266,9 @@ registration: &image_registration
             filename:   $PLOTS/mosaic.png
             cmap:       cmr.chroma
             alpha:      0.5
+
+        align:
+            filename:   $REGISTRY/aligned/$HDU.align.png
 
 # alias
 # reg: *image_registration
@@ -285,7 +294,7 @@ tracking:
     params:
         dilate:             2
         circularize:        True
-        njobs:              -1
+        njobs:              1
         
         centroids:
             # features used for tracking
@@ -426,7 +435,7 @@ phot:
 # ---------------------------------------------------------------------------- #
 lightcurves:
     title:          Light Curves
-    folder:         $PHOT/lightcurves/
+    folder:         lightcurves/
     
     raw:
         filename:   by_file/raw/$HDU.raw.txt
