@@ -215,8 +215,8 @@ def enable_local_caching(mapping):
                    'pipeline for the same data, but with a different kind of '
                    'aperture, etc.')
 #
-# @click.option('--cache/--no-cache', default=True,
-#               help='Enable/Disable caching.')
+@click.option('--cache/--no-cache', default=True,
+              help='Enable/Disable caching.')
 #
 @click.option('--plot/--no-plot', default=True,
               help='Show figure windows.')
@@ -226,7 +226,8 @@ def enable_local_caching(mapping):
 def main(files_or_folder, output='./.pyshoc',
          target=None, telescope=None,
          top=5, apertures='ragged', sub=...,
-         overwrite=False, plot=True, cutouts=True):
+         overwrite=False, cache=None,
+         plot=True, cutouts=True):
     """
     Main entry point for pyshoc pipeline command line interface.
     """
@@ -241,7 +242,8 @@ def main(files_or_folder, output='./.pyshoc',
                 'overwritten' if overwrite else 'used if available')
 
     # setup
-    paths = setup(root, output, not overwrite)
+    cache = bool(not overwrite if cache is None else cache)
+    paths = setup(root, output, cache) # 
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and
