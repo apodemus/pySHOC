@@ -37,6 +37,7 @@ from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
+from recipes.oo.property import ForwardProperty
 from recipes.string import named_items, strings, sub, indent as indented
 
 # relative
@@ -673,6 +674,9 @@ class shocHDU(ImageHDU, Messenger):
     @property
     def date(self):
         return self.t.date
+
+    # alias
+    date_for_filename = ForwardProperty('t.date_for_filename')
 
     @lazyproperty
     def rollover(self):

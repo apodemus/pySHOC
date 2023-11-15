@@ -248,7 +248,7 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
 
     for hdu in run.sort_by('t.t0'):
         # grouping
-        year, day = str(hdu.t.date_for_filename).split('-', 1)
+        year, day = str(hdu.date_for_filename).split('-', 1)
 
         for (j, k), image in samples[hdu.file.name].items():
             # get filename
