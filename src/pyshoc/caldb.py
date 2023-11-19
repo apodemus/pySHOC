@@ -18,11 +18,11 @@ from motley.table import Table
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 from recipes import io
 from recipes.logging import LoggingMixin
+from recipes.dicts import AttrDict, AutoVivify
 from recipes.string import numbered, pluralize
-from recipes.dicts import AutoVivify, AttrDict
 
 # relative
-from . import shocCampaign, MATCH
+from . import MATCH, shocCampaign
 
 
 def move_to_backup(file, ext='bak'):

@@ -13,8 +13,8 @@ utc2bjd
 """
 
 # std
-import urllib
 import re
+import urllib
 import numbers
 import itertools as itt
 from pathlib import Path
@@ -24,12 +24,11 @@ import numpy as np
 import spiceypy as spice
 import more_itertools as mit
 from joblib import Parallel, delayed
-from joblib._parallel_backends import SequentialBackend
-from astropy.time import Time
-from astropy.constants import c, G, M_sun
-from astropy.coordinates import SkyCoord, EarthLocation, FK5
-
 from barycorrpy.utc_tdb import JDUTC_to_BJDTDB
+from astropy.time import Time
+from astropy.constants import G, M_sun, c
+from astropy.coordinates import FK5, EarthLocation, SkyCoord
+
 
 # import multiprocessing as mp
 

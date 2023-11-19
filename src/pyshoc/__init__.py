@@ -6,15 +6,12 @@ pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
 from importlib.metadata import PackageNotFoundError, version
 
 # third-party
-
 from astropy.io.fits.hdu.base import register_hdu
 
-
-
 # relative
-from .config import CONFIG
 from .core import *
 from .caldb import CalDB
+from .config import CONFIG
 
 
 # ---------------------------------------------------------------------------- #
@@ -22,7 +19,6 @@ try:
     __version__ = version('pyshoc')
 except PackageNotFoundError:
     __version__ = '?.?.?'
-
 
 
 # ---------------------------------------------------------------------------- #

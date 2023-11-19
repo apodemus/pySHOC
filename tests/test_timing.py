@@ -1,6 +1,6 @@
-from pyshoc.timing import Date, TimeDelta
-from astropy import time
 import pytest
+from astropy import time
+from pyshoc.timing import Date, TimeDelta
 
 
 def test_date():

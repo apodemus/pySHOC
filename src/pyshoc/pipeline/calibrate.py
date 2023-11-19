@@ -6,7 +6,6 @@ Calibrate SHOC observations
 
 # std
 import textwrap
-import warnings
 
 # third-party
 import numpy as np

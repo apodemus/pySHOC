@@ -18,8 +18,8 @@ from tsa.outliers import WindowOutlierDetection
 from recipes.array import fold
 from recipes.config import ConfigNode
 from recipes import dicts, io, pprint as ppr
-from recipes.functionals.partial import PlaceHolder as o
 from recipes.decorators import delayed, update_defaults
+from recipes.functionals.partial import PlaceHolder as o
 
 # relative
 from ..timing import Time

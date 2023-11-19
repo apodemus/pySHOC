@@ -3,7 +3,6 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 """
 
 
-# relative
 from .. import CONFIG
 from .logging import logger
 from .banner import make_banner

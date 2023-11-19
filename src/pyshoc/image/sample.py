@@ -1,5 +1,6 @@
-from obstools.image.sample import BootstrapResample
+
 from obstools.image.orient import ImageOrienter
+from obstools.image.sample import BootstrapResample
 
 
 # class ImageOrienter(ImageOrientBase):
