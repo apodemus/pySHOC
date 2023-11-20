@@ -63,7 +63,7 @@ def get_root(files_or_folder, _level=0):
 
     files_or_folder = iter(files_or_folder)
 
-    folders = groupby(files_or_folder, Path.is_dir)
+    folders = groupby(Path.is_dir, files_or_folder)
     parent, *ambiguous = {*folders.get(True, ()),
                           *map(Path.parent.fget, folders.get(False, ()))}
     if not ambiguous:
