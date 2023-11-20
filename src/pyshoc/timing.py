@@ -370,7 +370,7 @@ class Date(time.Time):
     def __repr__(self):
         import warnings
         with warnings.catch_warnings():
-            warnings.filterwarnings("error")
+            warnings.filterwarnings('error')
             return self.strftime('%Y-%m-%d')
 
     __str__ = __repr__

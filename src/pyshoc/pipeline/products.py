@@ -192,7 +192,7 @@ def _get_desired_products(items, templates, key, **kws):
 def _get_column_header(base, keys, paths):
     section, *_ = keys
     rpath = paths.get_folder(keys).relative_to(paths.folders.output)
-    
+
     return (CONFIG[section].get('title', ''),
             f'{rpath.parent}/',
             f'{rpath.name}/',

@@ -142,7 +142,7 @@ def slice_sizes(l):
 
 
 class Binning:
-    """Simple class to represent CCD pixel binning"""
+    """Simple class to represent CCD pixel binning."""
 
     def __init__(self, args):
         # assert len(args) == 2
@@ -178,11 +178,13 @@ class Binning:
 class Filters:
     """Simple class to represent positions of the filter wheels"""
 
+    _empty = CONFIG.preferences.empty_filter_string
+
     def __init__(self, a, b=None):
         A = self.get(a)
         # sloan filters usually in wheel B. Keep consistency here when assigning
         if (b is None) and A.islower():
-            self.A = CONFIG.preferences.empty_filter_string
+            self.A = self._empty
             self.B = A
         else:
             self.A = A
@@ -191,10 +193,9 @@ class Filters:
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return CONFIG.preferences.empty_filter_string
-        if long:
-            return long.split(' - ')[0]
-        return (long or CONFIG.preferences.empty_filter_string)
+            return self._empty
+
+        return long.split(' - ')[0] if long else self._empty
 
     def __members(self):
         return self.A, self.B
@@ -203,7 +204,7 @@ class Filters:
         return f'{self.__class__.__name__}{self.__members()}'
 
     # def __format__(self, spec):
-    #     return next(filter(CONFIG.preferences.empty_filter_string.__ne__, self), '')
+    #     return next(filter(self._empty.__ne__, self), '')
 
     def __str__(self):
         return self.name
@@ -222,11 +223,10 @@ class Filters:
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(CONFIG.preferences.empty_filter_string.strip, self),
-                    CONFIG.preferences.empty_filter_string)
+        return next(filter(self._empty.strip, self), self._empty)
 
     def to_header(self, header):
-        _remap = {CONFIG.preferences.empty_filter_string: 'Empty'}
+        _remap = {self._empty: 'Empty'}
         for name, val in self.__dict__.items():
             header[f'FILTER{name}'] = _remap.get(val, val)
 
@@ -1885,7 +1885,7 @@ class shocObsGroups(Groups):
     def save(self, folder=None, name_format=None, overwrite=False):
         # since this calls `save` on polymorphic class HDU / Campaign and 'save'
         # method in each of those have different signature, we have to unpack
-        # the keyword
+        # the keywords
 
         for key, obj in self.items():
             self[key] = obj.save(folder=folder,
