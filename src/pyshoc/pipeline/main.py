@@ -631,7 +631,7 @@ def track(run, reg, paths, ui, overwrite=False):
 
 def _tracker_missing_files(templates, hdu, sources):
     desired = templates.map(products.resolve_path, hdu)
-    position_plots, files = desired.split('position')
+    files, position_plots = desired.split('position')
     missing_files = {
         key: file for key, path in files.flatten().items()
         if not (file := products.resolve_path(path, hdu)).exists()

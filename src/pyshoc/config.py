@@ -99,7 +99,7 @@ def _prefix_paths(node, prefix):
     if isinstance(node, PathConfig):
         result = PathConfig()
         if 'folder' in node:
-            folder, node = node.split('folder')
+            node, folder = node.split('folder')
             prefix = Path(prefix) / folder.folder
             result['folder'] = prefix
 
