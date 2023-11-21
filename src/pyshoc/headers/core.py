@@ -63,7 +63,7 @@ class shocHeader(Header):
             if self.get(key, None) != val:
                 to_update[key] = val
             else:
-                logger.debug('{!r} will not be updated', key)
+                logger.debug('{!r} will not be updated.', key)
         return to_update
 
     # def get_readnoise(self):

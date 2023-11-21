@@ -20,8 +20,8 @@ from .logging import logger
 # ---------------------------------------------------------------------------- #
 def get_figure(ui=None, *key, fig=None, **kws):
     if ui:
-        logger.debug('UI active, adding tab {}', key)
-        tab = ui.add_tab(*key, fig=fig, **kws)
+        logger.debug('UI active, adding tab {}.', tab)
+        tab = ui.add_tab(*tab, fig=fig, **kws)
         return tab.figure
 
     if fig:
@@ -29,10 +29,10 @@ def get_figure(ui=None, *key, fig=None, **kws):
         return fig
 
     if plt := sys.modules.get('matplotlib.pyplot'):
-        logger.debug('pyplot active, launching figure {}', key)
+        logger.debug('pyplot active, launching figure {}.', tab)
         return plt.figure(**kws)
 
-    logger.debug('No UI, creating figure. {}', key)
+    logger.debug('No UI, creating figure. {}.', tab)
     return Figure(**kws)
 
 
@@ -40,8 +40,8 @@ def save_figure(fig, filename, overwrite=False):
     if filename:
         filename = Path(filename)
         if not filename.exists() or overwrite:
-            logger.info('Saving image: {}', filename)
-            fig.savefig(filename)
+            logger.info('Saving image: {}.', filename)
+            fig.savefig(filename, **kws)
 
 
 # alias
@@ -116,9 +116,30 @@ class PlotFactory(LoggingMixin, Partial):
         self.delay = (ui is not None) and delay
 
     def __wrapper__(self, func, *args, **kws):
-        return self.task(self.ui, args, kws)(func)
+        return self.Task(self.ui, args, kws)(func)
 
-    def add_task(self, task, key, filename, overwrite, figure=None, *args, **kws):
+    def get_figure(self, tab, fig=None, **kws):
+        # Create figure if needed, add to ui tab if active
+        if self.ui:
+            if tab:
+                self.logger.debug('UI active, adding tab {}.', tab)
+                tab = self.ui.add_tab(*tab, fig=fig, **kws)
+                return tab.figure
+
+            self.logger.debug('UI active, but no tab. Figure will not be embedded.')
+
+        if fig:
+            assert isinstance(fig, Figure)
+            return fig
+
+        if plt := sys.modules.get('matplotlib.pyplot'):
+            self.logger.debug('pyplot active, launching figure {}.', tab)
+            return plt.figure(**kws)
+
+        self.logger.debug('Creating figure. {}.', tab)
+        return Figure(**kws)
+
+    def add_task(self, task, tab, filename, overwrite, figure=None, *args, **kws):
 
         # Task requires Figure
         # func_creates_figure = not (task.nfree or task._keywords)
@@ -126,7 +147,7 @@ class PlotFactory(LoggingMixin, Partial):
         # # after the task executes with the actual fgure we want in our tab
         figure = get_figure(self.ui, *key, fig=figure)
 
-        self.logger.debug('Task will save figure {} at {}, {}.', 
+        self.logger.debug('Task will save figure {} at {}, {}.',
                           figure, filename, f'{overwrite = }')
         _task = _SaveTask(task, filename, overwrite)
 
@@ -141,9 +162,10 @@ class PlotFactory(LoggingMixin, Partial):
             return _task
 
         # execute task
-        self.logger.debug('Plotting immediate: {}.', key)
-        return _task(figure, key, *args, **kws)
-
+        self.logger.debug('Plotting immediate: {}.', tab)
+        result = _task(figure, tab, *args, **kws)
+        _task._results_cache.append(result)
+        return _task
 
 # ---------------------------------------------------------------------------- #
 

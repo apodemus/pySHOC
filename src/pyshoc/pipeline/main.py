@@ -441,7 +441,14 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
                 {**cfg.raw, **cfg.calibrated}, ui
             )
         else:
-            logger.info("No calibration date, won't plot calibrated thumbnails.")
+            thumbs = {}
+            logger.info("No calibration data available, won't plot calibrated "
+                        "thumbnails.")
+
+        # Plot calibrated sample images
+        plot_sample_images(run, samples_cal,
+                           paths.files.samples.filename, overwrite,
+                           thumbs, ui)
 
     # align
     if do_reg:
@@ -766,8 +773,8 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Photometry
-    logger.section('Photometry')
-    lcs = lightcurves(run, paths, ui, plot, overwrite)
+    # logger.section('Photometry')
+    # lcs = lightcurves(run, paths, ui, plot, overwrite)
     # paths.lightcurves
 
     # phot = PhotInterface(run, reg, paths.phot)

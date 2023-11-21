@@ -227,9 +227,9 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         if not required:
             logger.info('All folders in output tree already exist.')
 
-        logger.info('The following folders will be created: {}', required)
+        logger.info('The following folders will be created: {}.', required)
         for path in required:
-            logger.debug('Creating folder: {}', path)
+            logger.debug('Creating folder: {}.', path)
             path.mkdir()
 
     def resolve_folders(self, output):

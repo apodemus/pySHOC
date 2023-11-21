@@ -84,7 +84,7 @@ def calibrate(run, path=None, overwrite=False):
         gobj.set_calibrators(master_dark, master_flats)
         logger.info('Calibration frames set.')
     else:
-        logger.info('No calibration frames found in {:s}', run)
+        logger.info('No calibration frames found in {:s}.', run)
 
     return gobj, master_dark, master_flats
 
@@ -135,7 +135,7 @@ def find(run, kind, path=None, ignore_masters=False):
     masters.group_id = gid, {}
     if need:
         if path:
-            logger.info('Searching for calibration frames in path: {!r:}', path)
+            logger.info('Searching for calibration frames in path: {!r:}.', path)
             # get calibrators from provided path.
             xcal = shocCampaign.load(path)
             _, gcal = run.match(xcal, *attrs)

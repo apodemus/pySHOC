@@ -67,7 +67,7 @@ def intersection(run, merge_histories=False):
             # all values for this key are identical -- keep
             out[KEYMAP.get(key, key)] = vals.pop()
         else:
-            logger.debug('Header key {} nonunique values: {}', key, list(vals))
+            logger.debug('Header key {} nonunique values: {}.', key, list(vals))
 
     # merge comments / histories
     for key in ('COMMENT', *(['HISTORY'] * merge_histories)):

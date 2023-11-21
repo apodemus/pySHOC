@@ -480,7 +480,7 @@ class shocTiming(LoggingMixin):
         return super().__new__(kls)
 
     def __getnewargs__(self):
-        self.logger.trace('unpickling: {}', self)
+        self.logger.trace('unpickling: {}.', self)
         return self.hdu,
 
     def __init__(self, hdu, **kws):
@@ -855,7 +855,7 @@ class shocTiming(LoggingMixin):
         """
 
         # FIXME: repeat print not necessary
-        logger.debug('Time stamping %s', self.hdu.file.path.name)
+        logger.debug('Time stamping %s.', self.hdu.file.path.name)
 
         header = self.header
         t = self.t[j]

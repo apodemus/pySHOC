@@ -12,4 +12,4 @@ for _ in range(3):
     logger.warning('Yar!')
     logger.critical('BOOM!')
 
-logger.success('final')
+logger.success('final.')

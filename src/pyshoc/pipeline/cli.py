@@ -67,7 +67,7 @@ def get_root(files_or_folder, _level=0):
     parent, *ambiguous = {*folders.get(True, ()),
                           *map(Path.parent.fget, folders.get(False, ()))}
     if not ambiguous:
-        logger.info('Input root: {}', parent)
+        logger.info('Input root: {}.', parent)
         return parent
 
     # Files with multiple parents.
@@ -84,7 +84,7 @@ def get_root(files_or_folder, _level=0):
 
 def resolve_output(output, root):
     out = _prefix_paths(output, root)
-    logger.info('Output root: {}', out)
+    logger.info('Output root: {}.', out)
     return out
 
 
@@ -237,7 +237,7 @@ def main(files_or_folder, output='./.pyshoc',
     logger.section('Setup')
     root = get_root(files_or_folder)
     output = resolve_output(output, root)
-    logger.debug('--overwrite is {}', overwrite)
+    logger.debug('--overwrite is {}.', overwrite)
     logger.info('Previous results will be {}.',
                 'overwritten' if overwrite else 'used if available')
 

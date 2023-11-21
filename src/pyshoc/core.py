@@ -387,7 +387,7 @@ class shocHDU(ImageHDU, Messenger):
         return ('SERNO' in header)
 
     def __getnewargs__(self):
-        self.logger.trace('unpickling: {}', self)
+        self.logger.trace('unpickling: {}.', self)
         return (None, self.header, self.obstype)
 
     def __new__(cls, data, header, obstype=None, *args, **kws):
@@ -420,11 +420,11 @@ class shocHDU(ImageHDU, Messenger):
 
         # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         class_name = f'shoc{age}{kind}{suffix}'
-        cls.logger.debug('Identified class_name={!r}, obstype={!r}',
+        cls.logger.debug('Identified class_name={!r}, obstype={!r}.',
                          class_name, obstype)
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
-            cls.logger.warning('Unknown OBSTYPE: {!r:}', obstype)
+            cls.logger.warning('Unknown OBSTYPE: {!r:}.', obstype)
 
         # cls = cls.__shoc_hdu_types.get(class_name, cls)
         return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
@@ -902,11 +902,11 @@ class shocHDU(ImageHDU, Messenger):
             path = folder / path
 
         if not path.parent.exists():
-            self.logger.info('Creating directory: {!r:}', str(path.parent))
+            self.logger.info('Creating directory: {!r:}.', str(path.parent))
             path.parent.mkdir()
 
         action = ('Saving to  ', 'Overwriting')[path.exists()]
-        self.logger.info('{:s} {!r:}', action, str(path))
+        self.logger.info('{:s} {!r:}.', action, str(path))
         self.writeto(path, overwrite=overwrite)
 
         # reload
@@ -1400,7 +1400,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if len(set(filenames)) < len(self):
             from recipes.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
-            self.logger.warning('Duplicate filenames: {:s}', dup)
+            self.logger.warning('Duplicate filenames: {:s}.', dup)
 
         hdus = self.calls.save(None, folder, name_format, overwrite)
         # reload
