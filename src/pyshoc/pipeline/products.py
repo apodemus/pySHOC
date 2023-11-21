@@ -79,7 +79,7 @@ def resolve_path(path, hdu, *frames, **kws):
             subs['$FRAMES'] = ''
 
     # if '$SOURCE' in path and kws.:
-    return Path(string.sub(path, subs))
+    return Path(string.sub(path, {**subs, **kws}))
 
 
 def get_previous(run, paths):
@@ -97,7 +97,8 @@ def get_previous(run, paths):
     }
 
     #
-    _sample_plots = overview['plotting'].pop(f'{paths.folders.samples.name}/')
+    samples = paths.folders.samples
+    _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
 
     #
     logger.opt(lazy=True).debug(

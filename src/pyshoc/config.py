@@ -15,6 +15,7 @@ from recipes import dicts
 from recipes.string import sub
 from recipes.caching import cached
 from recipes.config import ConfigNode
+from recipes.utils import ensure_tuple
 from recipes.functionals import always, negate
 
 
@@ -25,6 +26,7 @@ def get_username():
 
 
 # ---------------------------------------------------------------------------- #
+# Load package config
 CONFIG = ConfigNode.load_module(__file__)
 
 
@@ -58,6 +60,11 @@ CONFIG.console.cutouts['title'] = motley.stylize(CONFIG.console.cutouts.pop('tit
 prg = CONFIG.console.progress
 prg['bar_format'] = motley.stylize(prg.bar_format)
 del prg
+
+
+# Convert tab specifiers to tuple
+CONFIG.update(CONFIG.select('tab').map(ensure_tuple))
+
 
 # make config read-only
 CONFIG.freeze()
