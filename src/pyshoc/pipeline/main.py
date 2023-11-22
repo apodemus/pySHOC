@@ -672,15 +672,11 @@ def track(run, reg, paths, ui, overwrite=False):
     filenames = paths.files.tracking
     images_labels = list(itt.islice(zip(reg, reg.labels_per_image), 1, None))
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':589")
-
     for i, (hdu, (img, labels)) in enumerate(zip(run, images_labels), 1):
-        missing_files = _tracker_missing_files(filenames, hdu, spanning)
-        if overwrite or missing_files:
+        if overwrite or _tracker_missing_files(filenames, hdu, spanning):
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-            break
+            # break
             # path = products.resolve_path(paths.folders.tracking, hdu)
             tracker = _track(hdu, img.seg, spanning, coords, paths, ui, overwrite)
 
@@ -689,21 +685,37 @@ def track(run, reg, paths, ui, overwrite=False):
     return spanning
 
 
-def _tracker_missing_files(templates, hdu, sources):
+def _tracker_target_files(templates, hdu, sources):
     desired = templates.map(products.resolve_path, hdu)
     files, position_plots = desired.split('position')
-    missing_files = {
-        key: file for key, path in files.flatten().items()
-        if not (file := products.resolve_path(path, hdu)).exists()
+    target_files = {
+        key: products.resolve_path(path, hdu)
+        for key, path in files.flatten().items()
     }
 
+    # plots
     _ppk, position_plots = position_plots.flatten().popitem()
     position_plots = str(position_plots)
-    missing_files.update({
-        (*_ppk, i): position_plots.replace('$SOURCE', str(i))
+    target_files.update({
+        (*_ppk, i): Path(position_plots.replace('$SOURCE', str(i)))
         for i in sources
     })
-    return missing_files
+    return target_files
+
+
+def _tracker_missing_files(templates, hdu, sources):
+    target_files = _tracker_target_files(templates, hdu, sources)
+    missing = {key: file
+               for key, file in target_files.items()
+               if not file.exists()}
+
+    if missing and (missing != target_files):
+        logger.info('Source Tracker for {} missing some target files : {}.',
+                    hdu.file.name, missing)
+    else:
+        logger.info('First time run for {}.', hdu.file.name)
+
+    return missing
 
 
 @update_defaults(CONFIG.tracking.params)
@@ -832,13 +844,12 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    # spanning = track(run, reg, paths, ui, overwrite)
+    spanning = track(run, reg, paths, ui, overwrite)
 
     # ------------------------------------------------------------------------ #
     # Photometry
-    # logger.section('Photometry')
-    # lcs = lightcurves(run, paths, ui, plot, overwrite)
-    # paths.lightcurves
+    logger.section('Photometry')
+    lcs = lightcurves(run, paths, ui, plot, overwrite)
 
     # phot = PhotInterface(run, reg, paths.phot)
     # ts = mv phot.ragged() phot.regions()

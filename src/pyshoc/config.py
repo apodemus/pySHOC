@@ -11,7 +11,7 @@ from loguru import logger
 
 # local
 import motley
-from recipes import dicts
+from recipes.dicts import DictNode
 from recipes.string import sub
 from recipes.caching import cached
 from recipes.config import ConfigNode
@@ -161,7 +161,7 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         # create root node
         node = cls()
         attrs = [('files', 'filename'), ('folders', 'folder')]
-        remapped_keys = dicts.DictNode()
+        remapped_keys = DictNode()
         # catch both singular and plural form keywords
         for (key, term), s in itt.product(attrs, ('', 's')):
             found = config.find(term + s,  True, remapped_keys[key])
@@ -171,6 +171,7 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         # resolve files / folders
         node.resolve_folders(output)
         node.resolve_files()
+        # All paths are resolved
 
         # update config!
         for (kind, *orignal), new in remapped_keys.flatten().items():
