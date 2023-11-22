@@ -52,7 +52,7 @@ console:
             {v{version}: >{width}|Bc}
         subtitle:   Photometry Pipeline
         fg:         [bold, blue]
-        linestyle:  [-, bold]
+        linestyle:  ['-', bold]
         linecolor:  teal
         width:      Null
 
@@ -62,6 +62,7 @@ console:
             {rate_fmt:|gold}
             {elapsed:|cyan} eta {remaining:|cyan}
         ascii: " ╸━"
+        # unit:  " frames"
 
     colors:
         flat: cornflowerblue
@@ -160,7 +161,11 @@ calibration:
 # ---------------------------------------------------------------------------- #
 # plotting
 plotting: #&plotting
-    folder:             $INFO/plots/
+    # GUI
+    gui: 
+        title:      pySHOC Photometry Pipeline GUI
+        pos :       N
+        delay:      True
 
     # matplotlib rc params
     cmap:               cmr.voltage
@@ -168,12 +173,6 @@ plotting: #&plotting
         size:           14
     axes:
         labelweight:    bold
-
-    # GUI
-    gui: 
-        title:      pySHOC Photometry Pipeline GUI
-        pos :       N
-        delay:      False
 
 
 
@@ -185,7 +184,7 @@ plotting: #&plotting
 # ---------------------------------------------------------------------------- #
 # Sample image statistics 
 samples:
-    tab:                [Overview, Sample Images] # for tables
+    tab:                [Detection, Sample Images] # for tables
     folder:             $INFO/samples/
     filename:           $HDU$FRAMES.png
 
@@ -211,7 +210,7 @@ samples:
         thumbnails:
             raw:
                 tab:            [Overview, Thumbnails, Raw]
-                filename:       $PLOTS/thumbnails.png
+                filename:       thumbnails/thumbnails.png
                 figsize:        [9, 7.5]
                 plims:          [0.25, 99.9]
                 title_kws:
@@ -222,7 +221,7 @@ samples:
 
             calibrated:
                 tab:            [Overview, Thumbnails, Calibrated]
-                filename:       $PLOTS/thumbnails-cal.png
+                filename:       thumbnails/thumbnails-cal.png
                 overwrite:      Null
 
 
@@ -250,7 +249,7 @@ detect:          *source_detection #
 
 # ---------------------------------------------------------------------------- #
 # image registration (wcs)
-registration: &image_registration
+registration:
 
     folder:         registry/
     filenames:  
@@ -262,7 +261,8 @@ registration: &image_registration
         fov_stretch:    1.65
         fit_angle:      True
 
-    drizzle: 
+    drizzle:
+        show:           True
         tab:            [Overview, Drizzle]
         filename:       drizzle.fits
         pixfrac:        0.5
@@ -271,7 +271,8 @@ registration: &image_registration
         mosaic:
             show:       True
             tab:        [Overview, Mosaic]
-            filename:   $REGISTRY/mosaic.$TEL.png
+            filename:   $REGISTRY/mosaic/mosaic.$TEL.png
+
             cmap:       cmr.chroma
             alpha:      0.5
 
@@ -364,7 +365,6 @@ tracking:
         row_nrs:        True
         max_rows:       25
 
-        # unit:  " frames"
 
     # ------------------------------------------------------------------------ #
     plot:   True
@@ -372,10 +372,10 @@ tracking:
         folder:     plots/
 
         centroids:
-            com:              [r, +, "Centre of Mass"]
-            peak:             [m, ^, "Peak"]
-            avg:              [k, x, "Weighted Centroid"] 
-             # NOTE: avg sould be last
+            com:              [r, +, Centre of Mass]
+            peak:             [m, ^, Peak]
+            avg:              [k, x, Weighted Centroid] 
+            # NOTE: avg sould be last
 
         labels:
             offset: [6, 6]

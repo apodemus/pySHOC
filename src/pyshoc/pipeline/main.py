@@ -27,9 +27,10 @@ from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
 from recipes import io, op
 from recipes.iter import cofilter
+from recipes.dicts import DictNode
 from recipes.utils import not_null
+from recipes.functionals import negate
 from recipes.shell import is_interactive
-from recipes.functionals import negate, noop
 from recipes.decorators import update_defaults
 from recipes.decorators.reporting import trace
 from recipes.string import remove_prefix, shared_prefix
@@ -250,6 +251,9 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
             # plot
             yield factory.add_task(task, key, filename, overwrite, image=image)
 
+    if ui:
+        ui[section].link_focus()
+
 
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
 def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
@@ -434,94 +438,130 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
 
     if plot:
+        # -------------------------------------------------------------------- #
+        # Plot calibrated thumbnails if calibratuib data available available
         if any(map(any, run.attrs('calibrated.dark', 'calibrated.flat'))):
             cfg = CONFIG.samples.plots.thumbnails
-            plot_sample_images(
-                run, samples_cal, paths.files.samples.filename, overwrite,
-                {**cfg.raw, **cfg.calibrated}, ui
-            )
+            thumbs = {**cfg.raw, **cfg.calibrated}
         else:
             thumbs = {}
             logger.info("No calibration data available, won't plot calibrated "
                         "thumbnails.")
 
         # Plot calibrated sample images
+        # -------------------------------------------------------------------- #
         plot_sample_images(run, samples_cal,
                            paths.files.samples.filename, overwrite,
                            thumbs, ui)
 
     # align
+    # ------------------------------------------------------------------------ #
     if do_reg:
         logger.section('Image Registration (WCS)')
         reg = register(run, samples_cal, paths, ui, plot, overwrite)
 
     if plot:
-        plot_overview(run, reg, paths, ui, overwrite)
+        config = CONFIG.registration
+        factory = PlotFactory(ui)
+
+        # DSS mosaic
+        # -------------------------------------------------------------------- #
+        inner, outer = config.plots.mosaic.split(('show', 'tab', 'filename'))
+        if outer.show:
+            survey = config.params.survey
+            task = factory(reg.mosaic)(names=run.files.stems, **inner)
+            factory.add_task(task, (*outer.tab, survey.upper()),
+                             str(outer.filename).replace('$TEL', survey),
+                             outer.get('overwrite', overwrite))
+
+            # TODO mark target
+
+        # Drizzle
+        # -------------------------------------------------------------------- #
+        if config.drizzle.show:
+            filename = paths.files.registration.drizzle
+            task = factory(plot_drizzle)(fig=o, filename=filename)
+            factory.add_task(task, config.drizzle.tab,
+                             filename.with_suffix('.png'), overwrite)
 
     return reg
 
 
+def _registry_plot_tasks(run, paths, overwrite):
+
+    # config
+    inner, outer = CONFIG.registration.plots.split(('show', 'tab', 'filename', 'overwrite'))
+    input_config = {'alignment': {},
+                    'clusters': {},
+                    'mosaic': {},
+                    **inner}
+    input_config['mosaic']['connect'] = False
+
+    # alignment
+    templates = paths.templates['HDU'].find('alignment').flatten()
+    desired_files = products._resolve_by_file(run, templates)
+
+    section = outer.alignment.tab
+    ovr = outer.alignment.get('overwrite', overwrite)
+    align_config = input_config['alignment']
+
+    for stem, (file, ) in desired_files.items():
+        key = (*section, *get_tab_key(run[stem]))
+        yield 'alignment', key, file, ovr, align_config
+
+    # mosaic / clusters
+    templates = paths.templates['TEL'].flatten()
+    tel_products = products._get_desired_products(
+        sorted({*run.attrs.telescope, 'all'})[::-1], templates, 'TEL')
+
+    for tel, files in tel_products.items():
+        for key, file in zip(templates.keys(), files):
+            which = key[-1]
+            if outer[which].show:
+                key = (*CONFIG[key].tab, tel)
+
+            ovr = outer[which].get('overwrite', overwrite)
+            yield which, key, file, ovr, input_config[which]
+
+
+def echo_fig(fig, *args, **kws):
+    return fig
+
+
 def register(run, samples, paths, ui, plot, overwrite):
+
+    config = CONFIG.registration
 
     plot_config = False
     if plot:
-        # config
-        outer, inner = CONFIG.registration.plots.split(('filename', 'tab'))
-        alignment_config = inner.pop('alignment', {})
-        cluster_config = inner.pop('clusters', {})
-        mosaic_config = inner.pop('mosaic', {})
-        mosaic_config['connect'] = False
-        
-        # -------------------------------------------------------------------- #
-        # alignment
-        templates = paths.templates['HDU'].find('alignment').flatten()
-        desired_files = products._resolve_by_file(run, templates)
-        # desired_files = sum(desired_files.values(), [])
-
+        #
         factory = PlotFactory(ui)
-        task = factory(noop)(fig=o)
-        section = outer.alignment.tab
+        task = factory(echo_fig)(fig=o)
 
-        plot_config = {**inner, 'alignment': []}
-        for stem, (file, ) in desired_files.items():
-            key = (*section, *get_tab_key(run[stem]))
-            factory.add_task(task, key, file, overwrite)
-            plot_config['alignment'].append({'fig': ui[key].figure,
-                                             **alignment_config})
+        # pre generate figures and pass to `coalign` via `plots` parameter
+        plot_config = defaultdict(dict)
+        plot_config['alignment'] = []
+        for name, key, file, ovr, kws in _registry_plot_tasks(run, paths, overwrite):
+            tsk = factory.add_task(task, key, file, ovr)
+            kws = {**kws, 'fig': tsk.figure}
+            if name == 'alignment':
+                plot_config[name].append(kws)
+            else:
+                plot_config[name][key[-1]] = kws
 
-        # -------------------------------------------------------------------- #
-        # clustering
-        templates = paths.templates['TEL'].flatten()
-        tel_products = products._get_desired_products(
-            {*run.attrs.telescope, 'all'}, templates, 'TEL')
-        
-        plot_config['clusters'] = {}
-        # section = outer.clusters.tab
-        for tel, files in tel_products.items():
-            for key, file in zip(templates.keys(), files):
-                key = (*CONFIG[key].tab, tel)
-                factory.add_task(task, key, file, overwrite)
-                plot_config['clusters'][tel] = {'fig': ui[key].figure,
-                                                **cluster_config}
-            
-        # -------------------------------------------------------------------- #
-        # # mosaic
-        # mosaic_files = products._get_desired_products(
-        #     {*run.attrs.telescope, 'all'}, paths.templates['TEL'].flatten(), 'TEL')
-        # section = outer.mosaic.tab
-        # key = (*section, tel)
-        # factory.add_task(task, key, file, overwrite)
-        # plot_config['mosaic'] = {'fig': ui[key].figure,
-        #                                     **mosaic_config}
-        
+        if ui:
+            ui[config.plots.alignment.tab].link_focus()
+            ui[config.plots.clusters.tab].link_focus()
 
     # Align with survey image
-    # note: source detections were reported above in `get_sample_images`
-    reg = run.coalign_survey(**CONFIG.registration.params,
+    # ------------------------------------------------------------------------ #
+    # NOTE: source detections were reported above in `get_sample_images`
+    reg = run.coalign_survey(**config.params,
                              **{**CONFIG.detection, 'report': False},
                              plots=plot_config)
 
-    # save
+    # save registry
+    # ------------------------------------------------------------------------ #
     files = paths.files.registration
     logger.info('Saving image registry at: {}.', files.registry)
     reg.params = np.load(files.params)
@@ -530,6 +570,7 @@ def register(run, samples, paths, ui, plot, overwrite):
     # TODO region files
 
     # Build image WCS
+    # ------------------------------------------------------------------------ #
     wcss = reg.build_wcs(run)
 
     # save samples fits
@@ -538,7 +579,8 @@ def register(run, samples, paths, ui, plot, overwrite):
                       overwrite)
 
     # Drizzle image
-    reg.drizzle(files.drizzle, CONFIG.registration.drizzle.pixfrac)
+    # ------------------------------------------------------------------------ #
+    reg.drizzle(files.drizzle, config.drizzle.pixfrac)
 
     return reg
 
@@ -566,38 +608,55 @@ def save_samples_fits(run, samples, wcss, filename_template, overwrite):
                              overwrite=overwrite)
 
 
-def plot_overview(run, reg, paths, ui, overwrite):
-
-    outer, inner = CONFIG.registration.plots.mosaic.split(('filename', 'tab'))
-    factory = PlotFactory(ui)
-    task = factory(reg.mosaic)(names=run.files.stems, **inner)
-    factory.add_task(task, outer.tab, outer.filename, outer.get('overwrite', overwrite))
-
-    # Create mosaic plot
-    # mosaic = reg.mosaic(names=run.files.stems, **kws)
-
-    # txt, arrows = mos.mark_target(
-    #     run[0].target,
-    #     arrow_head_distance=2.,
-    #     arrow_size=10,
-    #     arrow_offset=(1.2, -1.2),
-    #     text_offset=(4, 5), size=12, fontweight='bold'
-    # )
-
-    # drizzle
-    filename = paths.files.registration.drizzle
-    ff = apl.FITSFigure(str(filename))
-    task = factory(plot_drizzle)(o, ff=ff)
-    factory.add_task(task, ('Overview', 'Drizzle'),
-                     filename.with_suffix('.png'), overwrite, ff._figure)
-
-
-def plot_drizzle(fig, *indices, ff):
+def plot_drizzle(fig, *indices, filename):
     # logger.info('POOP drizzle image: {} {}', fig, indices)
-    if not indices or indices[-1] == 'Drizzle':
-        logger.info('Plotting drizzle image: {} {}', fig, indices)
-        ff.show_colorscale(cmap=CONFIG.plotting.cmap)
-        fig.tight_layout()
+    logger.info('Plotting drizzle image: {} {}', fig, indices)
+
+    ff = apl.FITSFigure(str(filename), figure=fig)
+
+    ff.show_colorscale(cmap=CONFIG.plotting.cmap)
+    fig.tight_layout()
+
+    # return fig
+
+# def plot_overview(run, reg, paths, ui, overwrite):
+
+#     # ------------------------------------------------------------------------ #
+#     factory = PlotFactory(ui)
+
+#     # count = itt.count(1)
+#     # for name, key, file, ovr, kws in _registry_plot_tasks(run, paths, overwrite):
+#     # if name == 'alignment':
+#     #     reg.model.gmm.plot(reg[next(count)]
+
+#     # obs = groups.get(key[-1], run)
+
+#     # task = factory(func)()
+#     # factory.add_task(task, key, file, ovr, **kws)
+#     print(name, key, file, kws)
+
+#     # mosaic = reg.mosaic(names=run.files.stems, **kws)
+
+#     # txt, arrows = mos.mark_target(
+#     #     run[0].target,
+#     #     arrow_head_distance=2.,
+#     #     arrow_size=10,
+#     #     arrow_offset=(1.2, -1.2),
+#     #     text_offset=(4, 5), size=12, fontweight='bold'
+#     # )
+
+
+# def mosaic(fig, *key, reg, **kws):
+#     # names=run.files.stems,
+#     return reg.mosaic(**kws)
+
+
+# def plot_clusters(fig, *key, reg, **kws):
+#     return reg.plot_clusters(**kws)
+
+# # def plot_gmm_fit(fig, *key, reg, **kws):
+# #     reg.model.gmm.plot(**kws, fig=fig)
+# #     reg
 
 
 # ---------------------------------------------------------------------------- #
@@ -621,6 +680,7 @@ def track(run, reg, paths, ui, overwrite=False):
         if overwrite or missing_files:
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+            break
             # path = products.resolve_path(paths.folders.tracking, hdu)
             tracker = _track(hdu, img.seg, spanning, coords, paths, ui, overwrite)
 
@@ -682,9 +742,9 @@ def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs
 
     return tracker
 
+
 # ---------------------------------------------------------------------------- #
 # Light curves
-
 
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
@@ -724,6 +784,9 @@ def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws)
                          (*section, year, day, step),
                          filename, overwrite, None,
                          ts)
+
+    if ui:
+        ui[section].link_focus()
 
     return ui
 
@@ -769,7 +832,7 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    spanning = track(run, reg, paths, ui, overwrite)
+    # spanning = track(run, reg, paths, ui, overwrite)
 
     # ------------------------------------------------------------------------ #
     # Photometry
@@ -786,10 +849,11 @@ def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
         logger.section('Launching GUI')
         # activate tab switching callback (for all tabs)
         ui.add_task()   # needed to check for tab switch callbacks to run
-        ui[CONFIG.samples.tab].link_focus()
-        ui[CONFIG.lightcurves.tab].link_focus()
-        ui[CONFIG.registration.plots.alignment.tab].link_focus()
-        ui.set_focus(CONFIG.registration.plots.mosaic.tab)
+        cfg = CONFIG.registration
+        survey = cfg.params.survey.upper()
+        ui['Overview'].move_tab('Mosaic', 0)
+        ui['Overview', 'Mosaic'].move_tab(survey, 0)
+        ui.set_focus(*cfg.plots.mosaic.tab, survey)
         ui.show()
 
         if not is_interactive():

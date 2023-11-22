@@ -131,7 +131,7 @@ def setup(root, output, use_cache):
     atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory
-    rcParams['savefig.directory'] = paths.folders.plotting
+    rcParams['savefig.directory'] = output
 
     # set detection algorithm
     if algorithm := CONFIG.detection.pop('algorithm', None):
