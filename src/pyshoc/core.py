@@ -698,7 +698,7 @@ class shocHDU(ImageHDU, Messenger):
         Images taken in EM  mode are left unmodified
 
         """
-        from obstools.image.calibration import ImageOrienter
+        from obstools.image.calibrate import ImageOrienter
 
         # will flip CON images x axis (2nd axis)
         return ImageOrienter(self, x=self.readout.isCON)
@@ -1868,7 +1868,7 @@ class shocObsGroups(Groups):
         -------
 
         """
-        from obstools.image.calibration import keep
+        from obstools.image.calibrate import keep
 
         darks = darks or {}
         flats = flats or {}
