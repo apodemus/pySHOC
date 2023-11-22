@@ -23,14 +23,12 @@ from .. import CONFIG
 # ---------------------------------------------------------------------------- #
 cfg = CONFIG.logging
 
+
 # ---------------------------------------------------------------------------- #
 # Capture warnings
-# _showwarning = warnings.showwarning
-
 
 def _showwarning(message, *_, **__):
     logger.opt(depth=2).warning(message)
-    # _showwarning(message, *args, **kwargs)
 
 
 warnings.showwarning = _showwarning

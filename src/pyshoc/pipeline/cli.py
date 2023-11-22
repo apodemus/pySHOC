@@ -17,7 +17,7 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
-from ..config import PathConfig, _prefix_relative_path
+from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
 
@@ -63,11 +63,11 @@ def get_root(files_or_folder, _level=0):
 
     files_or_folder = iter(files_or_folder)
 
-    folders = groupby(files_or_folder, Path.is_dir)
+    folders = groupby(Path.is_dir, files_or_folder)
     parent, *ambiguous = {*folders.get(True, ()),
                           *map(Path.parent.fget, folders.get(False, ()))}
     if not ambiguous:
-        logger.info('Input root: {}', parent)
+        logger.info('Input root: {}.', parent)
         return parent
 
     # Files with multiple parents.
@@ -83,8 +83,8 @@ def get_root(files_or_folder, _level=0):
 
 
 def resolve_output(output, root):
-    out = _prefix_relative_path(output, root)
-    logger.info('Output root: {}', out)
+    out = _prefix_paths(output, root)
+    logger.info('Output root: {}.', out)
     return out
 
 
@@ -131,7 +131,7 @@ def setup(root, output, use_cache):
     atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory
-    rcParams['savefig.directory'] = paths.folders.plotting
+    rcParams['savefig.directory'] = output
 
     # set detection algorithm
     if algorithm := CONFIG.detection.pop('algorithm', None):
@@ -215,8 +215,8 @@ def enable_local_caching(mapping):
                    'pipeline for the same data, but with a different kind of '
                    'aperture, etc.')
 #
-# @click.option('--cache/--no-cache', default=True,
-#               help='Enable/Disable caching.')
+@click.option('--cache/--no-cache', default=True,
+              help='Enable/Disable caching.')
 #
 @click.option('--plot/--no-plot', default=True,
               help='Show figure windows.')
@@ -226,7 +226,8 @@ def enable_local_caching(mapping):
 def main(files_or_folder, output='./.pyshoc',
          target=None, telescope=None,
          top=5, apertures='ragged', sub=...,
-         overwrite=False, plot=True, cutouts=True):
+         overwrite=False, cache=None,
+         plot=True, cutouts=True):
     """
     Main entry point for pyshoc pipeline command line interface.
     """
@@ -236,12 +237,13 @@ def main(files_or_folder, output='./.pyshoc',
     logger.section('Setup')
     root = get_root(files_or_folder)
     output = resolve_output(output, root)
-    logger.debug('--overwrite is {}', overwrite)
+    logger.debug('--overwrite is {}.', overwrite)
     logger.info('Previous results will be {}.',
                 'overwritten' if overwrite else 'used if available')
 
     # setup
-    paths = setup(root, output, not overwrite)
+    cache = bool(not overwrite if cache is None else cache)
+    paths = setup(root, output, cache) # 
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and

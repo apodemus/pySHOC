@@ -13,7 +13,7 @@ from collections import defaultdict
 # third-party
 import pytest
 import numpy as np
-from pyshoc.header import Header
+from pyshoc.header.header import Header
 from pyshoc.timing import UnknownTimeException
 from pyshoc.core import (shocCampaign, shocDarkHDU, shocDarkMaster,
                          shocFlatHDU, shocFlatMaster, shocHDU, shocOldDarkHDU,

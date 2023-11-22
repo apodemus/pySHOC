@@ -4,14 +4,21 @@
 # In[ ]:
 
 
+# std
 import logging
-from pathlib import Path
 import itertools as itt
+from pathlib import Path
 
+# third-party
 from matplotlib import rc
-from IPython.display import display, HTML
+from pyshoc import shocCampaign
+from IPython.display import HTML, display
+from pySHOC import MATCH_DARKS, MATCH_FLATS
 
-from pyshoc import shocCampaign, shocHDU
+# local
+from scrawl.image import ImageDisplay
+from obstools.stats import median_scaled_median
+
 
 # setup logging
 rootlog = logging.getLogger()
@@ -35,7 +42,6 @@ rc('savefig', directory=fig_folder)
 run = shocCampaign.load(root_folder / 'SHOC/raw')
 print(run)
 run.pprint()
-
 
 
 # In[ ]:
@@ -89,7 +95,6 @@ fig
 
 
 # Match calibration frames
-from pySHOC import MATCH_DARKS, MATCH_FLATS
 
 # DEBIAS
 # need to debias flats & science observations
@@ -119,8 +124,6 @@ fig
 
 # In[ ]:
 
-
-from obstools.stats import median_scaled_median
 
 # Science files are large and won't all fit into RAM, so needs careful handling.
 # use `set_calibrators` to do calibration arithmetic on the fly when accessing 
@@ -190,8 +193,6 @@ mp.fig
 
 # In[43]:
 
-
-from scrawl.image import ImageDisplay
 
 def pixel_transform(i: int):
     # scale images by source counts for source 0 and median subtract

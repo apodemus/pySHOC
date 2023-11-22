@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------- #
 # prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
+
 preferences:
     metric_names:           True
     empty_filter_string:    ∅
@@ -43,13 +44,15 @@ console:
     banner:
         show:       True
         format: |
-            {{now:|B,darkgreen}: <{width:}}
+            {{python:|B,darkgreen}: <{width}}
+            {{now:|B,darkgreen}: <{width}}
             {logo}
+
             {{subtitle:|B,purple}: >{width}}
-            {{version:|Bk}: >{width}}
+            {v{version}: >{width}|Bc}
         subtitle:   Photometry Pipeline
         fg:         [bold, blue]
-        linestyle:  [-, bold]
+        linestyle:  ['-', bold]
         linecolor:  teal
         width:      Null
 
@@ -59,6 +62,7 @@ console:
             {rate_fmt:|gold}
             {elapsed:|cyan} eta {remaining:|cyan}
         ascii: " ╸━"
+        # unit:  " frames"
 
     colors:
         flat: cornflowerblue
@@ -92,11 +96,11 @@ logging:
             {time:HH:mm:ss!UTC}|
             {name}.{function}:{line:d}|
             {level.name}: {message}
-        
+
     # Console logging sink
     console:
-        level: debug
-        catch: False
+        level:  debug
+        catch:  False
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
             {{{name}.{function}:s|green}:{line:d|orange}: <52}|
@@ -111,21 +115,20 @@ logging:
 
     # library activation
     activation: 
-            pyshoc:                     True
-            obstools:                   True
-            obstools.phot:              TRACE
-            recipes:                    True
-            mpl_multitab:               True
-            recipes.io.utils:           False
-            motley.formatter:           False
-            motley.table.xlsx:          True
-            scrawl.moves.machinery:     False
+            pyshoc:                     1
+            obstools:                   1
+            mpl_multitab:               1
+            recipes:                    1
+            recipes.io.utils:           0
+            motley.formatter:           0
+            motley.table.xlsx:          1
+            scrawl.moves.machinery:     0
 
 
 # ---------------------------------------------------------------------------- #
 # Information / Overview data products
 info:
-    folder:         info
+    folder:         info/
     filenames:
         # pipeline summary info
         headers:        headers/$HDU.txt
@@ -158,16 +161,20 @@ calibration:
 # ---------------------------------------------------------------------------- #
 # plotting
 plotting: #&plotting
-    folder:         plots
-
     # GUI
     gui: 
         title:      pySHOC Photometry Pipeline GUI
         pos :       N
         delay:      True
 
-    #
-    cmap:           cmr.voltage
+    # matplotlib rc params
+    cmap:               cmr.voltage
+    font:
+        size:           14
+    axes:
+        labelweight:    bold
+
+
 
 # aliases
 # plots: *plotting
@@ -177,8 +184,8 @@ plotting: #&plotting
 # ---------------------------------------------------------------------------- #
 # Sample image statistics 
 samples:
-    title:              Sample Images # for tables
-    folder:             $PLOTS/samples
+    tab:                [Detection, Sample Images] # for tables
+    folder:             $INFO/samples/
     filename:           $HDU$FRAMES.png
 
     params:
@@ -186,7 +193,7 @@ samples:
         min_depth:          10          # minimun simulated integration time (seconds)
         n_intervals:        1
         subset:             Null        # eg: 1000 for sample from first 1000
-    
+
     plots:
         # detections
         contours: 
@@ -202,24 +209,28 @@ samples:
         # Sample thumbnails plot config
         thumbnails:
             raw:
-                filename: $PLOTS/thumbnails.png
-                figsize: [9, 7.5]
+                tab:            [Overview, Thumbnails, Raw]
+                filename:       thumbnails/thumbnails.png
+                figsize:        [9, 7.5]
+                plims:          [0.25, 99.9]
                 title_kws:
-                    color:      w
-                    size:       xx-small
-                    fontweight: bold
-                plims:  [0.25, 99.9]
-                
+                    color:          w
+                    size:           xx-small
+                    fontweight:     bold
+                overwrite:      False
 
             calibrated:
-                filename: $PLOTS/thumbnails-cal.png
-                overwrite: Null
+                tab:            [Overview, Thumbnails, Calibrated]
+                filename:       thumbnails/thumbnails-cal.png
+                overwrite:      Null
 
 
 # ---------------------------------------------------------------------------- #
 # source detection
 detection: &source_detection
     algorithm:      sigma_threshold
+    snr:            3
+
     npixels:        5
     edge_cutoff:    3
     edge_fraction:  0.5
@@ -227,6 +238,7 @@ detection: &source_detection
     roundness:      Null    # !!python/tuple [0.5, 1.75]
     dilate:         2
     deblend:        True
+
     report:
         cutouts: True
 
@@ -237,30 +249,48 @@ detect:          *source_detection #
 
 # ---------------------------------------------------------------------------- #
 # image registration (wcs)
-registration: &image_registration
+registration:
 
-    folder:         $PHOT/reg
+    folder:         registry/
     filenames:  
         registry:   registry.pkl
         params:     params.npy
-    
+
     params:
         survey:         dss
         fov_stretch:    1.65
-        plot:           False
         fit_angle:      True
-        # sigma_fallback: 10
 
-    drizzle: 
+    drizzle:
+        show:           True
+        tab:            [Overview, Drizzle]
         filename:       drizzle.fits
         pixfrac:        0.5
-    
+
     plots:
         mosaic:
-            filename:   $PLOTS/mosaic.png
+            show:       True
+            tab:        [Overview, Mosaic]
+            filename:   $REGISTRY/mosaic/mosaic.$TEL.png
+
             cmap:       cmr.chroma
             alpha:      0.5
 
+        alignment:
+            show:       True
+            tab:        [Registration, Alignment Fit]
+            filename:   $REGISTRY/alignment/$HDU.aligned.png
+
+        clusters:
+            show:               True
+            tab:                [Registration, Source IDs]
+            filename:           $REGISTRY/source-ids.$TEL.png
+
+            centres:            True
+            frames:             True
+            nrs:                True
+            show_bandwidth:     True
+            trim_labels:        False
 # alias
 # reg: *image_registration
 
@@ -269,10 +299,10 @@ registration: &image_registration
 # source tracking 
 tracking:
     # tables
-    title:      'Tracking Data'
+    title:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    folder:     $PHOT/tracking/$HDU
+    folder:     $PHOT/tracking/$HDU/
     filenames:  
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
@@ -285,20 +315,20 @@ tracking:
     params:
         dilate:             2
         circularize:        True
-        njobs:              -1
-        
+        njobs:              1
+
         centroids:
             # features used for tracking
-            com:                            1
-            peak:               
+            com:          1
+            peak:
                 upsample: 1     # note, changing this will siginificantly affect compute times
-                filter: lanczos
+                # filter: lanczos
 
         pre_subtract:       True
         # subtract background from image prior to computing features
         bg:                 median
         # statistic used for background
-        
+
         precision:          0.5
         # Required positional accuracy in pixels
         weights:            snr 
@@ -319,7 +349,7 @@ tracking:
 
         compute:
             centres: [0 , 1000, 100 ]
-    
+
     # ------------------------------------------------------------------------ #
     table:
         title:          Measured source coordinates
@@ -335,16 +365,17 @@ tracking:
         row_nrs:        True
         max_rows:       25
 
-        # unit:  " frames"
-    
+
     # ------------------------------------------------------------------------ #
     plot:   True
     plots:
+        folder:     plots/
+
         centroids:
-            com:              [r, +, "Centre of Mass"]
-            peak:             [m, ^, "Peak"]
-            avg:              [k, x, "Weighted Centroid"] 
-             # NOTE: avg sould be last
+            com:              [r, +, Centre of Mass]
+            peak:             [m, ^, Peak]
+            avg:              [k, x, Weighted Centroid] 
+            # NOTE: avg sould be last
 
         labels:
             offset: [6, 6]
@@ -353,6 +384,9 @@ tracking:
             # fontweight:bold
 
         position:
+        # -------------------------------------------------------------------- #
+            filename:           positions-source$SOURCE.png
+
             figsize:            [12, 6.5]
             legend:             False
             show:               [avg, weights, caption]  #  nulls, pixel
@@ -369,7 +403,7 @@ tracking:
                 color:  null
                 zorder: 1
                 alpha:  0.35
-            
+
             title:
                 size:       13
                 fontweight: bold
@@ -406,6 +440,12 @@ tracking:
                 ec:         darkgreen
                 zorder:     100
 
+        # -------------------------------------------------------------------- #
+        time_series:
+            tab:            Time Series
+            filename:       positions-ts.png
+            figsize:        [12, 5]
+
 
 # ---------------------------------------------------------------------------- #
 phot:   
@@ -414,9 +454,9 @@ phot:
 
 # ---------------------------------------------------------------------------- #
 lightcurves:
-    title:          Light Curves
-    folder:         $PHOT/lightcurves/
-    
+    tab:            Light Curves
+    folder:         lightcurves/
+
     raw:
         filename:   by_file/raw/$HDU.raw.txt
         title:      Raw ragged-aperture light curve for {}.
@@ -436,6 +476,7 @@ lightcurves:
         concat:
             title:      Nightly differential (0th order) ragged-aperture light curve for {}.
             filename:   by_date/diff/$DATE.diff0.txt
+            overwrite:  True
 
     decor:
         title:      Nightly differential (smoothed) ragged-aperture light curve for {}.
@@ -448,20 +489,11 @@ lightcurves:
 
     # -------------------------------------------------------------------- #
     plots:
-        # overwrite:      True
-        plims:      [-0.1, 99.99]
-        xlabel:     
-            top:    Time (UTC)
-            bottom: Δt (s)
-        ylabel:     Relative Flux
+        # ouput format 
+        format:       png
+        # overwrite:    True
 
-        subplotspec:
-            top:    0.81
-            bottom: 0.1
-            left:   0.065
-            right:  0.94
-
-
+        # Which plots to produce
         by_file:
             raw:        1
             flagged:    1
@@ -470,3 +502,16 @@ lightcurves:
         by_date:
             diff0:      1
             decor:      1
+
+        # plot parametes
+        plims:          [-0.1, 99.99]
+        xlabel:
+            top:        Time (UTC)
+            bottom:     Δt (s)
+        ylabel:         Relative Flux
+
+        subplotspec:
+            top:        0.81
+            bottom:     0.1
+            left:       0.065
+            right:      0.94

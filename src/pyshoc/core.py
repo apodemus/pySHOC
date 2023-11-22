@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 from astropy.io import fits
+from astropy.wcs import WCS
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.coordinates import SkyCoord
@@ -26,30 +27,31 @@ from pyxides.vectorize import MethodVectorizer, repeat
 from motley.table import Table
 from motley.utils import ALIGNMENT_MAP_INV, vstack
 from motley.table.attrs import AttrTable, AttrColumn as Column
+from obstools.image.hdu import ImageHDU
 from obstools.image.noise import StdDev
 from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
-from obstools.campaign import (ImageHDU, PhotCampaign,
-                               FilenameHelper as _FilenameHelper)
+from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes import pprint
 from recipes.dicts import pformat
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
+from recipes.oo.property import ForwardProperty
 from recipes.string import named_items, strings, sub, indent as indented
 
 # relative
+from . import headers
 from .config import CONFIG
 from .utils import str2tup
-from .tel_info import tel_info, get_tel
 from .printing import BraceContract
 from .readnoise import readNoiseTables
+from .tel_info import get_tel, tel_info
 from .timing import Trigger, shocTiming
-from .convert_keywords import KEYWORDS as KWS_OLD_TO_NEW
-from .header import HEADER_KEYS_MISSING_OLD, headers_intersect
 
 
+# ---------------------------------------------------------------------------- #
 # emit these warnings once only!
 wrn.filterwarnings('once', 'Using telescope pointing coordinates')
 
@@ -141,7 +143,7 @@ def slice_sizes(l):
 
 
 class Binning:
-    """Simple class to represent CCD pixel binning"""
+    """Simple class to represent CCD pixel binning."""
 
     def __init__(self, args):
         # assert len(args) == 2
@@ -177,11 +179,13 @@ class Binning:
 class Filters:
     """Simple class to represent positions of the filter wheels"""
 
+    _empty = CONFIG.preferences.empty_filter_string
+
     def __init__(self, a, b=None):
         A = self.get(a)
         # sloan filters usually in wheel B. Keep consistency here when assigning
         if (b is None) and A.islower():
-            self.A = CONFIG.preferences.empty_filter_string
+            self.A = self._empty
             self.B = A
         else:
             self.A = A
@@ -190,10 +194,9 @@ class Filters:
     def get(self, long):
         # get short description like "U",  "z'", or "∅"
         if long == 'Empty':
-            return CONFIG.preferences.empty_filter_string
-        if long:
-            return long.split(' - ')[0]
-        return (long or CONFIG.preferences.empty_filter_string)
+            return self._empty
+
+        return long.split(' - ')[0] if long else self._empty
 
     def __members(self):
         return self.A, self.B
@@ -202,7 +205,7 @@ class Filters:
         return f'{self.__class__.__name__}{self.__members()}'
 
     # def __format__(self, spec):
-    #     return next(filter(CONFIG.preferences.empty_filter_string.__ne__, self), '')
+    #     return next(filter(self._empty.__ne__, self), '')
 
     def __str__(self):
         return self.name
@@ -221,10 +224,10 @@ class Filters:
     @property
     def name(self):
         """Name of the non-empty filter in either position A or B, else ∅"""
-        return next(filter(CONFIG.preferences.empty_filter_string.strip, self), CONFIG.preferences.empty_filter_string)
+        return next(filter(self._empty.strip, self), self._empty)
 
     def to_header(self, header):
-        _remap = {CONFIG.preferences.empty_filter_string: 'Empty'}
+        _remap = {self._empty: 'Empty'}
         for name, val in self.__dict__.items():
             header[f'FILTER{name}'] = _remap.get(val, val)
 
@@ -385,7 +388,7 @@ class shocHDU(ImageHDU, Messenger):
         return ('SERNO' in header)
 
     def __getnewargs__(self):
-        self.logger.trace('unpickling: {}', self)
+        self.logger.trace('unpickling: {}.', self)
         return (None, self.header, self.obstype)
 
     def __new__(cls, data, header, obstype=None, *args, **kws):
@@ -401,8 +404,11 @@ class shocHDU(ImageHDU, Messenger):
         # NOTE:`_BaseHDU` creates a `_BasicHeader`, which does not contain
         # hierarch keywords, so for SHOC we cannot tell if it's the old format
         # header by checking those.
-        if any(kw not in header for kw in HEADER_KEYS_MISSING_OLD):
+        if any(kw not in header for kw in headers.HEADER_KEYS_MISSING_OLD):
             age = 'Old'
+            
+        if not isinstance(header, fits.header._BasicHeader):
+            headers.convert(header)
 
         # identify calibration files
         age, kind, suffix = '', '', 'HDU'
@@ -415,10 +421,11 @@ class shocHDU(ImageHDU, Messenger):
 
         # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         class_name = f'shoc{age}{kind}{suffix}'
-        cls.logger.trace(f'{class_name=}, {obstype=}')
+        cls.logger.debug('Identified class_name={!r}, obstype={!r}.',
+                         class_name, obstype)
         if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
             # pylint: disable=no-member
-            cls.logger.warning('Unknown OBSTYPE: {!r:}', obstype)
+            cls.logger.warning('Unknown OBSTYPE: {!r:}.', obstype)
 
         # cls = cls.__shoc_hdu_types.get(class_name, cls)
         return super().__new__(cls.__shoc_hdu_types.get(class_name, cls))
@@ -530,6 +537,15 @@ class shocHDU(ImageHDU, Messenger):
         trg = self.header['OBJECT'] = str(name)
         if ot != trg:
             del self.coords
+
+    @property
+    def wcs(self):
+        return self._wcs
+
+    @wcs.setter
+    def wcs(self, wcs):
+        assert isinstance(wcs, WCS)
+        self._wcs = wcs
 
     @property
     def diffraction_limit(self):
@@ -669,6 +685,9 @@ class shocHDU(ImageHDU, Messenger):
     def date(self):
         return self.t.date
 
+    # alias
+    date_for_filename = ForwardProperty('t.date_for_filename')
+
     @lazyproperty
     def rollover(self):
         return RollOverState(self)
@@ -689,7 +708,7 @@ class shocHDU(ImageHDU, Messenger):
         Images taken in EM  mode are left unmodified
 
         """
-        from obstools.image.calibration import ImageOrienter
+        from obstools.image.calibrate import ImageOrienter
 
         # will flip CON images x axis (2nd axis)
         return ImageOrienter(self, x=self.readout.isCON)
@@ -893,11 +912,11 @@ class shocHDU(ImageHDU, Messenger):
             path = folder / path
 
         if not path.parent.exists():
-            self.logger.info('Creating directory: {!r:}', str(path.parent))
+            self.logger.info('Creating directory: {!r:}.', str(path.parent))
             path.parent.mkdir()
 
         action = ('Saving to  ', 'Overwriting')[path.exists()]
-        self.logger.info('{:s} {!r:}', action, str(path))
+        self.logger.info('{:s} {!r:}.', action, str(path))
         self.writeto(path, overwrite=overwrite)
 
         # reload
@@ -912,7 +931,7 @@ class shocOldHDU(shocHDU):
         super().__init__(data, header, *args, **kws)
 
         # fix keywords
-        for old, new in KWS_OLD_TO_NEW:
+        for old, new in headers.KWS_OLD_TO_NEW:
             if old in header:
                 self.header.rename_keyword(old, new)
 
@@ -1391,7 +1410,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         if len(set(filenames)) < len(self):
             from recipes.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
-            self.logger.warning('Duplicate filenames: {:s}', dup)
+            self.logger.warning('Duplicate filenames: {:s}.', dup)
 
         hdus = self.calls.save(None, folder, name_format, overwrite)
         # reload
@@ -1536,7 +1555,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             raise ValueError('Cannot stack images with different shapes')
 
         # keep only header keywords that are the same in all headers
-        header = headers_intersect(self)
+        header = headers.intersection(self)
         header['FRAME'] = self[0].header['date']  # HACK: need date for flats!
         header['NAXIS'] = 3                  # avoid misidentification as master
         hdu = shocHDU(np.concatenate([_3d(hdu.data) for hdu in self]),
@@ -1774,15 +1793,16 @@ class shocObsGroups(Groups):
             self, attrs, titled=titled, filler_text='NO MATCH', **kws
         )
 
-    def pformat(self, titled=True, braces=False, vspace=1, **kws):
+    def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):
         """
         Run pprint on each group
         """
         tables = self.tabulate(titled=titled, **kws)
-        return vstack.from_dict(tables, not bool(titled), braces, vspace)
+        return vstack.from_dict(tables, not bool(titled), not headers,
+                                braces, vspace)
 
     def pprint(self, titled=True, headers=False, braces=False, vspace=0, **kws):
-        print(self.pformat(titled, braces, vspace, **kws))
+        print(self.pformat(titled, braces, headers, vspace, **kws))
 
     #
     combine = MethodVectorizer('combine')  # , convert=shocCampaign
@@ -1858,7 +1878,7 @@ class shocObsGroups(Groups):
         -------
 
         """
-        from obstools.image.calibration import keep
+        from obstools.image.calibrate import keep
 
         darks = darks or {}
         flats = flats or {}
@@ -1875,7 +1895,7 @@ class shocObsGroups(Groups):
     def save(self, folder=None, name_format=None, overwrite=False):
         # since this calls `save` on polymorphic class HDU / Campaign and 'save'
         # method in each of those have different signature, we have to unpack
-        # the keyword
+        # the keywords
 
         for key, obj in self.items():
             self[key] = obj.save(folder=folder,

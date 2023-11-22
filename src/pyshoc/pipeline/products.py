@@ -1,6 +1,7 @@
 
 
 # std
+import itertools as itt
 from pathlib import Path
 from collections import defaultdict
 
@@ -58,9 +59,13 @@ class ProductNode(FileSystemNode):
                 for child in self.children}
 
 
-def resolve_path(path, hdu, *frames):
+def sanitize_filename(name):
+    return name.lower().replace(" ", "")
+
+
+def resolve_path(path, hdu, *frames, **kws):
     if isinstance(path, DictNode):
-        raise TypeError
+        raise TypeError(f'{type(path)}')
 
     path = str(path)
     subs = {'$HDU':  hdu.file.stem,
@@ -73,7 +78,8 @@ def resolve_path(path, hdu, *frames):
         else:
             subs['$FRAMES'] = ''
 
-    return Path(string.sub(path, subs))
+    # if '$SOURCE' in path and kws.:
+    return Path(string.sub(path, {**subs, **kws}))
 
 
 def get_previous(run, paths):
@@ -91,7 +97,8 @@ def get_previous(run, paths):
     }
 
     #
-    _sample_plots = overview['plotting'].pop(f'{paths.folders.samples.name}/')
+    samples = paths.folders.samples
+    _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
 
     #
     logger.opt(lazy=True).debug(
@@ -165,29 +172,28 @@ def _overview_table_vstack(overview, paths):
 def _resolve_by_file(run, templates):
     # sort rows
     stems = run.sort_by('t.t0').files.stems
-    return _get_desired_products(templates, stems, 'HDU', FRAMES='')
+    return _get_desired_products(stems, templates, 'HDU', FRAMES='')
 
 
 def _resolve_by_date(run, templates):
     # sort rows
-    dates = sorted(set(run.attrs('date_for_filename')))
-    return _get_desired_products(templates, dates, 'DATE')
+    dates = sorted(set(run.attrs('t.date_for_filename')))
+    return _get_desired_products(dates, templates, 'DATE')
 
 
-def _get_desired_products(templates, items, key, **kws):
-
+def _get_desired_products(items, templates, key, **kws):
     rows = defaultdict(list)
-    for tmp in templates.values():
-        for val in items:
-            rows[val].append(
-                Path(tmp.substitute(**{key: val, **kws}))
-            )
+    for val, tmp in itt.product(items, templates.values()):
+        rows[val].append(
+            Path(tmp.substitute(**{key: val, **kws}))
+        )
     return rows
 
 
 def _get_column_header(base, keys, paths):
     section, *_ = keys
-    rpath = paths.folders[section].relative_to(paths.folders.output)
+    rpath = paths.get_folder(keys).relative_to(paths.folders.output)
+
     return (CONFIG[section].get('title', ''),
             f'{rpath.parent}/',
             f'{rpath.name}/',
@@ -197,7 +203,7 @@ def _get_column_header(base, keys, paths):
 def _hdu_products_table(run, paths):
 
     # resolve required data products (paths) from campaign and folder config
-    templates = paths.templates['HDU'].flatten()
+    templates = paths.templates['HDU'].filter('plots').flatten()
     desired_files = _resolve_by_file(run, templates)
     headers = [_get_column_header('HDU', s, paths) for s in templates.keys()]
 
@@ -266,7 +272,7 @@ def write_xlsx(run, paths, overview):
     return _write_nightly_products_xlsx(run, paths, filename, *sheet)
 
 
-def _get_templates(paths, key):
+def _get_templates(paths, key, add_ext=CONFIG.lightcurves.plots.format):
 
     def _append(k, ext):
         return (*k[:-1],
@@ -278,14 +284,14 @@ def _get_templates(paths, key):
 
     def _png_expected(k):
         attr = {'HDU': 'by_file',
-               'DATE': 'by_date'}[key]
+                'DATE': 'by_date'}[key]
         return CONFIG.lightcurves.plots[attr].get(k[0])
 
     #
     tmp = paths.templates[key].copy()
     txt = tmp.pop('lightcurves').map(op.AttrGetter('template'))
 
-    png = txt.map(str.replace, '.txt', '.png').transform(_append, 'png')
+    png = txt.map(str.replace, '.txt', f'.{add_ext}').transform(_append, add_ext)
     png = png.select(_png_expected)
     png = png.transform(_prepend, 'lightcurves')
     txt = txt.transform(_prepend, 'lightcurves').transform(_append, 'txt')

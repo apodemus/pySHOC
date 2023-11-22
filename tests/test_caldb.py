@@ -1,9 +1,7 @@
 
-# third-party
 import pytest
-
-# local
 from pyshoc import calDB
+
 
 # calDB.make(new=True)
 

@@ -4,39 +4,17 @@
 A utility for users to convert between different versions of header keywords.
 """
 
-__version__ = '1.0'
 
+# std
 import os
 import argparse
 
+# third-party
 from astropy.io import fits
+from pyshoc.headers.convert import KEYWORDS
 
-# A mapping of old to new keywords.
-KEYWORDS = [
-    # Example: ('oldkeyword', 'newkeyword'),
-    ('HIERARCH EMREALGAIN', 'EMREALGN'),
-    ('HIERARCH COUNTCONVERTMODE', 'CNTCVTMD'),
-    ('HIERARCH COUNTCONVERT', 'CNTCVT'),
-    ('HIERARCH DETECTIONWAVELENGTH', 'DTNWLGTH'),
-    ('HIERARCH SENSITIVITY', 'SNTVTY'),
-    ('HIERARCH SPURIOUSNOISEFILTER', 'SPSNFLTR'),
-    ('HIERARCH THRESHOLD', 'THRSHLD'),
-    ('HIERARCH PHOTONCOUNTINGENABLED', 'PCNTENLD'),
-    ('HIERARCH NOTHRESHOLDS', 'NSETHSLD'),
-    ('HIERARCH PHOTONCOUNTINGTHRESHOLD1', 'PTNTHLD1'),
-    ('HIERARCH PHOTONCOUNTINGTHRESHOLD2', 'PTNTHLD2'),
-    ('HIERARCH PHOTONCOUNTINGTHRESHOLD3', 'PTNTHLD3'),
-    ('HIERARCH PHOTONCOUNTINGTHRESHOLD4', 'PTNTHLD4'),
-    ('HIERARCH AVERAGINGFILTERMODE', 'AVGFTRMD'),
-    ('HIERARCH AVERAGINGFACTOR', 'AVGFCTR'),
-    ('HIERARCH FRAMECOUNT', 'FRMCNT'),
-]
 
-try:
-    input = raw_input
-except NameError:
-    pass
-
+# ---------------------------------------------------------------------------- #
 
 def get_input(prompt, validator=lambda r: r):
     """Tries to get user input until the validator function succeeds."""
@@ -47,7 +25,7 @@ def get_input(prompt, validator=lambda r: r):
     return response
 
 
-def convert(cube, forward=True):
+def main(cube, forward=True):
     """Convert between different versions of FITS keywords."""
     basename, extension = os.path.splitext(cube.filename())
     hdu = cube[0]
@@ -66,15 +44,15 @@ def convert(cube, forward=True):
     filename = '{0}_converted.fits'.format(basename)
     while os.path.exists(filename):
         overwrite = get_input(
-                "The file '{0}' already exists. Would you like to overwrite it?"
-                " [y/n] ".format(filename),
-                validator=lambda r: r.lower() in ('y', 'n')).lower()
+            "The file '{0}' already exists. Would you like to overwrite it?"
+            " [y/n] ".format(filename),
+            validator=lambda r: r.lower() in ('y', 'n')).lower()
 
         if overwrite == 'y':
             overwrite = get_input(
-                    "Are you sure that you want to overwrite '{0}'? "
-                    "[y/n] ".format(filename),
-                    validator=lambda r: r.lower() in ('y', 'n')).lower()
+                "Are you sure that you want to overwrite '{0}'? "
+                "[y/n] ".format(filename),
+                validator=lambda r: r.lower() in ('y', 'n')).lower()
 
         if overwrite == 'n':
             filename = get_input('Please enter a new filename: ')
@@ -86,8 +64,11 @@ def convert(cube, forward=True):
     print('')
 
 
+# ---------------------------------------------------------------------------- #
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=convert.__doc__)
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument('files', nargs='+', help='Files to convert.')
     parser.add_argument('-r', '--revert', action='store_false',
                         help='Revert the headers of an already converted file.')
@@ -100,5 +81,5 @@ if __name__ == '__main__':
         except IOError as e:
             print(e)
         else:
-            convert(cube, forward=arguments.revert)
+            main(cube, forward=arguments.revert)
             cube.close()

@@ -1,3 +1,0 @@
-"""
-Generate observing night log
-"""

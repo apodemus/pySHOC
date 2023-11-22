@@ -18,8 +18,8 @@ from tsa.outliers import WindowOutlierDetection
 from recipes.array import fold
 from recipes.config import ConfigNode
 from recipes import dicts, io, pprint as ppr
-from recipes.functionals.partial import PlaceHolder as o
 from recipes.decorators import delayed, update_defaults
+from recipes.functionals.partial import PlaceHolder as o
 
 # relative
 from ..timing import Time
@@ -44,7 +44,7 @@ def load_or_compute(path, overwrite, worker, save, plot):
         return lc.io.read_text(path)
 
     # Compute
-    logger.debug('File {!s} does not exist. Computing: {}',
+    logger.debug('File {!s} does not exist. Computing: {}.',
                  motley.apply(str(path), 'darkgreen'),
                  ppr.caller(worker))  # args, kws
     #
@@ -121,7 +121,7 @@ def _get_plot_config(grouping, step):
 
 def plotter(fig, ts, **kws):
     #
-    # logger.debug('{}', pformat(locals()))
+    # logger.debug('{}.', pformat(locals()))
     ax = SubplotHost(fig, 1, 1, 1)
     fig.add_subplot(ax)
 
@@ -246,7 +246,7 @@ def flag_outliers(bjd, flux, nwindow, noverlap, kmax):
 
     oflag = np.isnan(flux)
     for i, flx in enumerate(flux):
-        logger.debug('Source {}', i)
+        logger.debug('Source {}.', i)
         oidx = WindowOutlierDetection(flx, nwindow, noverlap, kmax=kmax)
         logger.info('Flagged {}/{} ({:5.3%}) points as outliers.',
                     (no := len(oidx)), (n := len(bjd)), (no / n))
@@ -326,7 +326,7 @@ def concat_phot(campaign, paths, overwrite=False, plot=False):
 
 def _concat_phot(campaign, paths, overwrite, plot=False):
     # stack time series for target run
-    logger.info('Concatenating {} light curves for run on {}',
+    logger.info('Concatenating {} light curves for run on {}.',
                 len(campaign), campaign[0].date_for_filename)
 
     # data
@@ -340,7 +340,7 @@ def _concat_phot(campaign, paths, overwrite, plot=False):
 
 def extract(run, paths, overwrite=False, plot=False):
 
-    logger.info('Extracting lightcurves for {!r}', run[0].target)
+    logger.info('Extracting lightcurves for {!r}.', run[0].target)
 
     lightcurves = dicts.DictNode()
     for date, obs in run.group_by('date_for_filename').sorted().items():
