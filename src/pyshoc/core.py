@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 from astropy.io import fits
+from astropy.wcs import WCS
 from astropy.time import Time
 from astropy.utils import lazyproperty
 from astropy.coordinates import SkyCoord
@@ -536,6 +537,15 @@ class shocHDU(ImageHDU, Messenger):
         trg = self.header['OBJECT'] = str(name)
         if ot != trg:
             del self.coords
+
+    @property
+    def wcs(self):
+        return self._wcs
+
+    @wcs.setter
+    def wcs(self, wcs):
+        assert isinstance(wcs, WCS)
+        self._wcs = wcs
 
     @property
     def diffraction_limit(self):
