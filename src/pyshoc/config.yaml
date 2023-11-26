@@ -148,7 +148,8 @@ info:
 calibration:
     # Location of calibration database
     # ~/.config/pyshoc/caldb
-    folder:     /media/Oceanus/work/Observing/data/SHOC/calibration/
+    # /media/Oceanus/work/Observing/data/SHOC/calibration/
+    folder:     null
 
     # darks:
     #     filename_format: {obstype}-{camera}-{binning}-{readout}

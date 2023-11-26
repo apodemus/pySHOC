@@ -2,6 +2,7 @@ click
 loguru
 tqdm
 more_itertools
+platformdirs
 
 numpy
 scipy
@@ -15,7 +16,6 @@ cmasher
 mpl_multitab
 
 pyxides
-numpydoc
 decorator
 wcwidth
 git+https://github.com/astromancer/recipes

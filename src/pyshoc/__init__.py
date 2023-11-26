@@ -27,4 +27,10 @@ register_hdu(shocHDU)
 
 
 # initialize calibration database
-calDB = CalDB(CONFIG.calibration.folder)
+if not (folder := CONFIG.calibration.get('folder')):
+    from platformdirs import user_data_path
+
+    folder = user_data_path('pyshoc') / 'caldb'
+
+# Load calibration database
+calDB = CalDB(folder)
