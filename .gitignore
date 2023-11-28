@@ -22,6 +22,11 @@ tests/j1928.py
 tests/J0354.py
 tests/polars.py
 tests/_test*
+tests/_test_bjd.py
+tests/_test_core.py
+tests/_test_logging.py
+
+
 .travis.yml
 
 
