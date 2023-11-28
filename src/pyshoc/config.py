@@ -231,7 +231,7 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         logger.info('The following folders will be created: {}.', required)
         for path in required:
             logger.debug('Creating folder: {}.', path)
-            path.mkdir()
+            path.mkdir(parents=True)
 
     def resolve_folders(self, output):
         # resolve internal folder references $EXAMPLE. Prefix paths where needed
