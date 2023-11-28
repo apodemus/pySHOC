@@ -186,7 +186,7 @@ plotting: #&plotting
 # Sample image statistics 
 samples:
     tab:                [Detection, Sample Images] # for tables
-    folder:             $INFO/samples/
+    folder:             $REGISTRY//samples/
     filename:           $HDU$FRAMES.png
 
     params:
@@ -297,12 +297,13 @@ registration:
 
 
 # ---------------------------------------------------------------------------- #
-# source tracking 
+# camera tracking 
 tracking:
-    # tables
-    title:      Tracking
+    # gui tab
+    tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
+    overwrite:  True
     folder:     $PHOT/tracking/$HDU/
     filenames:  
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
@@ -316,7 +317,7 @@ tracking:
     params:
         dilate:             2
         circularize:        True
-        njobs:              1
+        njobs:              -1
 
         centroids:
             # features used for tracking
@@ -384,7 +385,7 @@ tracking:
             size:   10
             # fontweight:bold
 
-        position:
+        positions:
         # -------------------------------------------------------------------- #
             filename:           positions-source$SOURCE.png
 
@@ -444,7 +445,7 @@ tracking:
         # -------------------------------------------------------------------- #
         time_series:
             tab:            Time Series
-            filename:       positions-ts.png
+            filename:       positions-dither-ts.png
             figsize:        [12, 5]
 
 
