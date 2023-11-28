@@ -1,3 +1,4 @@
+
 import pytest
 from astropy import time
 from pyshoc.timing import Date, TimeDelta
@@ -5,7 +6,8 @@ from pyshoc.timing import Date, TimeDelta
 
 def test_date():
     Date('2012-12-12') - Date('2012-12-10')
-    
+
+
 class TestTiming:
     @pytest.mark.parametrize(
         't',
@@ -18,4 +20,4 @@ class TestTiming:
         ])
     def test_type(self, t):
         assert type(t) is TimeDelta
-        print(t)
+        # print(t)

@@ -3,9 +3,6 @@ import pytest
 from pyshoc import calDB
 
 
-# calDB.make(new=True)
-
-
 @pytest.fixture(params=('flat', 'dark'))
 def kind(request):
     return request.param
@@ -13,8 +10,8 @@ def kind(request):
 
 class TestCalDB:
 
-    def test_make(self, kind):
-        calDB.make(kind, False)
+    def test_make(self):
+        calDB.make(False)
 
     def test_load(self, kind):
-        calDB.load(kind, False)
+        calDB.load(kind, master=False)
