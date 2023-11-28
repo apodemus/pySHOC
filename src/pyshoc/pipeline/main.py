@@ -662,7 +662,7 @@ def plot_drizzle(fig, *indices, filename):
 # ---------------------------------------------------------------------------- #
 # Tracking
 
-def track(run, reg, paths, ui, overwrite=False):
+def track(run, reg, paths, ui, overwrite=False, njobs=-1):
 
     logger.section('Source Tracking')
     spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
@@ -671,33 +671,33 @@ def track(run, reg, paths, ui, overwrite=False):
 
     filenames = paths.files.tracking
     images_labels = list(itt.islice(zip(reg, reg.labels_per_image), 1, None))
-
+    overwrite = overwrite or CONFIG.tracking.overwrite
     for i, (hdu, (img, labels)) in enumerate(zip(run, images_labels), 1):
+        # check if we need to run
         if overwrite or _tracker_missing_files(filenames, hdu, spanning):
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
-            # break
             # path = products.resolve_path(paths.folders.tracking, hdu)
-            tracker = _track(hdu, img.seg, spanning, coords, paths, ui, overwrite)
+            tracker = _track(hdu, img.seg, spanning, coords,
+                             paths, ui, overwrite, njobs=njobs)
 
-        # return ui
     logger.info('Source tracking complete.')
     return spanning
 
 
 def _tracker_target_files(templates, hdu, sources):
     desired = templates.map(products.resolve_path, hdu)
-    files, position_plots = desired.split('position')
+    files, position_plots = desired.split('positions')
     target_files = {
         key: products.resolve_path(path, hdu)
         for key, path in files.flatten().items()
     }
 
     # plots
-    _ppk, position_plots = position_plots.flatten().popitem()
+    key, position_plots = position_plots.flatten().popitem()
     position_plots = str(position_plots)
     target_files.update({
-        (*_ppk, i): Path(position_plots.replace('$SOURCE', str(i)))
+        (*key, i): Path(position_plots.replace('$SOURCE', str(i)))
         for i in sources
     })
     return target_files
@@ -721,9 +721,10 @@ def _tracker_missing_files(templates, hdu, sources):
 @update_defaults(CONFIG.tracking.params)
 def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs=-1):
 
-    logger.info(motley.stylize('Launching tracker for {:|darkgreen}. coords = {}'),
+    logger.info(motley.stylize('Launching tracker for {:|darkgreen}.\ncoords = {}'),
                 hdu.file.name, coords)
 
+    # Make circular regions for measuring centroids
     if (cfg := CONFIG.tracking).params.circularize:
         seg = seg.circularize()
 
@@ -734,8 +735,8 @@ def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs
 
     # plot
     if cfg.plot:
-        tmp, kws = cfg.plots.positions.split('filename')
-        tmp = str(products.resolve_path(tmp, hdu))
+        kws, tmp = cfg.plots.positions.split('filename')
+        tmp = str(products.resolve_path(tmp.filename, hdu))
 
         factory = PlotFactory(ui)   # static args
         task = factory(tracker.plot.positions)(fig=o, **kws)
@@ -744,8 +745,8 @@ def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs
         tab = (*cfg.tab, *get_tab_key(hdu))
         for j in tracker.use_labels:
             # plot source location features
-            # factory[(*tab, f'source {j}')] = TaskRunner(task, tmp.format(j), overwrite)
-            factory.add_task(task, (*tab, f'source {j}'), tmp.format(j), overwrite)
+            factory.add_task(task, (*tab, f'source {j}'),
+                             tmp.replace('$SOURCE', str(j)), overwrite)
 
         # plot positions displacement time series
         (filename, title), kws = (cfg.plots.time_series, ('filename', 'tab'))
@@ -807,7 +808,7 @@ def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws)
 # ---------------------------------------------------------------------------- #
 
 @trace
-def main(paths, target, telescope, top, plot, show_cutouts, overwrite):
+def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
     #
     # from obstools.phot import PhotInterface
 

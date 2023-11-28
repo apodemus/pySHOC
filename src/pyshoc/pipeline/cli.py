@@ -199,7 +199,8 @@ def enable_local_caching(mapping):
               help='For single file mode, the slice of data cube to consider. '
                    'Useful for debugging. Ignored if processing multiple fits '
                    'files.')
-#
+@click.option('-j', '--njobs', default=-1, show_default=True, type=click.INT)
+
 # @click.option('--timestamps', type=click.Path(),
 #               help='Location of the gps timestamp file for observation trigger '
 #                    'time. Necessary for older SHOC data where this information '
@@ -225,7 +226,8 @@ def enable_local_caching(mapping):
 @click.version_option()
 def main(files_or_folder, output='./.pyshoc',
          target=None, telescope=None,
-         top=5, apertures='ragged', sub=...,
+         top=5, apertures='ragged',
+         sub=..., njobs=-1,
          overwrite=False, cache=None,
          plot=True, cutouts=True):
     """
@@ -257,7 +259,7 @@ def main(files_or_folder, output='./.pyshoc',
     # try:
 
     # pipeline main routine
-    pipeline.main(paths, target, telescope, top, plot, cutouts, overwrite)
+    pipeline.main(paths, target, telescope, top, njobs, plot, cutouts, overwrite)
 
     # except Exception as err:
     #     # catch errors so we can safely shut down any remaining processes
