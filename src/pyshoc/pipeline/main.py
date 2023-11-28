@@ -27,7 +27,6 @@ from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
 from recipes import io, op
 from recipes.iter import cofilter
-from recipes.dicts import DictNode
 from recipes.utils import not_null
 from recipes.functionals import negate
 from recipes.shell import is_interactive

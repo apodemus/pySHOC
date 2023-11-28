@@ -13,7 +13,7 @@ from loguru import logger
 
 # local
 import motley
-from recipes.misc import get_terminal_size
+from recipes.shell import terminal
 from recipes.logging import RepeatMessageHandler, TimeDeltaFormatter
 
 # relative
@@ -51,7 +51,7 @@ level_formats = {
 
 # custom level for sectioning
 level_formats['SECTION'] = motley.stylize(cfg.console.section, '',
-                                          width=get_terminal_size()[0])
+                                          width=terminal.get_size()[0])
 logger.level('SECTION', no=15)
 Logger = type(logger)
 Logger.section = partialmethod(Logger.log, 'SECTION')

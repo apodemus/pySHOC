@@ -11,9 +11,9 @@ from loguru import logger
 
 # local
 import motley
-from recipes.dicts import DictNode
 from recipes.string import sub
 from recipes.caching import cached
+from recipes.dicts import DictNode
 from recipes.config import ConfigNode
 from recipes.utils import ensure_tuple
 from recipes.functionals import always, negate

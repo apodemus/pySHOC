@@ -15,7 +15,7 @@ import more_itertools as mit
 # local
 import motley
 from recipes import string
-from recipes.misc import get_terminal_size
+from recipes.shell import terminal
 
 
 # ---------------------------------------------------------------------------- #
@@ -77,7 +77,7 @@ def make_banner(format, subtitle='', width=None, **style):
     from pyshoc import __version__
     from sys import version_info
 
-    width = int(width or get_terminal_size()[0])
+    width = int(width or terminal.get_size()[0])
     halfwidth = width // 2
 
     now = datetime.now()
