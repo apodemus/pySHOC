@@ -380,11 +380,13 @@ class Messenger:
 class shocHDU(ImageHDU, Messenger):
 
     __shoc_hdu_types = {}
+
     filename_format = None
     _FilenameHelperClass = FilenameHelper
 
     @classmethod
     def match_header(cls, header):
+        # for astropy constructor mechanism
         return ('SERNO' in header)
 
     def __getnewargs__(self):
@@ -393,7 +395,7 @@ class shocHDU(ImageHDU, Messenger):
 
     def __new__(cls, data, header, obstype=None, *args, **kws):
 
-        # handle direct init here eg:   shocDarkHDU(data, header)
+        # handle direct init here eg: >>> shocDarkHDU(data, header)
         if cls in cls.__shoc_hdu_types.values():
             return super().__new__(cls)
 
@@ -406,7 +408,7 @@ class shocHDU(ImageHDU, Messenger):
         # header by checking those.
         if any(kw not in header for kw in headers.HEADER_KEYS_MISSING_OLD):
             age = 'Old'
-            
+
         if not isinstance(header, fits.header._BasicHeader):
             headers.convert(header)
 
@@ -421,9 +423,10 @@ class shocHDU(ImageHDU, Messenger):
 
         # Choose subtypes of `shocHDU` here - simpler than using `match_header`
         class_name = f'shoc{age}{kind}{suffix}'
-        cls.logger.debug('Identified class_name={!r}, obstype={!r}.',
-                         class_name, obstype)
-        if class_name not in ['shocHDU', *cls.__shoc_hdu_types]:
+        if class_name != cls.__name__:
+            cls.logger.debug('Identified hdu class={!r}, obstype={!r}.',
+                            class_name, obstype)
+        if class_name not in ('shocHDU', *cls.__shoc_hdu_types):
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: {!r:}.', obstype)
 
@@ -1104,7 +1107,7 @@ class LatexWriter:
 
     def _tabular_body(self,
                       booktabs=True, unicodemath=False,
-                      flag_fmt='$\:^{{{flag}}}$',
+                      flag_fmt=R'$\:^{{{flag}}}$',
                       foot_fmt=R'\hspace{{1eM}}$^{{{flag}}}$\ {info}\\',
                       summary_fmt=R'\hspace{{1eM}}{{{key} = {val}¿ [{unit}]?}}\\',
                       timing_flags=None,
@@ -1119,7 +1122,7 @@ class LatexWriter:
             else:
                 timing_flags = {-1: '!',
                                 0:  '*',
-                                1:  '\dagger'}  # '
+                                1:  R'\dagger'}  # '
 
         # change flags symbols temporarily
         with temporary(Trigger, FLAG_SYMBOLS=timing_flags):
@@ -1135,7 +1138,7 @@ class LatexWriter:
                 'readout.mode':    Column('Readout Mode'),
                 'binning':         Column('Binning', unit='y, x', align='^',
                                           fmt=R'{0.y}\times{0.x}'),
-                'timing.exp':      Column('$t_{\mathrm{exp}}$', fmt=str, unit='s',
+                'timing.exp':      Column(R'$t_{\mathrm{exp}}$', fmt=str, unit='s',
                                           flags=op.attrgetter('t.trigger.texp_flag')),
                 'timing.duration': Column('Duration', fmt=hms_latex, unit='hh:mm:ss',
                                           total=True)},
@@ -1143,7 +1146,7 @@ class LatexWriter:
                 frame=False,
                 hlines=False,
                 col_head_style=None,
-                borders={...: '& ', -1: r'\\'},
+                borders={...: '& ', -1: R'\\'},
                 summary=dict(footer=True, n_cols=1, bullets='', align='<',
                              pillars=['t0'], fmt=summary_fmt),
                 too_wide=False,
@@ -1158,7 +1161,7 @@ class LatexWriter:
                 foot_fmt=foot_fmt
             )
             tabulate.parent = self.parent
-            with temporary(Table, _nrs_header='\#'):  # HACK for latex symbol
+            with temporary(Table, _nrs_header=R'\#'):  # HACK for latex symbol
                 tbl = tabulate(title=False, col_groups=None, **kws)
 
         # HAck out the footnotes for formatting downstream
@@ -1193,8 +1196,8 @@ class LatexWriter:
         # options
         star = '*' if star else ''
         cap = f'[{{{cap!s}}}]' if cap else ''
-        caption = rf'\caption{cap}{{{caption}}}' if caption else ''
-        label = f'\\label{{{label}}}' if label else ''
+        caption = fR'\caption{cap}{{{caption}}}' if caption else ''
+        label = fR'\\label{{{label}}}' if label else ''
 
         #
         tbl, footnotes = self._tabular_body(booktabs, unicodemath)
