@@ -4,4 +4,3 @@ pytest
 docsplice
 spiceypy
 barycorrpy
-git+https://github.com/astromancer/motley

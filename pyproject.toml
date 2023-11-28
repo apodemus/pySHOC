@@ -4,9 +4,7 @@ description = "Tools for data analysis and reduction of data from the Sutherland
 authors = [
     {name = "Hannes Breytenbach", email = "hannes@saao.ac.za"}
 ]
-dynamic = ["version", "readme"]
 license = {text = "MIT"}
-requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -15,6 +13,36 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
+dynamic = ["version", "readme", "optional-dependencies"]
+requires-python = ">=3.8"
+dependencies = [
+    "click",
+    "loguru",
+    "tqdm",
+    "more_itertools",
+    "platformdirs",
+    "anytree",
+    "openpyxl",
+    "decorator",
+    "pyxides",
+
+    "numpy",
+    "scipy",
+    "astropy",
+    "scikit-learn",
+    "joblib",
+    "Pillow",
+    "matplotlib",
+    "aplpy",
+    "cmasher",
+    "mpl_multitab",
+
+    "recipes",
+    "obstools",
+    "motley",
+    "scrawl",
+    "tsa"
+]
 
 [project.scripts]
 pyshoc = "pyshoc.pipeline.run:main"
@@ -22,9 +50,6 @@ pyshoc = "pyshoc.pipeline.run:main"
 [project.urls]
 "Homepage" = "https://github.com/astromancer/pyshoc"
 "Bug Tracker" = "https://github.com/astromancer/pyshoc/issues"
-
-[project.optional-dependencies]
-tests = ["pytest"]
 
 [build-system]
 build-backend = "setuptools.build_meta"
@@ -39,11 +64,14 @@ requires = [
 where = ["src"]
 
 [tool.setuptools.dynamic]
-readme = {file = "README.md", content-type = "text/markdown"}
 version = {attr = "pyshoc._version.version"}
+readme = {file = "README.md", content-type = "text/markdown"}
+optional-dependencies.test = { file = ["requirements-dev.txt"] }
+
 
 [tool.setuptools_scm]
 write_to = "src/pyshoc/_version.py"
+
 
 [tool.tox]
 legacy_tox_ini = """
@@ -58,5 +86,5 @@ deps =
     -rrequirements-dev.txt
 # run the tests
 # ... or run any other command line tool you need to run here
-commands = pytest {posargs} # substitute with tox positional arguments
+commands = pytest -vvsx # substitute with tox positional arguments
 """

@@ -11,8 +11,8 @@ pip install pyshoc
 ```
 
 ## Use
-To run the reduction pipeline on a set of fits files (observations of a single 
-source):
+To run the reduction pipeline on a set of fits files located in a terget diretory
+(multiple observations of a single target, possibly including calibration files):
 ```shell
 pyshoc /path/to/data/folder -o /path/to/output/products -tel 74 --target "CTCV J1928-5001"
 ```
