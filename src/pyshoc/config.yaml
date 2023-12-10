@@ -1,4 +1,9 @@
 # ---------------------------------------------------------------------------- #
+# Configuration file for pyshoc
+# {version}
+# ---------------------------------------------------------------------------- #
+
+# ---------------------------------------------------------------------------- #
 # prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
 
 preferences:
@@ -104,7 +109,7 @@ logging:
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
             {{{name}.{function}:s|green}:{line:d|orange}: <52}|
-            {{level.name}: {message}:|{style}}
+            {{level.name: <6}| {message}:|{style}}
         section: |
 
             {0:━<{width}}
@@ -185,7 +190,7 @@ plotting: #&plotting
 # ---------------------------------------------------------------------------- #
 # Sample image statistics 
 samples:
-    tab:                [Detection, Sample Images] # for tables
+    tab:                [Sample Images] # Detection
     folder:             $REGISTRY//samples/
     filename:           $HDU$FRAMES.png
 
@@ -212,13 +217,15 @@ samples:
             raw:
                 tab:            [Overview, Thumbnails, Raw]
                 filename:       thumbnails/thumbnails.png
+                overwrite:      False
                 figsize:        [9, 7.5]
+
                 plims:          [0.25, 99.9]
                 title_kws:
                     color:          w
                     size:           xx-small
                     fontweight:     bold
-                overwrite:      False
+
 
             calibrated:
                 tab:            [Overview, Thumbnails, Calibrated]
@@ -244,7 +251,7 @@ detection: &source_detection
         cutouts: True
 
 # aliases
-detect:          *source_detection #
+# detect:          *source_detection #
 # source_detection:   *source_detection #
 
 
@@ -303,7 +310,6 @@ tracking:
     tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    overwrite:  True
     folder:     $PHOT/tracking/$HDU/
     filenames:  
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
@@ -321,10 +327,11 @@ tracking:
 
         centroids:
             # features used for tracking
-            com:          1
+            com:            1
             peak:
-                upsample: 1     # note, changing this will siginificantly affect compute times
+                upsample:   1
                 # filter: lanczos
+                # note, upsampling will siginificantly affect compute times
 
         pre_subtract:       True
         # subtract background from image prior to computing features
@@ -445,7 +452,7 @@ tracking:
         # -------------------------------------------------------------------- #
         time_series:
             tab:            Time Series
-            filename:       positions-dither-ts.png
+            filename:       displacement-ts.png
             figsize:        [12, 5]
 
 
@@ -505,15 +512,18 @@ lightcurves:
             diff0:      1
             decor:      1
 
-        # plot parametes
-        plims:          [-0.1, 99.99]
-        xlabel:
-            top:        Time (UTC)
-            bottom:     Δt (s)
-        ylabel:         Relative Flux
-
+        # figure
         subplotspec:
             top:        0.81
             bottom:     0.1
             left:       0.065
             right:      0.94
+
+        # time series plot parametes
+        plims:          [-0.1, 99.99]
+        xlabel:
+            top:        Time (UTC)
+            bottom:     Δt (s)
+            pad:       -17.5
+        ylabel:         Relative Flux
+

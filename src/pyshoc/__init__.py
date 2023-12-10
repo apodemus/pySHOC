@@ -25,12 +25,5 @@ except PackageNotFoundError:
 # register HDU classes (must happen before CalDB init)
 register_hdu(shocHDU)
 
-
-# initialize calibration database
-if not (folder := CONFIG.calibration.get('folder')):
-    from platformdirs import user_data_path
-
-    folder = user_data_path('pyshoc') / 'caldb'
-
 # Load calibration database
-calDB = CalDB(folder)
+calDB = CalDB(CONFIG.calibration.folder)

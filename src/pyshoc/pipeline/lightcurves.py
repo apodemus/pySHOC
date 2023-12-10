@@ -129,20 +129,20 @@ def plotter(fig, ts, **kws):
     jd0 = int(ts.t[0]) - 0.5
     utc0 = Time(jd0, format='jd').utc.iso.split()[0]
     #
-    axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45, utc0)
 
     # plot
+    axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45)
     tsp = ts.plot(ax, t0=[0], tscale=SPD,
                   **{**dict(plims=(-0.1, 99.99), show_masked=True), **kws})
-
     axp.xaxis.set_minor_formatter(DateTick(utc0))
     _rotate_tick_labels(axp, 45, True)
 
-    ax.set(xlabel=CONFIG.plots.xlabel.bottom, ylabel=CONFIG.plots.ylabel)
-    axp.set_xlabel(CONFIG.plots.xlabel.top, labelpad=-17.5)
+    cfg = CONFIG.plots
+    ax.set(xlabel=cfg.xlabel.bottom, ylabel=cfg.ylabel)
+    axp.set_xlabel(cfg.xlabel.top, labelpad=cfg.xlabel.pad)
 
     # fig.tight_layout()
-    fig.subplots_adjust(**CONFIG.plots.subplotspec)
+    fig.subplots_adjust(**cfg.subplotspec)
 
     # if overwrite or not filename.exists():
     #     save_fig(fig, filename)
@@ -182,7 +182,8 @@ def load_raw(hdu, infile, outfile, overwrite=False, plot=False):
 
     data = load_or_compute(
         # load
-        resolve_path(outfile, hdu), overwrite,
+        resolve_path(outfile, hdu),
+        CONFIG.raw.get('overwrite', overwrite),
         # compute
         delayed(load_memmap)(hdu, resolve_path(infile, hdu)),
         # save
@@ -215,7 +216,8 @@ def load_flagged(hdu, paths, overwrite=False, plot=False):
     files = paths.files
     return load_or_compute(
         # load
-        resolve_path(files.lightcurves.flagged, hdu), overwrite,
+        resolve_path(files.lightcurves.flagged, hdu),
+        CONFIG.flagged.get('overwrite', overwrite),
         # compute
         delayed(_flag_outliers)(hdu,
                                 resolve_path(files.tracking.source_info, hdu),
@@ -302,7 +304,7 @@ def _diff0_phot(hdu, paths, c=1, meta=None, overwrite=False):
 
 # ---------------------------------------------------------------------------- #
 
-def concat_phot(campaign, paths, overwrite=False, plot=False):
+def concat_phot(campaign, paths, overwrite=None, plot=False):
     #
     cfg = CONFIG.find('concat')
     title, = cfg.find('title').flatten().values()
@@ -314,7 +316,8 @@ def concat_phot(campaign, paths, overwrite=False, plot=False):
 
     return load_or_compute(
         # load
-        resolve_path(paths.files.lightcurves.diff0.concat, campaign[0]), overwrite,
+        resolve_path(paths.files.lightcurves.diff0.concat, campaign[0]),
+        cfg.get('overwrite', overwrite),
         # compute
         delayed(_concat_phot)(campaign, paths, overwrite, plot),
         # save
@@ -343,9 +346,10 @@ def extract(run, paths, overwrite=False, plot=False):
     logger.info('Extracting lightcurves for {!r}.', run[0].target)
 
     lightcurves = dicts.DictNode()
-    for date, obs in run.group_by('date_for_filename').sorted().items():
+    for date, obs in run.group_by('t.date_for_filename').sorted().items():
         date = str(date)
         # year, day = date.split('-', 1)
+
         bjd, rflux, rsigma = concat_phot(obs, paths, overwrite, plot)
         lightcurves['diff0'][date] = ts = TimeSeries(bjd, rflux.T, rsigma.T)
 

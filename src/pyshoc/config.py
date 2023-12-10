@@ -8,6 +8,7 @@ from string import Template
 
 # third-party
 from loguru import logger
+from platformdirs import user_config_path, user_data_path
 
 # local
 import motley
@@ -31,24 +32,35 @@ CONFIG = ConfigNode.load_module(__file__)
 
 
 # load cmasher if needed
+# ---------------------------------------------------------------------------- #
 plt = CONFIG.plotting
 
-for cmap in CONFIG.select('cmap').filtered(values=None).flatten().values():
-    if cmap.startswith('cmr.'):
+for _ in CONFIG.select('cmap').filtered(values=None).flatten().values():
+    if _.startswith('cmr.'):
         # load the cmasher colormaps into the matplotlib registry
         import cmasher
         break
 
 
+# user details
+# ---------------------------------------------------------------------------- #
+user_config_path = user_config_path('pyshoc')
+
+# calibration database default
+if not CONFIG.calibration.get('folder'):
+    CONFIG.calibration['folder'] = user_data_path('pyshoc') / 'caldb'
+
 # set remote username default
-if CONFIG.remote.username is None:
+if not CONFIG.remote.get('username'):
     CONFIG.remote['username'] = get_username()
 
 
+# logging
+# ---------------------------------------------------------------------------- #
 # uppercase logging level
 for sink, cfg in CONFIG.logging.select(('file', 'console')).items():
     CONFIG.logging[sink, 'level'] = cfg.level.upper()
-del cfg
+del sink, cfg
 
 
 # stylize log repeat handler
@@ -62,6 +74,8 @@ prg['bar_format'] = motley.stylize(prg.bar_format)
 del prg
 
 
+# GUI
+# ---------------------------------------------------------------------------- #
 # Convert tab specifiers to tuple
 CONFIG.update(CONFIG.select('tab').map(ensure_tuple))
 
@@ -226,7 +240,8 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         required = set(filter(negate(Path.exists), required))
 
         if not required:
-            logger.info('All folders in output tree already exist.')
+            logger.debug('All folders in output tree already exist.')
+            return
 
         logger.info('The following folders will be created: {}.', required)
         for path in required:
