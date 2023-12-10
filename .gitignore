@@ -3,6 +3,7 @@
 ###################################
 # old code / needs integrating
 dev
+dep-graph.svg
 src/pyshoc/pipeline/new.py
 src/pyshoc/pipeline/parse.py
 src/pyshoc/pipeline/banner/_banner.txt
