@@ -17,9 +17,12 @@ from recipes.string import most_similar
 # relative
 from .. import CONFIG, shocHDU
 from ..core import get_tel
+from .._version import version as VERSION
 from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
+
+# ---------------------------------------------------------------------------- #
 
 def check_files_exist(files_or_folder):
     for path in files_or_folder:
@@ -114,13 +117,41 @@ def resolve_target(_ctx, _param, value):
     return value
 
 
-def setup(root, output, use_cache):
+def setup(root, output, overwrite, use_cache):
     """Setup results folder tree."""
 
     root = Path(root).resolve()
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
 
+    # ------------------------------------------------------------------------ #
+    # check for previous version stamp
+    logger.debug('--overwrite is {}.', overwrite)
+    vcf = output / '.version'
+    if overwrite is None:
+        if vcf.exists():
+            old_version = vcf.read_text().strip()
+            if overwrite := (old_version != str(VERSION)):
+                logger.info(
+                    'Pipeline results are from an older version of the '
+                    'pipeline: {}. Current version is {}. Previous results will'
+                    ' be overwritten with new results.', old_version, VERSION
+                )
+        else:
+            overwrite = False
+            logger.info('No verion file available at output {!s}. Overwrite is '
+                        'False.', vcf)
+    else:
+        logger.info('Previous results will be {}.',
+                    'overwritten' if overwrite else 'used if available')
+    
+    if overwrite:
+        vcf.write_text(VERSION)
+    
+    #
+    use_cache = bool(not overwrite if use_cache is None else use_cache)
+
+    # ------------------------------------------------------------------------ #
     # path helper
     paths = PathConfig.from_config(root, output, CONFIG)
     paths.create(ignore='calibration')
@@ -147,7 +178,7 @@ def setup(root, output, use_cache):
             shocHDU.detection._algorithm.__call__: paths.folders.cache / 'source-regions.pkl'
         })
 
-    return paths
+    return paths, overwrite
 
 
 def enable_local_caching(mapping):
@@ -200,7 +231,6 @@ def enable_local_caching(mapping):
                    'Useful for debugging. Ignored if processing multiple fits '
                    'files.')
 @click.option('-j', '--njobs', default=-1, show_default=True, type=click.INT)
-
 # @click.option('--timestamps', type=click.Path(),
 #               help='Location of the gps timestamp file for observation trigger '
 #                    'time. Necessary for older SHOC data where this information '
@@ -209,15 +239,16 @@ def enable_local_caching(mapping):
 #                    ' The default is to look for a file named `gps.sast` or '
 #                    '`gps.utc` in the processing root folder.')
 #
-@click.option('-w', '--overwrite', flag_value=True,  default=False,
+@click.option('-w', '--overwrite', flag_value=True, default=None,
               help='Overwite pre-existing data products. Default is False => '
                    "Don't re-compute anything unless explicitly asked to. This "
                    'is safer and can save time on multiple re-runs of the '
-                   'pipeline for the same data, but with a different kind of '
-                   'aperture, etc.')
+                   'pipeline for the same data, but with different '
+                   'configurations, for example.')
 #
 @click.option('--cache/--no-cache', default=True,
-              help='Enable/Disable caching.')
+              help=f'Enable/Disable persistent caching. Cache location is '
+                   'configurable in `config.yaml`')
 #
 @click.option('--plot/--no-plot', default=True,
               help='Show figure windows.')
@@ -239,13 +270,9 @@ def main(files_or_folder, output='./.pyshoc',
     logger.section('Setup')
     root = get_root(files_or_folder)
     output = resolve_output(output, root)
-    logger.debug('--overwrite is {}.', overwrite)
-    logger.info('Previous results will be {}.',
-                'overwritten' if overwrite else 'used if available')
 
     # setup
-    cache = bool(not overwrite if cache is None else cache)
-    paths = setup(root, output, cache) # 
+    paths, overwrite = setup(root, output, overwrite, cache)
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and
