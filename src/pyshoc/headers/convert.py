@@ -51,7 +51,7 @@ def convert(header, forward=True):
     """Convert old HIERARCH keywords to new short equivalents"""
     success = True
     if to_rename := get_old_keys(header):
-        logger.debug(
+        logger.bind(indent=True).debug(
             'The following header keywords will be renamed:' +
             ('\n{: <35}--> {:}' * len(to_rename)),
             *mit.interleave(to_rename, map(KEYWORDS.get, to_rename))

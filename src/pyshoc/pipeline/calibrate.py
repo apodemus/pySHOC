@@ -31,7 +31,7 @@ COLOURS = CONFIG.console.colors
 def calibrate(run, path=None, overwrite=False):
     """
     Calibrate the observing campaign in `run`. 
-    
+
     Master calibration frames are search for, first by checking if any of the
     `run`'s constituent `hdu`s are flagged as calibration files in the fits
     headers. Failing that, we search the file system folder in `path` if
@@ -84,7 +84,7 @@ def calibrate(run, path=None, overwrite=False):
         gobj.set_calibrators(master_dark, master_flats)
         logger.info('Calibration frames set.')
     else:
-        logger.info('No calibration frames found in {:s}.', run)
+        logger.bind(indent=True).info('No calibration frames found in {:s}.', run)
 
     return gobj, master_dark, master_flats
 
@@ -169,7 +169,7 @@ def find(run, kind, path=None, ignore_masters=False):
             need -= set(cal.attrs(*attx))
 
     if need:
-        logger.warning(textwrap.dedent(
+        logger.bind(indent=2).warning(textwrap.dedent(
             '''\
             Could not find {:s} for observed data with instrumental {:s}
             {:s}
@@ -183,9 +183,11 @@ def find(run, kind, path=None, ignore_masters=False):
 
     # finally, group for convenience
     matched = run.match(cal.join(masters), *attrs)
-    logger.info('The following files were matched:\n{:s}\n',
-                matched.pformat(title=f'Matched {kind.title()}',
-                                g1_style=COLOURS[kind]))
+    logger.bind(indent=2).info(
+        'The following files were matched:\n{:s}\n',
+        matched.pformat(title=f'Matched {kind.title()}',
+                        g1_style=COLOURS[kind])
+    )
 
     return gcal, masters
 

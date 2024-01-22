@@ -101,7 +101,7 @@ def get_previous(run, paths):
     _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
 
     #
-    logger.opt(lazy=True).debug(
+    logger.bind(indent=' ').opt(lazy=True).debug(
         'Found previous data products: \n{}\n{}\n{}',
 
         # overview

@@ -25,13 +25,13 @@ from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
-from recipes import io, op
+from recipes.flow import Catch
 from recipes.iter import cofilter
 from recipes.utils import not_null
 from recipes.functionals import negate
+from recipes import io, op, pprint as pp
 from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
-from recipes.decorators.reporting import trace
 from recipes.string import remove_prefix, shared_prefix
 from recipes.functionals.partial import PlaceHolder as o
 
@@ -340,8 +340,10 @@ def preview(run, paths, info, ui, plot, overwrite):
 
     # Print summary table
     daily = run.group_by('date')  # 't.date_for_filename'
-    logger.info('Observations of {} by date:\n{:s}\n', info['target'],
-                daily.pformat(titled=repr))
+    logger.bind(indent=' ').info(
+        'Observations of {} by date:\n{:s}\n', info['target'],
+        daily.pformat(titled=repr)
+    )
 
     # write observation log latex table
     paths.files.info.obslog.write_text(
@@ -482,6 +484,8 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
             task = factory(plot_drizzle)(fig=o, filename=filename)
             factory.add_task(task, config.drizzle.tab,
                              filename.with_suffix('.png'), overwrite)
+
+    logger.success(' Image Registration complete!')
 
     return reg
 
@@ -867,19 +871,21 @@ def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
         ui.set_focus(*cfg.plots.mosaic.tab, survey)
         ui.show()
 
-        if not is_interactive():
-            # sys.exit(app.exec_())
-            app.exec_()
+        logger.section('UI shutdown')
 
         # Run incomplete plotting tasks
+        trap = Catch(action=logger.warning,
+                     message=('Could not complete plotting task '
+                              'due the following {err.__class__.__name__}: {err}'))
         getter = op.AttrVector('plot.func.filename', default=None)
         tabs = list(ui.tabs._leaves())
         filenames, tabs = cofilter(getter.map(tabs), tabs)
         unsaved, tabs = map(list, cofilter(negate(Path.exists), filenames, tabs))
         if n := len(unsaved):
             logger.info('Now running {} incomplete tasks:', n)
-            for tab in tabs:
-                tab.run_task()
+            with trap:
+                for tab in tabs:
+                    tab.run_task()
 
     # ------------------------------------------------------------------------ #
     logger.section('Finalize')
@@ -890,3 +896,6 @@ def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
     # Write data products spreadsheet
     products.write_xlsx(run, paths, overview)
     # This updates spreadsheet with products computed above
+
+    logger.info('Thanks for using pyshoc! Please report any issues at: '
+                'https://github.com/astromancer/pyshoc/issues.')

@@ -6,7 +6,6 @@ Logging config for pyshoc pipeline.
 # std
 import warnings
 from pathlib import Path
-from functools import partialmethod
 
 # third-party
 from loguru import logger
@@ -14,7 +13,8 @@ from loguru import logger
 # local
 import motley
 from recipes.shell import terminal
-from recipes.logging import RepeatMessageHandler, TimeDeltaFormatter
+from recipes.logging import (ParagraphWrapper, RepeatMessageHandler,
+                             TimeDeltaFormatter)
 
 # relative
 from .. import CONFIG
@@ -49,12 +49,17 @@ level_formats = {
     for level in logger._core.levels.values()
 }
 
+
 # custom level for sectioning
+def section(message):
+    logger.bind(indent=False).log('SECTION', message, depth=1)
+
+
 level_formats['SECTION'] = motley.stylize(cfg.console.section, '',
                                           width=terminal.get_size()[0])
 logger.level('SECTION', no=15)
 Logger = type(logger)
-Logger.section = partialmethod(Logger.log, 'SECTION')
+Logger.section = staticmethod(section)
 
 
 # ---------------------------------------------------------------------------- #
@@ -111,7 +116,8 @@ def config():
         # File sink is added by pipeline.cli.setup once output path is known
         handlers=[{
             # console handler
-            'sink':     RepeatMessageHandler(template=cfg.console.repeats),
+            'sink':     RepeatMessageHandler(ParagraphWrapper(indent=f'{"| ": >75}'),
+                                             template=cfg.console.repeats),
             'level':    cfg.console.level,
             'catch':    cfg.console.catch,
             'colorize': False,

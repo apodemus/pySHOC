@@ -121,10 +121,12 @@ logging:
     # library activation
     activation: 
             pyshoc:                     1
+            pyshoc.headers.convert:     0
             obstools:                   1
             mpl_multitab:               1
             recipes:                    1
             recipes.io.utils:           0
+            recipes.decorators.base:    0
             motley.formatter:           0
             motley.table.xlsx:          1
             scrawl.moves.machinery:     0

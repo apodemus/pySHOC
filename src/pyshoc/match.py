@@ -169,11 +169,11 @@ class MatchedObservations(LoggingMixin):
             mapping to unique `shocCampaign` instances
         """
 
-        self.logger.info(txw.dedent('''
-            Matching {:d} files to {:d} files by attributes:
-               Exact  : {!r:};
-               Closest: {!r:}
-            '''), len(self.a), len(self.b), exact, closest
+        self.logger.bind(indent=True).info(
+            'Matching {:d} files to {:d} files by attributes:\n'
+            '    Exact  : {!r:};\n'
+            '    Closest: {!r:}',
+            len(self.a), len(self.b), exact, closest
         )
 
         # create the GroupedRun for science frame and calibration frames
@@ -183,7 +183,7 @@ class MatchedObservations(LoggingMixin):
 
         if not self.attrs:
             raise ValueError('Need at least one `key` (attribute name) by which'
-                             ' to match')
+                             ' to match.')
         # assert len(other), 'Need at least one other observation to match'
 
         g0 = self.a.group_by(*exact)
@@ -297,7 +297,7 @@ class MatchedObservations(LoggingMixin):
             obs = g0[gid]
             other = g1[gid]
             use = varies[:len(gid)]
-            
+
             # insert group header
             head = [f'{key}={tmp.tabulate.formatters.get(key, str)(val)}'
                     for key, val in np.array((head_keys, gid), 'O').T[use]]
