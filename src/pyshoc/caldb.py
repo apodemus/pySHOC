@@ -9,15 +9,11 @@ import itertools as itt
 from pathlib import Path
 from datetime import datetime
 
-# third-party
-from loguru import logger
-
 # local
 import motley
 from motley.table import Table
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
-from recipes import io
-from recipes.logging import LoggingMixin
+from recipes import io, logging
 from recipes.dicts import AttrDict, AutoVivify
 from recipes.string import numbered, pluralize
 
@@ -74,7 +70,7 @@ class MockRun(ArrayLike1D, AttrGrouper, OfType(MockHDU)):
     """A lightweight Campaign emulator"""
 
 
-class CalDB(DB, LoggingMixin):
+class CalDB(DB, logging.LoggingMixin):
     """Calibration file database"""
 
     format = 'pkl'
@@ -199,8 +195,9 @@ class CalDB(DB, LoggingMixin):
 
         which = 'master' if master else 'raw'
         name = motley.apply(f'{which} {kind}', CONFIG.console.colors[kind])
-        logger.info("Searching for {:s} files in database:\n'{!s}'",
-                    name, self[which][kind])
+        self.logger.bind(indent=2).info(
+            "Searching for {:s} files in database:\n'{!s}'", name, self[which][kind]
+            )
 
         if kind in self.db[which]:
             db = self.db[which][kind]
@@ -221,12 +218,11 @@ class CalDB(DB, LoggingMixin):
                 continue
 
             # load
-            logger.disable('obstools.campaign')
-            # catch repetative log message. Will emit below for loop
-            cal = grp[key] = shocCampaign.load(mock.attrs('filename'),
-                                               obstype=kind)
-            i += 1
-            logger.enable('obstools.campaign')
+            with logging.disabled('obstools.campaign'):
+                # catch repetative log message. Will emit below for loop.
+                cal = grp[key] = shocCampaign.load(mock.attrs('filename'),
+                                                obstype=kind)
+                i += 1
 
             # set telescope / filter from db folder path for flats
             if kind == 'flat':
@@ -235,12 +231,11 @@ class CalDB(DB, LoggingMixin):
                 assert None not in cal.attrs.telescope
 
         if n := sum(map(len, grp.values())):
-            logger.info('Found {:d} {:s} matching files in database.', n, name)
+            self.logger.info('Found {:d} {:s} matching files in database.', n, name)
 
         if not_found:
-            logger.info(
-                'No {:s} available in database for {:s} with '
-                'observational {:s}:\n{:s}',
+            self.logger.bind(indent=2).info(
+                'No {:s} available in database for {:s} with observational {:s}:\n{:s}',
                 name, numbered(not_found, 'file'), pluralize('setup', not_found),
                 Table(not_found, col_headers=attrs, nrs=True)
             )
