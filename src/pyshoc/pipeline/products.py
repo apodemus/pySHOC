@@ -64,6 +64,7 @@ def sanitize_filename(name):
 
 
 def resolve_path(path, hdu, *frames, **kws):
+
     if isinstance(path, DictNode):
         raise TypeError(f'{type(path)}')
 
@@ -93,12 +94,12 @@ def get_previous(run, paths):
     overview = {
         section: products[path].as_dict()
         for section, path in
-        paths.folders.select(('info', 'plotting', 'registration')).items()
+        paths.folders.select(('info', 'registration')).items()
     }
 
     #
-    samples = paths.folders.samples
-    _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
+    # samples = paths.folders.samples
+    # _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
 
     #
     logger.bind(indent=' ').opt(lazy=True).debug(
@@ -287,8 +288,9 @@ def _get_templates(paths, key, add_ext=CONFIG.lightcurves.plots.format):
                 'DATE': 'by_date'}[key]
         return CONFIG.lightcurves.plots[attr].get(k[0])
 
-    #
+    # Get template tree
     tmp = paths.templates[key].copy()
+    tmp = tmp.filter(('tracking', 'plots'))  # FIXME
     txt = tmp.pop('lightcurves').map(op.AttrGetter('template'))
 
     png = txt.map(str.replace, '.txt', f'.{add_ext}').transform(_append, add_ext)
@@ -313,8 +315,18 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
     out['FITS', files] = run.files.paths
 
     # duplicate Overview images so that they get merged below
-    out['Images', 'Overview'] = [[(paths.folders.plotting / _)
-                                  for _ in overview['plotting']]] * len(run)
+    rplot_paths = paths.files.registration.plots
+
+    path = rplot_paths.alignment.parent
+    out['Registration', 'Alignment'] = \
+        [path / _ for _ in overview['registration'][f'{path.name}/']]
+
+    # section, tmp = paths.templates['TEL'].find('mosaic').flatten().popitem()
+    # tmp.substitute(TEL=CONFIG.registration.params.survey)
+    # path = rplot_paths.mosaic.parent
+
+    # out['Images', 'Overview'] = [[(paths.folders.plotting / _)
+    #                               for _ in overview['plotting']]] * len(run)
 
     # CONFIG[section].get('title', section.title())
     sections = [(section.title(), name) for section, name, *_ in templates]
@@ -327,9 +339,6 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
 
     out['Light Curves'] = out.pop('Lightcurves')
 
-    # Images
-    # out['Images']['Source Regions'] = list(match(run, paths.source_regions.iterdir()))
-
     # TODO
     # ['Spectral Estimates', ]
     # 'Periodogram','Spectrogram'
@@ -339,7 +348,7 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
                           title='HDU Data Products',
                           convert={Path: hyperlink_ext,
                                    'files': hyperlink_ext,
-                                   'Overview': hyperlink_name
+                                   #    'Overview': hyperlink_name
                                    },
                           split_nested_types={tuple, list},
                           )
@@ -354,16 +363,16 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
         widths={'HDU':      14,
                 files:      5,
                 'headers':  7,
-                'Overview': 4,
+                # 'Overview': 4,
                 'samples':  7,
                 ...:        7},
         align={'HDU': '<',
-               'Overview': dict(horizontal='center',
-                                vertical='center',
-                                text_rotation=90),
+               #    'Overview': dict(horizontal='center',
+               #                     vertical='center',
+               #                     text_rotation=90),
                ...: dict(horizontal='center',
                          vertical='center')},
-        merge_unduplicate=('Overview', 'headers')
+        merge_unduplicate=( 'headers') # 'Overview',
     )
 
 
