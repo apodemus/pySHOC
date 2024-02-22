@@ -12,6 +12,7 @@ from platformdirs import user_config_path, user_data_path
 
 # local
 import motley
+from recipes.shell import bash
 from recipes.string import sub
 from recipes.caching import cached
 from recipes.dicts import DictNode
@@ -146,7 +147,6 @@ def _ignore_any(ignore):
 
     return wrapper
 
-
 # ---------------------------------------------------------------------------- #
 
 class Template(Template):
@@ -156,6 +156,23 @@ class Template(Template):
         _, keys, *_ = zip(*self.pattern.findall(self.template))
         return keys
 
+    def __repr__(self):
+        return f'{type(self).__name__}({self.template})'
+
+    def resolve_paths(self, section, **kws):
+        if '$EXT' in self.template:
+            if formats := CONFIG[section[0]].find('formats').get('formats'):
+                for ext in formats:
+                    yield Path(self.substitute(**{'EXT': ext, **kws}))
+                return
+
+            raise ValueError(
+                f'No formats specified in config section {section} for '
+                f'template: {self.template} '
+            )
+
+        # expand braced expressions
+        yield from map(Path, bash.brace_expand(self.substitute(**kws)))
 
 # ---------------------------------------------------------------------------- #
 
@@ -245,7 +262,7 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
 
         logger.info('The following folders will be created:\n    {}.',
                     '\n    '.join(map(str, required)))
-        
+
         for path in required:
             logger.debug('Creating folder: {}.', path)
             path.mkdir(parents=True)

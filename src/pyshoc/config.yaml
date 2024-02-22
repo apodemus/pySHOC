@@ -97,6 +97,7 @@ logging:
     file:
         level:      debug
         rotation:   2Mb
+        retention:  1 month
         format:  >-  # {time:YYYY-MM-DD HH:mm:ss zz}
             {time:HH:mm:ss!UTC}|
             {name}.{function}:{line:d}|
@@ -104,7 +105,7 @@ logging:
 
     # Console logging sink
     console:
-        level:  debug
+        level:  info
         catch:  False
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
@@ -193,7 +194,7 @@ plotting: #&plotting
 # Sample image statistics 
 samples:
     tab:                [Sample Images] # Detection
-    folder:             $REGISTRY//samples/
+    folder:             $REGISTRY/samples/
     filename:           $HDU$FRAMES.png
 
     params:
@@ -325,7 +326,7 @@ tracking:
     params:
         dilate:             2
         circularize:        True
-        njobs:              -1
+        njobs:              1
 
         centroids:
             # features used for tracking
@@ -396,24 +397,24 @@ tracking:
 
         positions:
         # -------------------------------------------------------------------- #
-            filename:           positions-source$SOURCE.png
+            filename:           positions-$SOURCE.png
 
             figsize:            [12, 6.5]
             legend:             False
             show:               [avg, weights, caption]  #  nulls, pixel
 
             density:
-                cmap:               null
-                tessellation:       hex
-                min_count:          3
+                cmap:           null
+                tessellation:   hex
+                min_count:      3
 
             scatter:
-                marker: x
-                s:      5
-                ls:     ''
-                color:  null
-                zorder: 1
-                alpha:  0.35
+                marker:     x
+                s:          5
+                ls:         ''
+                color:      null
+                zorder:     1
+                alpha:      0.35
 
             title:
                 size:       13
@@ -462,58 +463,22 @@ tracking:
 phot:   
     folder:         phot/
 
+    apertures:
+        shapes:     [contour, elliptical]
+        optimize:   True
+
 
 # ---------------------------------------------------------------------------- #
 lightcurves:
+
     tab:            Light Curves
-    folder:         lightcurves/
+    folder:         $PHOT/lightcurves/
+    formats:        [txt, npy, png, pdf]
 
-    raw:
-        filename:   by_file/raw/$HDU.raw.txt
-        title:      Raw ragged-aperture light curve for {}.
-
-    flagged:
-        filename:   by_file/raw/$HDU.oflag.txt
-        title:      Flagged ragged-aperture light curve for {}.
-        params:
-            nwindow:    1000
-            noverlap:   50%
-            kmax:       0.1%
-
-    diff0:
-        title:      Differential (0th order) ragged-aperture light curve for {}.
-        filename:   by_file/diff/$HDU.diff0.txt
-
-        concat:
-            title:      Nightly differential (0th order) ragged-aperture light curve for {}.
-            filename:   by_date/diff/$DATE.diff0.txt
-            overwrite:  True
-
-    decor:
-        title:      Nightly differential (smoothed) ragged-aperture light curve for {}.
-        filename:   by_date/decor/$DATE.decor.txt
-
-        params:
-            nwindow:        1000
-            noverlap:       10%
-            smoothing:      0.1
-
-    # -------------------------------------------------------------------- #
     plots:
-        # ouput format 
-        format:       png
-        # overwrite:    True
-
-        # Which plots to produce
-        by_file:
-            raw:        1
-            flagged:    1
-            diff0:      1
-
-        by_date:
-            diff0:      1
-            decor:      1
-
+        # save
+        # formats:    []
+        
         # figure
         subplotspec:
             top:        0.81
@@ -526,6 +491,144 @@ lightcurves:
         xlabel:
             top:        Time (UTC)
             bottom:     Δt (s)
-            pad:       -17.5
+            pad:        -17.5
         ylabel:         Relative Flux
+
+    # lightcurve analysis by file
+    # ------------------------------------------------------------------------ #
+    by_file:
+        folder:     by_file/$HDU
+
+        # Raw light curve
+        raw: 
+            filename:   $HDU.raw.$EXT
+            title:      Raw contour aperture light curve for {}.
+
+            acf:
+                filename: $HDU.raw.acf.{npy,pdf,png}
+
+        # Flag outliers
+        flagged:
+            filename:   $HDU.oflag.$EXT
+            title:      Outlier-flagged contour aperture light curve for {}.
+            
+            # parameters for outlier detection
+            params:
+                # method:   gESD
+                nwindow:    1000
+                noverlap:   50%
+                kmax:       0.1%
+
+        # Scaled by median flux of reference source
+        diff0:
+            title:      Median scaled contour aperture light curve for {}.
+            filename:   $HDU.diff0.$EXT
+
+            plot:
+                hist:   True
+
+        # Differential with Total Variational (TV) smoothing
+        diff:
+            title:      Differential light curve (via total variational smoothing) for {}.
+            filename:   $HDU.diff.$EXT
+            plot:
+                hist:   True
+
+            # Parameters for variational smoother
+            params:
+                nwindow:        1000
+                noverlap:       10%
+                smoothing:      0.1
+
+            acf:
+                filename: $HDU.diff.acf.{npy,pdf,png}
+
+        # decorrelate  via Maximum entropy spectrum. 
+        # Do by file since more likely heteroscedastic
+        decor:
+            title:      Decorrelated light curve (via Maximum Entropy whitening) for {}.
+            filename:   $HDU.decor.$EXT
+
+            params:
+                # method for choosing p in AR(p)
+                method:     FPE # Akaike Final prediction Error 
+
+            acf:
+                filename: $HDU.decor.acf.{npy,pdf,png}
+            
+            # Concatenate to produce nightly light curves
+            concat:
+                title:      Nightly decorrelated contour aperture light curve for {}.
+                folder:     by_date/$DATE/
+                filename:   $DATE.decor.$EXT
+                overwrite:  True
+
+    # products by date
+    # ------------------------------------------------------------------------ #
+    by_date:
+        folder:         by_date/$DATE
+        formats:        [npy, pdf, png]
+
+        # Spectral Analysis
+        periodogram:
+            title:      Periodogram
+            filename:   $DATE.pg.$EXT
+
+        lombscargle:
+            title:      'Lomb-Scargle Periodogram'
+            filename:   $DATE.ls.$EXT
+
+        welch:
+            title:      'Welch Periodogram'
+            filename:   $DATE.welch.$EXT
+
+        tfr:
+            title:      Time Frequency Representation 
+            filename:   $DATE.tfr.$EXT
+
+    # products by cycle
+    # ------------------------------------------------------------------------ #
+    # Phase folded light curves (If ephemeris available)
+    by_cycle:
+        # ephemeris:    
+        folder:         by_cycle/
+        filename:       E$CYCLE.lc.$EXT
+
+        stacked:
+            title:      Orbit phased light curves for {}
+            filename:   lcs-stacked.png
+
+
+        phased:
+            title:      Orbit phased light curve {}
+            filename:   lcs-phased.png
+            
+            params:
+                bins:           360
+                statistics: 
+                    median:     'o'
+                    # mad:        '|'
+                    p5, p95:    '-.'
+                    min, max:   ':'
+
+        # # Spectral Analysis
+        # periodogram:
+        #     title:      'Periodogram'
+        #     filename:   E$CYCLE.pg.txt
+        #     plot:       True
+
+        # lombscargle:
+        #     title:      'Lomb-Scargle Periodogram'
+        #     filename:   E$CYCLE.ls.txt
+        #     plot:       True
+
+        # welch:
+        #     title:      'Welch Periodogram'
+        #     filename:   E$CYCLE.welch.txt
+        #     plot:       True
+        
+
+
+    # -------------------------------------------------------------------- #
+
 

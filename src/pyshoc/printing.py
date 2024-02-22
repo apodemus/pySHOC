@@ -16,8 +16,8 @@ RGX_FILENAME = re.compile(r'(SH[ADH]_|)(\d{4})(\d{2})(\d{2})(.+)')
 
 # ---------------------------------------------------------------------------- #
 # class Node(bash.BraceExpressionNode):
-#     def __init__(self, name, parent=None, children=None, **kwargs):
-#         super().__init__(name, parent=parent, children=children, **kwargs)
+#     def __init__(self, name, parent=None, children=None, **kws):
+#         super().__init__(name, parent=parent, children=children, **kws)
 
 #         # tree from parts of filename  / from letters
 #         itr = iter(mo.groups() if (mo := RGX_FILENAME.match(name)) else name)

@@ -165,7 +165,7 @@ def setup(root, output, overwrite, use_cache):
     rcParams['savefig.directory'] = output
 
     # set detection algorithm
-    if algorithm := CONFIG.detection.pop('algorithm', None):
+    if algorithm := CONFIG.detection.get('algorithm', None):
         shocHDU.detection.algorithm = algorithm
 
     # update cache locations
@@ -247,7 +247,7 @@ def enable_local_caching(mapping):
                    'configurations, for example.')
 #
 @click.option('--cache/--no-cache', default=True,
-              help=f'Enable/Disable persistent caching. Cache location is '
+              help='Enable/Disable persistent caching. Cache location is '
                    'configurable in `config.yaml`')
 #
 @click.option('--plot/--no-plot', default=True,

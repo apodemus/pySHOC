@@ -2,6 +2,7 @@
 # std
 import time
 import numbers
+from pathlib import Path
 
 # local
 from recipes.pprint.nrs import TIME_DIVISORS, ymdhms
@@ -28,9 +29,11 @@ def human_time(age):
 
 
 def get_file_age(path, dne=''):
+    
+    path = Path(path)
     if not path.exists():
         return dne
 
     now = time.time()
     info = path.stat()
-    return now - max(info.st_mtime, info.st_ctime)
+    return now - min(info.st_mtime, info.st_ctime)
