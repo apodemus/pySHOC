@@ -14,8 +14,8 @@ import motley
 from motley.table import Table
 from pyxides.containers import ArrayLike1D, AttrGrouper, OfType
 from recipes import io, logging
-from recipes.dicts import AttrDict, AutoVivify
 from recipes.string import numbered, pluralize
+from recipes.containers.dicts import AttrDict, AutoVivify
 
 # relative
 from . import MATCH, shocCampaign

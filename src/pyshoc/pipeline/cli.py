@@ -11,8 +11,8 @@ from matplotlib import rcParams
 
 # local
 from recipes import io
-from recipes.dicts import groupby
 from recipes.string import most_similar
+from recipes.containers.dicts import groupby
 
 # relative
 from .. import CONFIG, shocHDU

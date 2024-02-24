@@ -13,8 +13,8 @@ import motley
 from motley.utils import Filler, GroupTitle
 from motley.formatters import ConditionalFormatter
 from recipes import op
-from recipes.sets import OrderedSet
 from recipes.logging import LoggingMixin
+from recipes.containers.sets import OrderedSet
 
 # relative
 from .utils import str2tup

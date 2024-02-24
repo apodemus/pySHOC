@@ -33,9 +33,9 @@ from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes import pprint
-from recipes.dicts import pformat
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
+from recipes.containers.dicts import pformat
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
 from recipes.oo.property import ForwardProperty
@@ -1411,7 +1411,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             filenames = self.calls.get_save_name(name_format)
 
         if len(set(filenames)) < len(self):
-            from recipes.lists import tally
+            from recipes.containers.lists import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
             self.logger.warning('Duplicate filenames: {:s}.', dup)
 

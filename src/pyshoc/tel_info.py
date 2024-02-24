@@ -8,8 +8,8 @@ import numpy as np
 from astropy.coordinates import EarthLocation
 
 # local
-from recipes.dicts import invert
 from recipes.oo.slots import SlotHelper
+from recipes.containers.dicts import invert
 
 # relative
 from .config import CONFIG

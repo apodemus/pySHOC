@@ -26,11 +26,10 @@ from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
 from recipes.flow import Catch
 from recipes.iter import cofilter
-from recipes.utils import not_null
 from recipes.functionals import negate
-from recipes import io, op, pprint as pp
 from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
+from recipes import io, not_null, op, pprint as pp
 from recipes.string import remove_prefix, shared_prefix
 from recipes.functionals.partial import PlaceHolder as o
 

@@ -14,10 +14,9 @@ from platformdirs import user_config_path, user_data_path
 import motley
 from recipes.shell import bash
 from recipes.string import sub
-from recipes.caching import cached
-from recipes.dicts import DictNode
 from recipes.config import ConfigNode
-from recipes.utils import ensure_tuple
+from recipes.containers import ensure
+from recipes.containers.dicts import DictNode
 from recipes.functionals import always, negate
 
 
