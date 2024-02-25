@@ -10,7 +10,7 @@ from astropy.io.fits import Header
 
 # local
 from motley.table import Table
-from recipes.sets import OrderedSet
+from recipes.containers.sets import OrderedSet
 
 # relative
 from .convert import KEYMAP

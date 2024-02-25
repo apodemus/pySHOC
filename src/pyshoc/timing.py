@@ -20,8 +20,8 @@ from loguru import logger
 import motley
 from obstools.airmass import Young94, altitude
 from recipes.oo import Null
-from recipes.dicts import invert
 from recipes.logging import LoggingMixin
+from recipes.containers.dicts import invert
 
 
 # import spiceypy as spice
