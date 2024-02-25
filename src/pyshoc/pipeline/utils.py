@@ -8,6 +8,7 @@ from pathlib import Path
 from recipes.pprint.nrs import TIME_DIVISORS, ymdhms
 
 
+# ---------------------------------------------------------------------------- #
 def human_time(age):
 
     fill = (' ', ' ', ' ', 0, 0, 0)
@@ -16,24 +17,31 @@ def human_time(age):
         # print(type(age))
         return '--'
 
+    off = 0
     mags = 'yMdhms'
     for m, d in zip(mags[::-1], TIME_DIVISORS[::-1]):
         if age < d:
+            off = 1
             break
 
-    i = mags.index(m) + 1
-    if i < 5:
-        return ymdhms(age, mags[i], f'{mags[i+1]}.1', fill=fill)
+    # n = 5
+    i = mags.index(m) + off
+    base = mags[min(i, 5)]
+    fmt = mags[i + 2] if (i < 4) else 's1?'
+    return ymdhms(age, base, fmt, fill=fill)
 
-    return ymdhms(age, 's', 's1?', fill=fill)
 
+def get_file_age(path, dne='--', human=False):
 
-def get_file_age(path, dne=''):
-    
     path = Path(path)
     if not path.exists():
         return dne
 
     now = time.time()
     info = path.stat()
-    return now - min(info.st_mtime, info.st_ctime)
+    age = now - min(info.st_mtime, info.st_ctime)
+    
+    if human:
+        return human_time(age)
+    
+    return age
