@@ -15,12 +15,14 @@ import motley
 from recipes.shell import bash
 from recipes.string import sub
 from recipes.config import ConfigNode
-from recipes.containers import ensure
+from recipes.functionals import always
 from recipes.containers.dicts import DictNode
-from recipes.functionals import always, negate
+from recipes.containers import ensure, replace
+from recipes.functionals.partial import Partial, placeholder as o
 
 
 # ---------------------------------------------------------------------------- #
+
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
@@ -77,7 +79,7 @@ del prg
 # GUI
 # ---------------------------------------------------------------------------- #
 # Convert tab specifiers to tuple
-CONFIG.update(CONFIG.select('tab').map(ensure_tuple))
+CONFIG.update(CONFIG.select('tab').map(ensure.tuple))
 
 
 # make config read-only
@@ -87,46 +89,133 @@ CONFIG.freeze()
 # Get file / folder tree for config
 # PATHS = get_paths(CONFIG)
 
-_section_aliases = dict(registration='registry',
-                        plotting='plots')
+_section_aliases = dict(
+    plotting='plots',
+    lightcurves='lc',
+    calibration='cal',
+    registration='registry'
+)
 
 
 # ---------------------------------------------------------------------------- #
+# def resolve_paths(self, output):        # resolve files / folders
+
+#     resolve_folders(output)
+#     resolve_files()
+#     # All paths resolved as far as possbile(barring $HDU $DATE templates)
+
+#     # add file parent folders to node.folders
+#     # note, ordinary dict here so we can save path and nested paths below
+#     folders = ConfigNode()
+#     for section, path in files.map(Path.parent.fget).flatten().items():
+#         # replace 'filename' with 'folder'
+#         if section[-1] == 'filename':
+#             section = (*section[:-1], 'folder')
+
+#         if original := self.folders.get(section):
+#             assert original == path
+#             section = (*section, 'folder')
+#         #
+#         folders[section] = path
+
+#     self['folders'] = folders
+
+
+# def resolve_folders(folders, output):
+#     # resolve internal folder references $HDU etc. Prefix paths when needed.
+
+#     # path $ substitutions
+#     # folders = self.folders
+#     folders['output'] = ''
+#     substitutions = resolve_internal_path_refs(folders, **_section_aliases)
+
+#     # Convert folders to absolute paths
+#     folders = folders.map(sub, substitutions)
+#     return _prefix_paths(folders, output)
+
+
+# def resolve_files(files, folders):
+#     # convert filenames to absolute paths where necessary
+
+#     # find config sections where 'filename' given as relative path, and
+#     # there is also a 'folder' given in the same group. Prefix the filename
+#     # with the folder path.
+
+#     # sub internal path refs
+#     substitutions = get_internal_path_refs(folders, **_section_aliases)
+
+#     files = files.map(sub, substitutions).map(Path)
+#     needs_prefix = files.filter(values=Path.is_absolute)
+
+#     for section, path in needs_prefix.flatten().items():
+#         if prefix := get_folder(folders, section):
+#             files[section] = prefix / path
+
+#     # make sure everything converted to full path
+#     assert len(files.filter(values=Path.is_absolute)) == 0
+
+#     return files
+
+
+# def get_folder(folders, section):
+#     for end in range(1, len(section) + 1)[::-1]:
+#         if (folder_key := section[:end]) in folders:
+#             folder = folders[folder_key]
+#             return getattr(folder, 'folder', folder)
 
 
 def resolve_internal_path_refs(folders, **aliases):
-    return _resolve_internal_path_refs(_get_internal_path_refs(folders, **aliases))
+    return _resolve_internal_path_refs(get_internal_path_refs(folders, **aliases))
 
 
 def _resolve_internal_path_refs(subs):
     return dict(zip(subs, (sub(v, subs) for v in subs.values())))
 
 
+def get_internal_path_refs(folders, **aliases):
+    return {f'${name.upper()}': str(loc).rstrip('/')
+            for name, loc in _get_internal_path_refs(folders, **aliases)}
+
+
 def _get_internal_path_refs(folders, **aliases):
-    return {f'${aliases.get(name, name).upper()}': str(loc).rstrip('/')
-            for name, loc in folders.items()}
+    for name, loc in folders.items():
+        if isinstance(loc, DictNode):
+            if (loc := loc.get('folder')):
+                yield name, loc
+            continue
+
+        yield name, loc
+
+        if name := aliases.get(name):
+            yield name, loc
 
 
 def _prefix_paths(node, prefix):
-    # print(f'{node = }    {prefix = }')
 
-    if isinstance(node, PathConfig):
-        result = PathConfig()
-        if 'folder' in node:
-            node, folder = node.split('folder')
-            prefix = Path(prefix) / folder.folder
-            result['folder'] = prefix
+    prefix = Path(prefix)
 
-        result.update({
-            key: _prefix_paths(child, prefix)
-            for key, child in node.items()
-        })
-        return result
+    if isinstance(node, (str, Path)):
+        return prefix / node
 
-    if prefix:
-        return Path(prefix) / node
+    done = set()
+    paths, parents = node.split('folder')
+    needs_prefix = paths.map(Path).filter(values=Path.is_absolute)
+    for key, parent in parents.flatten().items():
+        # set folder again on paths for completeness
+        paths[key] = current = prefix / parent
 
-    return node
+        # last key is 'folder', ignore
+        section = key[:-1]
+        # only prefix relative paths
+        for key, path in needs_prefix[section].flatten().items():
+            done.add(key := (*section, *key))
+            paths[key] = current / path
+
+    # prefix paths without explicit folder
+    for key in (set(paths.flatten().keys()) - done):
+        paths[key] = prefix / paths[key]
+
+    return paths
 
 
 def _is_special(path):
@@ -147,6 +236,7 @@ def _ignore_any(ignore):
     return wrapper
 
 # ---------------------------------------------------------------------------- #
+
 
 class Template(Template):
 
@@ -173,13 +263,15 @@ class Template(Template):
         # expand braced expressions
         yield from map(Path, bash.brace_expand(self.substitute(**kws)))
 
+
 # ---------------------------------------------------------------------------- #
 
 class PathConfig(ConfigNode):  # AttributeAutoComplete
     """
-    Filesystem tree helper. Attributes point to the full system folders and
-    files for pipeline data products.
+    Filesystem tree helper. Attributes `files` and `folders` point to the full 
+    system paths for pipeline data products.
     """
+
     @classmethod
     def from_config(cls, root, output, config):
 
@@ -194,21 +286,19 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         remapped_keys = DictNode()
         # catch both singular and plural form keywords
         for (key, term), s in itt.product(attrs, ('', 's')):
-            found = config.find(term + s,  True, remapped_keys[key])
+            found = config.find(term + s, True, remapped_keys[key])
             for keys, val in found.flatten().items():
                 node[(key, *keys)] = val
 
-        # resolve files / folders
-        node.resolve_folders(output)
-        node.resolve_files()
-        # All paths are resolved
-
-        # update config!
-        for (kind, *orignal), new in remapped_keys.flatten().items():
-            config[tuple(orignal)] = node[(kind, *new)]
+        # read in paths, fill templates
+        node.resolve_paths(output)
 
         # add root
-        node.folders['root'] = root
+        node.folders['root'] = node.folders['input'] = root
+
+        # update config!
+        # for (kind, *orignal), new in remapped_keys.flatten().items():
+        #     config[tuple(orignal)] = node[(kind, *new)]
 
         # isolate the file template patterns
         templates = node.files.select(values=lambda v: '$' in str(v))
@@ -231,29 +321,22 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
     #     out = self._root().folders.output
     #     return f'/{path.relative_to(out)}' if out in path.parents else path
 
-    @cached.property
-    def _folder_sections(self):
-        return [key[:(-1 if key[-1] == 'folder' else None)]
-                for key in self.folders.flatten().keys()]
+    # @cached.
+    # @property
+    # def _section_folders(self):
+    #     return DictNode(self.folders.reshape(Partial(remove)(o, 'folder')))
 
-    def get_folder(self, section):
-        for end in range(1, len(section) + 1)[::-1]:
-            if section[:end] in self._folder_sections:
-                folder_key = section[:end]
-                break
-
-        folder = self.folders[folder_key]
-
-        return getattr(folder, 'folder', folder)
+        # return [key[:(-1 if key[-1] == 'folder' else None)]
+        # for key in self.folders.flatten().keys()]
 
     def create(self, ignore=()):
         logger.debug('Checking for missing folders in output tree.')
 
-        node = self.filtered(_ignore_any(ignore))
-        required = {*node.folders.flatten().values(),
-                    *map(Path.parent.fget, node.files.flatten().values())}
-        required = set(filter(negate(_is_special), required))
-        required = set(filter(negate(Path.exists), required))
+        required = set(self.folders
+                       .filter(('root', 'input'))
+                       .filter(_ignore_any(ignore))
+                       .filter(values=_is_special)
+                       .filter(values=Path.exists))
 
         if not required:
             logger.debug('All folders in output tree already exist.')
@@ -266,8 +349,27 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
             logger.debug('Creating folder: {}.', path)
             path.mkdir(parents=True)
 
+    def resolve_paths(self, output):
+        # resolve files / folders
+        self.resolve_folders(output)
+        self.resolve_files()
+        # All paths resolved as far as possbile (barring $HDU $DATE templates)
+
+        # ensure we have unique path to each folder node
+        folders = DictNode()
+        for section, folder in self.folders.flatten().items():
+            if section in self.files:
+                section = (*section, 'folder')
+            folders[section] = folder
+
+        # add file parent folders to node.folders
+        parents = DictNode(self.files.map(Path.parent.fget))
+        parents = parents.reshape(Partial(replace)(o, 'filename', 'folder'))
+        folders.update(parents)
+        self['folders'] = folders
+
     def resolve_folders(self, output):
-        # resolve internal folder references $EXAMPLE. Prefix paths where needed
+        # resolve internal folder references $HDU etc. Prefix paths when needed.
 
         # path $ substitutions
         folders = self.folders
@@ -275,7 +377,8 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         substitutions = resolve_internal_path_refs(folders, **_section_aliases)
 
         # Convert folders to absolute paths
-        self['folders'] = _prefix_paths(folders.map(sub, substitutions), output)
+        folders = folders.map(sub, substitutions)
+        self['folders'] = _prefix_paths(folders, output)
 
     def resolve_files(self):
         # convert filenames to absolute paths where necessary
@@ -285,16 +388,25 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         # with the folder path.
 
         # sub internal path refs
-        substitutions = _get_internal_path_refs(self.folders, **_section_aliases)
+        substitutions = get_internal_path_refs(self.folders, **_section_aliases)
 
         files = self.files.map(sub, substitutions).map(Path)
         needs_prefix = files.filter(values=Path.is_absolute)
 
         for section, path in needs_prefix.flatten().items():
-            prefix = self.get_folder(section)
-            files[section] = prefix / path
+            if prefix := self.get_folder(section):
+                files[section] = prefix / path
 
         # make sure everything converted to full path
         assert len(files.filter(values=Path.is_absolute)) == 0
 
         self['files'] = files
+
+    def get_folder(self, section):
+        if folder := self.folders.get((*section, 'folder')):
+            return folder
+
+        for end in range(1, len(section) + 1)[::-1]:
+            if (folder_key := section[:end]) in self.folders:
+                folder = self.folders[folder_key]
+                return getattr(folder, 'folder', folder)

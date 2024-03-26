@@ -35,7 +35,7 @@ from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes import pprint
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
-from recipes.containers.dicts import pformat
+from recipes.pprint.mapping import pformat
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
 from recipes.oo.property import ForwardProperty
@@ -1054,6 +1054,7 @@ class TableHelper(AttrTable):
                                          align='<'),
             'timing.t0.datetime': Column('Time', '[UTC]',
                                          fmt='YYYY-MM-DD HH:MM:SS',
+                                         convert=str,
                                          align='<'),
             'timing.exp':         Column('Exposure', '[s]',
                                          fmt='0.?????',
@@ -1078,8 +1079,7 @@ class TableHelper(AttrTable):
 
         tabulate.parent = self.parent
         return tabulate.to_xlsx(path, sheet, overwrite=overwrite,
-                                align={...: '^'},
-                                header_formatter=str.title)
+                                align={...: '^'}, header_formatter=str.title)
         # widths={'binning': 5})
 
         # tabulate = AttrTable.from_spec({
@@ -1351,10 +1351,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
          #  'readout.mode.outAmp':    ...,
          #   'filters.B':          ...,
          },
-        row_nrs=1,
-        summary=True,
-        title_style=dict(fg=('underline', 'bold'), bg='b'),
-        too_wide=False,
+        **CONFIG.tabulate.campaign,
         footnotes=Trigger.get_flags()
     )
 
@@ -1411,7 +1408,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
             filenames = self.calls.get_save_name(name_format)
 
         if len(set(filenames)) < len(self):
-            from recipes.containers.lists import tally
+            from recipes.containers import tally
             dup = [fn for fn, cnt in tally(filenames).items() if cnt > 1]
             self.logger.warning('Duplicate filenames: {:s}.', dup)
 
@@ -1793,7 +1790,8 @@ class shocObsGroups(Groups):
 
         """
         return shocCampaign.tabulate.get_tables(
-            self, attrs, titled=titled, filler_text='NO MATCH', **kws
+            self, attrs, titled=titled, filler_text='NO MATCH', 
+            **{**CONFIG.tabulate.obs_groups, **kws}
         )
 
     def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):

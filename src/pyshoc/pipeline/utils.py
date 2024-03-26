@@ -33,6 +33,10 @@ def human_time(age):
 
 def get_file_age(path, dne='--', human=False):
 
+    # split tab name out of path
+    if '::' in (s := str(path)):
+        path = s[:s.index('::')]
+    
     path = Path(path)
     if not path.exists():
         return dne

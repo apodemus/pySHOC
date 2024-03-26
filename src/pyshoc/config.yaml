@@ -33,14 +33,6 @@ folders:
 #     tracking:       $PHOT/tracking/$HDU
 #     lightcurves:    $PHOT/lightcurves
 
-# ---------------------------------------------------------------------------- #
-# scripts for remote file retrieval
-remote:
-    filenames:       
-        rsync_script:           $INFO/rsync-remote.sh
-        rsync_files:            $INFO/remote-files.txt
-    server:             astro.cape.saao.ac.za
-    username:           Null
 
 
 # ---------------------------------------------------------------------------- #
@@ -73,7 +65,7 @@ console:
         flat: cornflowerblue
         dark: tan
 
-    cutouts: 
+    cutouts:
         title:          "Source image cutouts: {hdu.file.name:|c}"
         title_align:    <
         title_style:    [B, _]
@@ -87,6 +79,8 @@ console:
         header_style:
             bg:     lightgreen
             fg:     [darkslategrey, B]
+
+
 
 
 # ---------------------------------------------------------------------------- #
@@ -120,7 +114,7 @@ logging:
             { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
 
     # library activation
-    activation: 
+    activation:
             pyshoc:                     1
             pyshoc.headers.convert:     0
             obstools:                   1
@@ -134,25 +128,53 @@ logging:
 
 
 # ---------------------------------------------------------------------------- #
-# Information / Overview data products
+# Tables
+tabulate:
+    campaign:
+        row_nrs: 1
+        summary: True
+        title_style: 
+            fg: [bold, underline]
+            bg: 'darkslategrey'
+        too_wide: False
+
+    obs_groups:
+        title_style: 
+            fg: [teal, underline, bold]
+            # bg: 'darkslategrey'
+        title_align: '<'
+
+# ---------------------------------------------------------------------------- #
+# Information / Overview Data Products
+
 info:
     folder:         info/
     filenames:
         # pipeline summary info
         headers:        headers/$HDU.txt
         obslog:         observing-log.tex
-        # spreadsheet
-        campaign :      info.xlsx::Campaign Info                 # campaign-files.xlsx
-        products :
-            by_file:        info.xlsx::Data Products by File     # data-products.xlsx
-            by_date :       info.xlsx::Data Products by Date
-
-        # remote file retrieval
-        remote:         remote-files.txt
-        rsync_script:   rsync-remote.sh
+        # 
+        spreadsheets:
+            # These can be separate files if you wish
+            campaign:       info.xlsx::Campaign Info
+            overview:       info.xlsx::Data Products Overview
+            by_file:        info.xlsx::Data Products by File
+            by_date:        info.xlsx::Data Products by Date
 
 
 # ---------------------------------------------------------------------------- #
+# scripts for remote file retrieval
+remote:
+    username:           Null
+    server:             astro.cape.saao.ac.za
+    filenames:
+        rsync_script:           $INFO/rsync-remote.sh
+        rsync_files:            $INFO/remote-files.txt
+
+
+# ---------------------------------------------------------------------------- #
+# Calibration Database
+
 calibration:
     # Location of calibration database
     # ~/.config/pyshoc/caldb
@@ -168,10 +190,13 @@ calibration:
 
 
 # ---------------------------------------------------------------------------- #
-# plotting
-plotting: #&plotting
+# Plotting
+
+plotting:
+    # global plotting config. Specific plots are configurable per section below
+    
     # GUI
-    gui: 
+    gui:
         title:      pySHOC Photometry Pipeline GUI
         pos :       N
         delay:      True
@@ -191,7 +216,8 @@ plotting: #&plotting
 
 
 # ---------------------------------------------------------------------------- #
-# Sample image statistics 
+# Sample Image Statistics
+
 samples:
     tab:                [Sample Images] # Detection
     folder:             $REGISTRY/samples/
@@ -205,7 +231,7 @@ samples:
 
     plots:
         # detections
-        contours: 
+        contours:
             cmap:   cmr.pride
             lw:     1.5
 
@@ -237,7 +263,8 @@ samples:
 
 
 # ---------------------------------------------------------------------------- #
-# source detection
+# Source Detection
+
 detection: &source_detection
     algorithm:      sigma_threshold
     snr:            3
@@ -259,11 +286,12 @@ detection: &source_detection
 
 
 # ---------------------------------------------------------------------------- #
-# image registration (wcs)
+# Image Registration (wcs)
+
 registration:
 
     folder:         registry/
-    filenames:  
+    filenames:
         registry:   registry.pkl
         params:     params.npy
 
@@ -307,20 +335,21 @@ registration:
 
 
 # ---------------------------------------------------------------------------- #
-# camera tracking 
+# Camera Tracking
+
 tracking:
     # gui tab
     tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
     folder:     $PHOT/tracking/$HDU/
-    filenames:  
+    filenames:
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
         frame_info:         frame-info.dat      # (n, 2)        structured
         source_info:        source-info.dat     # (n, nsources) structured
         feature_weights:    feature-weights.dat # (nstats, 1, 1)
-        source_weights:     source-weights.dat  # nsources  
+        source_weights:     source-weights.dat  # nsources
 
     # ------------------------------------------------------------------------ #
     params:
@@ -343,14 +372,14 @@ tracking:
 
         precision:          0.5
         # Required positional accuracy in pixels
-        weights:            snr 
+        weights:            snr
         # Per-source weights for frame offset calculation. Use "snr" for
         # signal-to-noise weighting.
 
         cutoffs:
             edge:           0
             snr:            3.
-            # Sources with signal-to-noise ratio less than this will not be 
+            # Sources with signal-to-noise ratio less than this will not be
             # considered when solving for image dither
             distance:       10
             # For outlier detection: maximum distance allowed for point measurements
@@ -365,13 +394,13 @@ tracking:
     # ------------------------------------------------------------------------ #
     table:
         title:          Measured source coordinates
-        title_style: 
+        title_style:
             fg:         [B,  _,  w]
             bg:         darkslategrey
         col_head_style:
             fg:         [B,  _,  black]
             bg:         grey
-        col_head_align: ^ 
+        col_head_align: ^
         precision:      3
         align:          r
         row_nrs:        True
@@ -386,7 +415,7 @@ tracking:
         centroids:
             com:              [r, +, Centre of Mass]
             peak:             [m, ^, Peak]
-            avg:              [k, x, Weighted Centroid] 
+            avg:              [k, x, Weighted Centroid]
             # NOTE: avg sould be last
 
         labels:
@@ -438,7 +467,7 @@ tracking:
                 label0:  Counts
                 label1:  Counts (Recentred)
 
-            pixel: 
+            pixel:
                 lw:         0.75
                 ls:         '--'
                 fc:         none
@@ -460,7 +489,9 @@ tracking:
 
 
 # ---------------------------------------------------------------------------- #
-phot:   
+# Photometry
+
+phot:
     folder:         phot/
 
     apertures:
@@ -469,6 +500,8 @@ phot:
 
 
 # ---------------------------------------------------------------------------- #
+# Time Series Analysis
+
 lightcurves:
 
     tab:            Light Curves
@@ -478,7 +511,7 @@ lightcurves:
     plots:
         # save
         # formats:    []
-        
+
         # figure
         subplotspec:
             top:        0.81
@@ -494,13 +527,13 @@ lightcurves:
             pad:        -17.5
         ylabel:         Relative Flux
 
-    # lightcurve analysis by file
+    # Data Products by file
     # ------------------------------------------------------------------------ #
     by_file:
         folder:     by_file/$HDU
 
         # Raw light curve
-        raw: 
+        raw:
             filename:   $HDU.raw.$EXT
             title:      Raw contour aperture light curve for {}.
 
@@ -511,7 +544,7 @@ lightcurves:
         flagged:
             filename:   $HDU.oflag.$EXT
             title:      Outlier-flagged contour aperture light curve for {}.
-            
+
             # parameters for outlier detection
             params:
                 # method:   gESD
@@ -543,7 +576,7 @@ lightcurves:
             acf:
                 filename: $HDU.diff.acf.{npy,pdf,png}
 
-        # decorrelate  via Maximum entropy spectrum. 
+        # decorrelate  via Maximum entropy spectrum.
         # Do by file since more likely heteroscedastic
         decor:
             title:      Decorrelated light curve (via Maximum Entropy whitening) for {}.
@@ -551,46 +584,46 @@ lightcurves:
 
             params:
                 # method for choosing p in AR(p)
-                method:     FPE # Akaike Final prediction Error 
+                method:     FPE # Akaike Final prediction Error
 
             acf:
                 filename: $HDU.decor.acf.{npy,pdf,png}
-            
+
             # Concatenate to produce nightly light curves
             concat:
                 title:      Nightly decorrelated contour aperture light curve for {}.
-                folder:     by_date/$DATE/
-                filename:   $DATE.decor.$EXT
+                filename:   $LIGHTCURVES/by_date/$DATE/$DATE.decor.$EXT
                 overwrite:  True
 
-    # products by date
+    # Data Products by date
     # ------------------------------------------------------------------------ #
     by_date:
         folder:         by_date/$DATE
         formats:        [npy, pdf, png]
 
+        # sde:
         # Spectral Analysis
         periodogram:
             title:      Periodogram
             filename:   $DATE.pg.$EXT
 
         lombscargle:
-            title:      'Lomb-Scargle Periodogram'
+            title:      Lomb-Scargle Periodogram
             filename:   $DATE.ls.$EXT
 
         welch:
-            title:      'Welch Periodogram'
+            title:      Welch Periodogram
             filename:   $DATE.welch.$EXT
 
         tfr:
-            title:      Time Frequency Representation 
+            title:      Time Frequency Representation
             filename:   $DATE.tfr.$EXT
 
-    # products by cycle
+    # Data Products by orbital cycle (ephemeris required)
     # ------------------------------------------------------------------------ #
     # Phase folded light curves (If ephemeris available)
     by_cycle:
-        # ephemeris:    
+        # ephemeris:    Eg: 
         folder:         by_cycle/
         filename:       E$CYCLE.lc.$EXT
 
@@ -600,12 +633,12 @@ lightcurves:
 
 
         phased:
-            title:      Orbit phased light curve {}
+            title:      Orbit phased light curve for {}
             filename:   lcs-phased.png
-            
+
             params:
                 bins:           360
-                statistics: 
+                statistics:
                     median:     'o'
                     # mad:        '|'
                     p5, p95:    '-.'
@@ -626,9 +659,9 @@ lightcurves:
         #     title:      'Welch Periodogram'
         #     filename:   E$CYCLE.welch.txt
         #     plot:       True
-        
 
 
-    # -------------------------------------------------------------------- #
-
+# ---------------------------------------------------------------------------- #
+sde:
+    tab:    Spectral Density Estimates
 

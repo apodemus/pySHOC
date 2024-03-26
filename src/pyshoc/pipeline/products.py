@@ -1,7 +1,6 @@
 
 
 # std
-from recipes.functionals import echo
 import itertools as itt
 from pathlib import Path
 
@@ -12,23 +11,325 @@ from loguru import logger
 import motley
 from motley.table import Table
 from motley.table.xlsx import hyperlink_ext
+from recipes import string, op
 from recipes.functionals import echo
-from recipes.containers import ensure
-from recipes import cosort, op, string
 from recipes.tree import FileSystemNode
-from recipes.logging import LoggingMixin
-from recipes.containers.lists import remove
+from recipes.containers import ensure, remove
 from recipes.containers.dicts import DictNode
-from recipes.functionals.partial import Map, Partial, over, PlaceHolder as o
+from recipes.functionals.partial import over, PlaceHolder as o, Map, Partial
 
 # relative
 from .. import CONFIG
 from ..config import Template
-from .utils import get_file_age, human_time
+from .utils import get_file_age
+
+
+# ---------------------------------------------------------------------------- #
+class ProductNode(FileSystemNode):
+
+    @staticmethod
+    def _get_name(path):
+        return path.name
+        # return f'{path.name}{"/" * path.is_dir()}'
+
+    def __getitem__(self, key):
+        # sourcery skip: assign-if-exp, reintroduce-else
+        if self.is_leaf:
+            raise IndexError('Leaf node')
+
+        if isinstance(key, Path):
+            if key.is_absolute():
+                key = key.relative_to(self.root.as_path)
+            item = self
+            for key in key.parts:
+                item = item[key]
+            return item
+
+        try:
+            return super().__getitem__(key)
+        except KeyError as err:
+            return super().__getitem__(f'{key}/')
+
+    def get_ages(self):
+        for leaf in self.leaves:
+            leaf.age = get_file_age(leaf.as_path)
+        return self
+
+    def as_dict(self, attr='name', leaf_attr='age'):
+        if self.is_leaf:
+            return getattr(self, leaf_attr)
+
+        return {getattr(child, attr): child.as_dict(attr, leaf_attr)
+                for child in self.children}
 
 
 # ---------------------------------------------------------------------------- #
 
+# GROUPINGS = dict(
+#     by_file='file.stems',
+#     by_date='t.date_for_filename',
+#     # by_cycle=
+# )
+GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
+                            'date':  'DATE',
+                            'cycle': 'E'}
+
+# SAMPLE = ['sample']
+# SERIES = ['raw', 'flagged', 'diff0', 'diff', 'decor']
+SPECTRAL = dict(zip(
+    ['periodogram', 'lombscargle', 'welch', 'tfr', 'acf'],
+    itt.repeat('sde')))
+
+# SECTIONS = dict((*zip(SAMPLE, itt.repeat('Sample Images')),
+#                  *zip(SERIES, itt.repeat('Light Curves')),
+#                  *zip(SPECTRAL, itt.repeat('Spectral Density Estimates'))))
+# dict(*(zip(thing, itt.repeat(name))
+#        for thing, name in [(SAMPLE, 'Sample Images'),
+#                            (SERIES, 'Light Curves'),
+#                            (SPECTRAL, 'Spectral Density Estimates')])
+#      )
+
+
+# class DataProducts(LoggingMixin):
+
+#     GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
+#                                 'date':  'DATE',
+#                                 'cycle': 'E'}
+
+#     GROUPING_SORT_ATTR = {'file':  't.t0',
+#                           'date':  't.date_for_filename', }
+#     # 'cycle': 'E'}
+
+#     _remove_keys = ('by_file', 'by_date', 'concat')
+
+#     def __init__(self, run, paths, groupings=('file', 'date')):
+#         self.campaign = run
+#         self.paths = paths
+#         for g in groupings:
+#             names, targets = self.resolve(g)
+#             self.targets = {g: targets}
+
+#     def get_templates(self, key):
+
+#         # Get template tree
+#         tmp = self.paths.templates[key].copy()
+#         tmp = tmp.filter(('tracking', 'plots'))  # FIXME
+#         tmp, lcs = tmp.split('lightcurves')
+#         lcs = lcs.map(op.AttrGetter('template'))
+
+#         return DictNode({**tmp.flatten(),
+#                         **lcs.map(Template).flatten()}).flatten()
+
+#     def resolve(self, by):
+#         by = by.lower()
+#         if by == 'cycle':
+#             raise ValueError('TODO')
+
+#         key = GROUPING_TO_TEMPLATE_KEY[by]
+#         if by == 'file':
+#             # sort rows
+#             stems = self.campaign.sort_by('t.t0').files.stems
+#             templates = self.get_templates('HDU')
+#             files = _get_desired_products(stems, templates, key, FRAMES='')
+
+#         if by == 'date':
+#             # sort rows
+#             dates = sorted(set(self.campaign.attrs('t.date_for_filename')))
+#             templates = self.get_templates('DATE')
+#             files = _get_desired_products(dates, templates, key)
+
+#         #
+#         files = files.reshape(Partial(remove)(o, self.to_remove))
+#         return files.stack(level=0)
+
+#     # def get_desired_products(self, items, templates,  key, **kws):
+
+#     #     rows = DictNode()
+#     #     for val, (section, template) in itt.product(items, templates.items()):
+#     #         files = template.resolve_paths(section, **{key: val, **kws})
+#     #         rows[(val, *section)] = {file.suffix.strip('.'): file for file in files}
+
+#     #     return rows
+
+#     def write_xlsx(self, overview):
+
+#         paths = self.paths
+#         run = self.campaign
+#         sheets = paths.files.info.spreadsheets
+
+#         # Overview
+#         filename, *sheet = str(sheets.overview).split('::')
+
+#         # HDU
+#         filename, *sheet = str(sheets.by_file).split('::')
+#         _write_hdu_products_xlsx(run, paths, overview, filename, *sheet)
+
+#         # DATE
+#         filename, *sheet = str(sheets.by_date).split('::')
+#         return _write_nightly_products_xlsx(run, paths, filename, *sheet)
+
+
+# ---------------------------------------------------------------------------- #
+
+def replace_from(lookup, keys, level, at=None, fallback=None):
+
+    if level < len(keys):
+        keys = list(keys)
+        at = int(level if at is None else at)
+
+        if new := lookup.get(keys[level]):
+            keys[at] = new
+        elif fallback:
+            keys[at] = fallback(keys[at])
+
+    return tuple(keys)
+
+
+def insert_from(lookup, key, level, insert=0):
+
+    if new := lookup.get(key[level]):
+        return (*key[:insert], *ensure.list(new), *key[insert:])
+
+    return key
+
+
+def balance_depth(key, depth, insert=''):
+    # balance depth of the branches for table
+    key = list(key)
+    while len(key) < depth:
+        key.insert(-1, insert)
+
+    return tuple(key)
+
+
+# ---------------------------------------------------------------------------- #
+
+def _prepare_headers(products, path_info, to_remove, fixups, fmt, path_stop):
+
+    sections = list(products.flatten().keys())
+    headers = DictNode(zip(sections, sections))
+
+    # any ad hoc changes
+    for fixup in fixups:
+        headers = headers.map(fixup)
+
+    # get section title
+    headers = headers.map(get_titles)
+
+    # remove verbose keys
+    if to_remove:
+        headers = headers.map(Partial(remove)(o, *to_remove))
+
+    # add paths
+    headers = add_path_infos(headers, path_info, fmt, stop=path_stop)
+
+    # balance branch depths
+    headers = headers.map(Partial(balance_depth)(o, headers.depth()))
+
+    # filter empty row header lines
+    return remove_empty_rows(headers)
+
+
+def remove_empty_rows(headers):
+    # filter empty row header lines
+    keys, vals = zip(*headers.flatten().items())
+    return DictNode(zip(keys, zip(*filter(any, zip(*vals)))))
+
+
+def get_titles(section, lookup_at='tab', fallbacks={0: str.title}):
+    return tuple(_get_titles(section, lookup_at, fallbacks))[::-1]
+
+
+def _get_titles(section, lookup_at, fallbacks):
+    i = len(section)
+    while i:
+        key = section[:i]
+        if not (title := CONFIG.get((*key, lookup_at))):
+            fallback = fallbacks.get(i - 1, echo)
+            title = fallback(key[-1])
+
+        yield from (titles := ensure.tuple(title))[::-1]
+        i -= len(titles)
+
+
+def add_path_infos(headers, path_info, fmt, stop=None):
+    out = DictNode()
+    for section, header in headers.flatten().items():
+        info = path_info.get(section[:stop], ())
+        # print(f'{section = }\n{header = }\n{info = }')
+        out[section] = add_path_info(header, info, fmt)
+    return out
+
+
+def add_path_info(section, info, fmt='{}: {}'):
+    return tuple(_add_path_info(section, info, fmt))
+
+
+def _add_path_info(section, info, fmt):
+    for key, rpath in itt.zip_longest(section, info):
+        yield fmt.format(key, rpath) if rpath else key
+
+
+def get_path_info(sections, paths, templates):
+    return DictNode(_get_path_info(sections, paths, templates))
+
+
+def _get_path_info(sections, paths, templates):
+    for section in sections:
+        section = section[:-1]
+        rpaths = tuple(_get_relative_paths(section, paths))
+        # print(rpaths)
+        if tmp := templates.get(section):
+            yield section, (*rpaths, Path(tmp.template).name)
+
+
+def get_relative_paths(sections, paths, depth=-1, order=1, slash=None):
+    return {s: tuple(_get_relative_paths(s, paths, depth, order, slash))
+            for s in sections}
+
+
+def _get_relative_paths(section, paths, depth=-1, order=1, slash=None,
+                        parent=None, fill=False, fill_value=''):
+
+    top = parent = (parent or paths.folders.output)
+    depth = (n if (depth == -1) else depth) if (n := len(section)) else 0
+
+    slash = True
+    slashed = [*[('/' * (slash or slash is None))] * (n - 1), '/' * bool(slash)]
+    itr = zip(range(1, n + 1), slashed)
+    if order == -1:
+        itr = list(itr)[::-1]
+
+    ancestors = []
+    for i, slash in itr:
+        if ((i <= depth) and (section[0] != 'input')
+                    and (folder := paths.get_folder(section[:i])) and (folder != parent)
+                    and isinstance(folder, Path)
+                ):
+            #
+            if folder.is_relative_to(parent):
+                yield f'/{folder.relative_to(parent)!s}{slash}'
+                ancestors.append(parent)
+                parent = folder
+            elif folder.is_relative_to(top):
+                # yield f'/{folder.relative_to(top)!s}{slash}'
+                for trial in ancestors[::-1]:
+                    if folder.is_relative_to(trial):
+                        yield f'/{folder.relative_to(trial)!s}{slash}'
+                        parent = trial
+                        break
+
+        elif fill:
+            yield fill_value
+
+
+def replace_section_title(key, at='tab', level=0, fallback=str.title):
+    section = key[level]
+    new = CONFIG.get((section, at), fallback(section))
+    return (*key[:level], *ensure.list(new),  *key[(level + 1):])
+
+
+# ---------------------------------------------------------------------------- #
 
 def sanitize_filename(name):
     return name.lower().replace(' ', '')
@@ -52,239 +353,6 @@ def resolve_path(path, hdu, *frames, **kws):
 
     # if '$SOURCE' in path and kws.:
     return Path(string.sub(path, {**subs, **kws}))
-
-
-def get_previous(run, paths):
-    # get data products
-    output = paths.folders.output
-    products = ProductNode.from_path(output,
-                                     ignore=('.cache', '_old', 'logs'))
-    products.get_ages()
-
-    # get overview products
-    overview = {
-        section: products[path].as_dict()
-        for section, path in
-        paths.folders.select(('info', 'registration')).items()
-    }
-
-    # targets = DataProducts(run, paths)
-    #
-    # samples = paths.folders.samples
-    # _sample_plots = overview[samples.parent.name].pop(f'{samples.name}/')
-
-    #
-    debug = logger.bind(indent=' ').opt(lazy=True).info
-    pprint = (
-        # overview
-        lambda: ('overview',  _overview_table_vstack(overview, paths)),
-
-        # hdu products
-        lambda: ('hdu', _hdu_products_table(run, paths)),
-
-        # nightly data products
-        lambda: ('nightly', _nightly_products_table(run, paths))
-    )
-    for f in pprint:
-        debug('Found previous {0[0]} data products: \n{0[1]}', f)
-
-    return overview, products
-
-
-def _overview_table_hstack(overview, paths):
-    subtitles = {key: f'{key.title()}: /{paths.folders[key].relative_to(paths.folders.output)}/*'
-                 for key in overview}
-    tables = {
-        key: Table.from_dict(
-            dict(zip(*cosort(*zip(*items.items())))),
-            title=('Data Products: Overview' if (first := (key == 'info')) else ''),
-            col_groups=[subtitles[key]] * 2,  # if first else None,
-            col_groups_align='<',
-            col_headers=['file', 'Age'],  # if first else None,
-            formatter=human_time,
-            order='c',
-            **(CONFIG.console.products if first else
-                {'title_align': '<', 'title_style': ('B', '_')}),
-        )
-        for key, items in overview.items()
-    }
-
-    # return tables.values()
-    return motley.utils.hstack(tables.values(), spacing=0)
-    # return motley.utils.vstack.from_dict(tables, vspace=1)
-
-
-def _overview_table_vstack(overview, paths):
-    subtitles = {
-        key: f'{key.title()}: /{paths.folders[key].relative_to(paths.folders.output)}/*'
-        for key in overview
-    }
-
-    tables = {
-        key: Table.from_dict(
-            dict(zip(*cosort(*zip(*items.items())))),
-            title=('Data Products: Overview' if (first := (key == 'info'))
-                   else f'\n{subtitles[key]}'),
-            ignore_keys=('headers/'),
-            col_groups=[subtitles[key]] * 2 if first else None,
-            col_groups_align='<',
-            col_headers=['file', 'Age'] if first else None,
-            formatter=human_time,
-            order='c',
-            **(CONFIG.console.products if first else
-               {'title_align': '<', 'title_style': ('B', '_')}),
-        )
-        for key, items in overview.items()
-    }
-
-    tables = dict(zip(*cosort(tables.keys(), tables.values())))
-
-    # return tables.values()
-    return motley.utils.vstack.from_dict(tables, vspace=0)
-
-
-# ---------------------------------------------------------------------------- #
-class ProductNode(FileSystemNode):
-
-    @staticmethod
-    def get_label(path):
-        return path.name
-        # return f'{path.name}{"/" * path.is_dir()}'
-
-    def __getitem__(self, key):
-        # sourcery skip: assign-if-exp, reintroduce-else
-        if self.is_leaf:
-            raise IndexError('Leaf node')
-
-        if isinstance(key, Path):
-            if key.is_absolute():
-                key = key.relative_to(self.root.as_path())
-            item = self
-            for key in key.parts:
-                item = item[key]
-            return item
-
-        try:
-            return super().__getitem__(key)
-        except KeyError as err:
-            return super().__getitem__(f'{key}/')
-
-    def get_ages(self):
-        for leaf in self.leaves:
-            leaf.age = get_file_age(leaf.as_path())
-        return self
-
-    def as_dict(self, attr='name', leaf_attr='age'):
-        if self.is_leaf:
-            return getattr(self, leaf_attr)
-
-        return {getattr(child, attr): child.as_dict(attr, leaf_attr)
-                for child in self.children}
-
-
-# ---------------------------------------------------------------------------- #
-
-# GROUPINGS = dict(
-#     by_file='file.stems',
-#     by_date='t.date_for_filename',
-#     # by_cycle=
-# )
-GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
-                            'date':  'DATE',
-                            'cycle': 'E'}
-
-
-class DataProducts(LoggingMixin):
-
-    GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
-                                'date':  'DATE',
-                                'cycle': 'E'}
-
-    GROUPING_SORT_ATTR = {'file':  't.t0',
-                          'date':  't.date_for_filename', }
-    # 'cycle': 'E'}
-
-    _remove_keys = ('by_file', 'by_date', 'concat')
-
-    def __init__(self, run, paths, groupings=('file', 'date')):
-        self.campaign = run
-        self.paths = paths
-        for g in groupings:
-            names, targets = self.resolve(g)
-            self.targets = {g: targets}
-
-    def get_templates(self, key):
-
-        # Get template tree
-        tmp = self.paths.templates[key].copy()
-        tmp = tmp.filter(('tracking', 'plots'))  # FIXME
-        tmp, lcs = tmp.split('lightcurves')
-        lcs = lcs.map(op.AttrGetter('template'))
-
-        return DictNode({**tmp.flatten(),
-                        **lcs.map(Template).flatten()}).flatten()
-
-    def resolve(self, by):
-        by = by.lower()
-        if by == 'cycle':
-            raise ValueError('TODO')
-
-        key = GROUPING_TO_TEMPLATE_KEY[by]
-        if by == 'file':
-            # sort rows
-            stems = self.campaign.sort_by('t.t0').files.stems
-            templates = self.get_templates('HDU')
-            files = _get_desired_products(stems, templates, key, FRAMES='')
-
-        if by == 'date':
-            # sort rows
-            dates = sorted(set(self.campaign.attrs('t.date_for_filename')))
-            templates = self.get_templates('DATE')
-            files = _get_desired_products(dates, templates, key)
-
-        #
-        files = files.reshape(Partial(remove)(o, self.to_remove))
-        return files.stack(level=0)
-
-    # def get_desired_products(self, items, templates,  key, **kws):
-
-    #     rows = DictNode()
-    #     for val, (section, template) in itt.product(items, templates.items()):
-    #         files = template.resolve_paths(section, **{key: val, **kws})
-    #         rows[(val, *section)] = {file.suffix.strip('.'): file for file in files}
-
-    #     return rows
-
-    def write_xlsx(self, overview):
-
-        paths = self.paths
-        run = self.campaign
-
-        # HDU
-        filename, *sheet = str(paths.files.info.products.by_file).split('::')
-        _write_hdu_products_xlsx(run, paths, overview, filename, *sheet)
-
-        # DATE
-        filename, *sheet = str(paths.files.info.products.by_date).split('::')
-        return _write_nightly_products_xlsx(run, paths, filename, *sheet)
-
-
-# ---------------------------------------------------------------------------- #
-
-# SAMPLE = ['sample']
-# SERIES = ['raw', 'flagged', 'diff0', 'diff', 'decor']
-SPECTRAL = dict(zip(
-    ['periodogram', 'lombscargle', 'welch', 'tfr', 'acf'],
-    itt.repeat('sde')))
-
-# SECTIONS = dict((*zip(SAMPLE, itt.repeat('Sample Images')),
-#                  *zip(SERIES, itt.repeat('Light Curves')),
-#                  *zip(SPECTRAL, itt.repeat('Spectral Density Estimates'))))
-# dict(*(zip(thing, itt.repeat(name))
-#        for thing, name in [(SAMPLE, 'Sample Images'),
-#                            (SERIES, 'Light Curves'),
-#                            (SPECTRAL, 'Spectral Density Estimates')])
-#      )
 
 
 def _get_templates(paths, key):
@@ -326,194 +394,194 @@ def _get_desired_products(items, templates, key, **kws):
 
     return rows
 
-
-# ---------------------------------------------------------------------------- #
-
-def replace_from(lookup, keys, level, at=None, fallback=None):
-
-    if level < len(keys):
-        keys = list(keys)
-        at = int(level if at is None else at)
-
-        if new := lookup.get(keys[level]):
-            keys[at] = new
-        elif fallback:
-            keys[at] = fallback(keys[at])
-
-    return tuple(keys)
-
-
-def insert_from(key, lookup, level, insert=0):
-
-    if new := lookup.get(key[level]):
-        return (*key[:insert], *ensure.list(new), *key[insert:])
-
-    return key
-
-
-def balance_depth(key, depth, insert=''):
-    # balance depth of the branches for table
-    key = list(key)
-    while len(key) < depth:
-        key.insert(-1, insert)
-
-    return tuple(key)
-
-
-# ---------------------------------------------------------------------------- #
-
-def add_path_info(section, info, fmt='{}: /{}/'):
-    return tuple(_add_path_info(section, info, fmt))
-
-
-def _add_path_info(section, info, fmt):
-    for key, rpath in itt.zip_longest(section, info):
-        yield fmt.format(key, rpath) if rpath else key
-
-
-def get_path_info(sections, paths, templates):
-    return DictNode(_get_path_info(sections, paths, templates))
-
-
-def _get_path_info(sections, paths, templates):
-    for section in sections:
-        section = section[:-1]
-        rpaths = tuple(_rpaths(section, paths, fill=False))
-        if tmp := templates.get(section):
-            yield section, (*rpaths, Path(tmp.template).name)
-
-
-def get_relative_paths(sections, paths, depth=-1):
-    return {s: tuple(_rpaths(s, paths, depth)) for s in sections}
-
-
-def _rpaths(section, paths, depth=-1, fill=False, fill_value=''):
-    parent = paths.folders.output
-    depth = depth % (n := len(section))
-    for i in range(1, n + 1):
-        if ((i <= depth) and (folder := paths.get_folder(section[:i]))
-                and (folder != parent)):
-            yield str(folder.relative_to(parent))
-            parent = folder
-        elif fill:
-            yield fill_value
-
-
-def replace_section_title(key, at='tab', level=0, fallback=str.title):
-    section = key[level]
-    new = CONFIG.get((section, at), fallback(section))
-    return (*key[:level], *ensure.list(new),  *key[(level + 1):])
-
-
-def get_titles(section, lookup_at='tab', fallbacks={0: str.title}):
-    return tuple(_get_titles(section, lookup_at, fallbacks))
-
-
-def _get_titles(section, lookup_at, fallbacks):
-    for i in range(1, len(section) + 1):
-        key = section[:i]
-        if not (title := CONFIG.get((*key, lookup_at))):
-            fallback = fallbacks.get(i, echo)
-            title = fallback(key[-1])
-
-        yield from ensure.list(title)
-
 # ---------------------------------------------------------------------------- #
 
 
-def _get_hdu_products(run, paths, overview=None, **kws):
+def get_previous(run, paths):
+    # get data products
+    output = paths.folders.output
+    products = ProductNode.from_path(output,
+                                     ignore=('.cache', '_old', 'logs'))
+    products.get_ages()
+
+    # get overview products
+    overview = _get_overview_products(paths)
+
+    # targets = DataProducts(run, paths)
+
+    #
+    debug = logger.bind(indent=' ').opt(lazy=True).info
+    pprint = (
+        # overview
+        lambda: ('overview',  _overview_products_table(overview, paths)),
+
+        # hdu products
+        lambda: ('hdu', _hdu_products_table(run, paths)),
+
+        # nightly data products
+        lambda: ('nightly', _nightly_products_table(run, paths))
+    )
+    for f in pprint:
+        debug('Found previous {0[0]} data products: \n{0[1]}', f)
+
+    return overview, products
+
+
+def _get_overview_products(paths):
+    return paths.files.filter(values=lambda s: '$' in str(s))
+
+
+def _overview_products_table(overview, paths):
+    return _overview_products_hstack(overview, paths)
+
+
+def _overview_products_hstack(overview, paths):
+
+    # get overview products
+    overview = overview.filter('logging')
+
+    # header edits
+    to_remove = ('Overview', )
+    fixup = Partial(replace_from)({'Overview': 'Registration'}, o, 0, 0)
+
+    # path info format
+    fmt = R'{{:<{width:}}: {{!s}/:|turquoise}:|bold}'
+    fmt_subtitle = motley.stylize(fmt, width=13)
+    fmt_header = motley.stylize(fmt, width='')
+
+    # get relative paths
+    sections = list(overview.flatten().keys())
+    path_info = get_relative_paths(sections, paths, slash=False)
+
+    # Map to path name and age
+    out = overview.map(lambda path: (path.name, path))
+
+    # get headers
+    headers = _prepare_headers(out, path_info, to_remove, [fixup],
+                               fmt_header, None)
+
+    return Table.from_dict(
+        out.reshape(headers.get),
+        # too_wide=False,
+        title='Data Products: Overview',
+        row_headers=['File', 'Age'],
+        converters={Path: Partial(get_file_age)(o, human=True)},
+        col_header_align='<',
+        align='<',
+        subtitle='\n'.join(
+            fmt_subtitle.format(f'{io.title()}put folder',
+                                getattr(paths.folders, f'{io}put'))
+            for io in ('in', 'out')),
+        subtitle_align='<',
+        subtitle_style='_',
+        **CONFIG.console.products
+    )
+
+
+def _write_overview_products_table(overview, paths, filename=None, sheet=None,
+                                   overwrite=True):
+
+    out = overview.filter('spreadsheets')
+
+    tbl = Table.from_dict(out,
+                          title='Data Products Overview',
+                          convert={Path: hyperlink_ext})
+
+    return tbl.to_xlsx(
+        filename, sheet, overwrite=overwrite,
+        formats={...:  ';;;[Blue]@'},
+        widths={'headers':  7,
+                # 'Overview': 4,
+                # 'samples':  7,
+                ...:        7},
+        align={  # base: '<',
+            #    'Overview': dict(horizontal='center',
+            #                     vertical='center',
+            #                     text_rotation=90),
+            ...: dict(horizontal='center',
+                      vertical='center')},
+        merge_unduplicate=('headers', )  # 'Overview',
+    )
+
+
+# ---------------------------------------------------------------------------- #
+
+def _get_hdu_products(run, paths, **kws):
 
     #
     templates = _get_templates(paths, 'HDU')
     desired_files = get_desired_products(run, templates, by='file')
 
     # input for table
-    out = DictNode()
+    products = DictNode()
     base, files = 'base', 'fits'
-    out['input', base] = list(desired_files.keys())
-    out['input', files] = run.files.paths
+    products['input', base] = list(desired_files.keys())
+    products['input', files] = run.files.paths
 
     # add files
-    out.update(desired_files.stack(level=0))
+    products.update(desired_files.stack(level=0))
 
-    if overview:
-        # re-section
-        out['registration', 'samples'] = out.pop('samples')
+    # sort columns
+    products = products.sorted(['input', 'info', 'samples', 'lightcurves'])
 
-        # duplicate Overview images so that they get merged below
-        rplot_paths = paths.files.registration.plots
-        path = rplot_paths.alignment.parent
-        out['registration', 'alignment', 'png'] = \
-            [path / _ for _ in overview['registration'][f'{path.name}/']]
-
-    out = out.sorted(['input', 'info', 'registration', 'lightcurves'])
-
-    return out, DictNode(templates)
+    return products, DictNode(templates)
 
 
 def _hdu_products_table(run, paths):
     #
-    tree, templates = _get_hdu_products(run, paths)
-
-    # get relative paths
-    sections = list(tree.flatten().keys())
-    path_info = get_path_info(sections, paths, templates)
-
-    # replace 'filename' header
-    fixup = {'filename': 'ts'}
-    headers = Map(replace_from)(fixup, Over(sections), -2)
-
-    # get section title
-    headers = Map(replace_from)(SPECTRAL, Over(headers), -2, 0)
+    products, templates = _get_hdu_products(run, paths)
 
     # remove verbose keys
-    to_remove = ('by_file', 'by_date', 'concat')
-    headers = Map(remove)(Over(headers), *to_remove)
+    to_remove = ('filename', 'concat', 'by_file', 'by_date')
 
-    # balance depth of branches
-    depth = max(map(len, headers))
-    headers = Map(balance_depth)(Over(headers), depth)
+    fixups = (
+        # get section title
+        Partial(replace_from)(SPECTRAL, o, -2, 0),
+        # add level header for time series
+        Partial(insert_from)({'lightcurves': 'ts'}, o, 0, -1)
+    )
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':472")
+    # get relative paths
+    sections = list(products.flatten().keys())
+    path_info = get_path_info(sections, paths, templates)
 
-    # get section titles
+    # path info format
     fmt = motley.stylize(R'{{}: {{!s}:|turquoise}:|bold}')
-    new = []
-    for section, header in zip(sections, headers):
-        titles = get_titles(header)
-        infos = path_info.get(section[:-1], ())
-        new.append(add_path_info(titles, infos, fmt))
 
-    # finally combine headers and data
-    out = DictNode(zip(new, tree.flatten().values()))
+    # get headers
+    headers = _prepare_headers(products, path_info, to_remove, fixups, fmt,
+                               path_stop=-1)
+    row_headers = products.pop(('input', 'base'))
 
-    return Table.from_dict(
-        out,
+    tbl = Table.from_dict(
+        products.reshape(headers.get),
         title='HDU Data Products',
         converters={Path: Partial(get_file_age)(o, human=True)},
+        row_headers=row_headers,
         align='<',
-        col_groups_align='<',
-        subtitle=fmt.format('Output folder', paths.folders.output),
+        col_header_align='<',
+        subtitle='\n'.join(fmt.format(f'{io.title()}put folder',
+                                      getattr(paths.folders, f'{io}put'))
+                           for io in ('in', 'out')),
         subtitle_align='<',
-        subtitle_style=('_'),
+        subtitle_style='_',
         **CONFIG.console.products
     )
 
+    tbl.headers_header_block[:, 0] = ('Input', '', '', 'base')
+    return tbl
 
-def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
+
+def _write_hdu_products_xlsx(run, paths, filename=None, sheet=None,
                              overwrite=True):
 
     base, files = 'base', 'fits'
-    tree = _get_hdu_products(run, paths, overview)
-    tree = tree.reshape(replace_section_title)
+    out, templates = _get_hdu_products(run, paths)
 
-    tbl = Table.from_dict(tree,
+    tbl = Table.from_dict(out,
                           title='HDU Data Products',
                           convert={Path: hyperlink_ext,
-                                   files: hyperlink_ext,
-                                   #    'Overview': hyperlink_name
-                                   })
+                                   files: hyperlink_ext})
     # create table
     # col_sort = op.index(
 
@@ -532,8 +600,8 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
 
     return tbl.to_xlsx(
         filename, sheet, overwrite=overwrite,
-        formats={base: str,
-                 ...:  ';;;[Blue]@'},
+        formats={
+            ...:  ';;;[Blue]@'},
         widths={base:       14,
                 files:      5,
                 'headers':  7,
@@ -551,57 +619,92 @@ def _write_hdu_products_xlsx(run, paths, overview, filename=None, sheet=None,
 
 
 # ---------------------------------------------------------------------------- #
-# def _get_column_header(base, keys, paths):
-#     section, *_ = keys
-#     rpath = paths.get_folder(keys).relative_to(paths.folders.output)
-
-#     return (CONFIG[section].get('title', ''),
-#             f'{rpath.parent}/',
-#             f'{rpath.name}/',
-#             Path(paths.templates[(base, *keys)].template).name)
-
 
 def _get_nightly_products(run, paths):
 
-    def get_header(key, depth):
-        key = list(key)
-
-        # replace 'filename' header
-        fixup = {'lightcurves': 'ts'}
-        repl = fixup.get(key[0], '')
-        replace(key, 'filename', repl)
-
-        # balance depth of the branches for table
-        while len(key) < depth:
-            key.insert(-1, repl)
-
-        return tuple(key)
-
-    #
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':561")
-
     date = 'date'
     templates = _get_templates(paths, date.upper())
-    to_remove = ('by_file', 'by_date', 'concat')
     desired_files = get_desired_products(run, templates, by=date)
-    desired_files = desired_files.reshape(Partial(remove)(o, *to_remove))
 
     #
     tree = DictNode()
     tree['input', date] = list(desired_files.keys())
+
     tree.update(desired_files.stack(level=0))
-    return tree.reshape(Partial(get_header)(o, tree.depth()))
+    return tree, templates
+
+
+def _nightly_products_table(run, paths):
+
+    #
+    products, templates = _get_nightly_products(run, paths)
+
+    # remove verbose keys
+    to_remove = ()
+    fixups = (
+        # get section title
+        Partial(replace_from)(SPECTRAL, o, 2, 0),
+    )
+
+    # get relative paths
+    sections = list(products.flatten().keys())
+    path_info = get_path_info(sections, paths, templates)
+
+    # path info format
+    fmt = motley.stylize(R'{{}: {{!s}:|turquoise}:|bold}')
+
+    # get headers
+    headers = _prepare_headers(products, path_info, to_remove, fixups,
+                               fmt, path_stop=-1)
+
+    return Table.from_dict(
+        products.reshape(headers.get),
+        title='Nightly Data Products',
+        convert={Path: Partial(get_file_age)(o, human=True)},
+        align='<',
+        col_header_align='<',
+        subtitle='\n'.join(fmt.format(f'{io.title()}put folder',
+                                      getattr(paths.folders, f'{io}put'))
+                           for io in ('in', 'out')),
+        subtitle_align='<',
+        subtitle_style='_',
+        **CONFIG.console.products
+    )
 
 
 def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
                                  overwrite=True):
 
-    tree = _get_nightly_products(run, paths)
-    tree = tree.reshape(replace_section_title)
-    # tree = tree.reshape(_replace_key_from(o, SECTIONS, 2, True))
+    #
+    tree, templates = _get_nightly_products(run, paths)
+    sections = list(tree.flatten().keys())
 
-    # tree = _add_path_info(tree, paths, '{!s}')
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':626")
+
+    # get relative paths
+    path_info = get_path_info(sections, paths, templates)
+    sx, pp = paths.folders.find('concat').flatten().popitem()
+    *_, keep = path_info[sx]
+    path_info[sx] = (*_get_relative_paths(('lightcurves', 'by_date'), paths, slash=True), keep)
+
+    # # remove verbose keys
+    to_remove = ('filename', 'concat', 'by_file', 'by_date')
+    headers = Map(remove)(over(sections), *to_remove)
+
+    # get section title
+    headers = Map(replace_from)(SPECTRAL, over(headers), 1)
+
+    # get section titles
+    fmt = motley.stylize(R'{{}: {{!s}:|turquoise}:|bold}')
+    headers = add_path_infos(sections, path_info, fmt)
+
+    # balance branch depths
+    depth = max(map(len, headers.values()))
+    headers = headers.map(Partial(balance_depth)(o, depth))
+
+    # finally combine headers and data
+    out = DictNode(zip(new, tree.flatten().values()))
 
     tbl = Table.from_dict(
         tree,
@@ -623,32 +726,17 @@ def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
     )
 
 
-def _nightly_products_table(run, paths):
-
-    # templates = paths.templates['DATE'].flatten()
-    # desired_files = get_desired_products(run, templates, by='date')
-    # headers = [_get_column_header('DATE', s, paths) for s in templates.keys()]
-
-    tree = _get_nightly_products(run, paths)
-    fmt = motley.stylize(R'{{}: {/{!s}/:|turquoise}:|bold}')
-    out = _add_path_info(tree, paths, fmt)
-
-    return Table.from_dict(
-        out,
-        title='Nightly Data Products',
-        convert={Path: Partial(get_file_age)(o, human=True)},
-        align='<',
-        col_groups_align='<',
-        **CONFIG.console.products
-    )
-
-
 def write_xlsx(run, paths, overview):
+    sheets = paths.files.info.spreadsheets
+
+    # Overview
+    filename, *sheet = str(sheets.overview).split('::')
+    _write_overview_products_table(overview, paths, filename, *sheet)
 
     # HDU
-    filename, *sheet = str(paths.files.info.products.by_file).split('::')
-    _write_hdu_products_xlsx(run, paths, overview, filename, *sheet)
+    filename, *sheet = str(sheets.by_file).split('::')
+    _write_hdu_products_xlsx(run, paths, filename, *sheet)
 
     # DATE
-    filename, *sheet = str(paths.files.info.products.by_date).split('::')
+    filename, *sheet = str(sheets.by_date).split('::')
     return _write_nightly_products_xlsx(run, paths, filename, *sheet)
