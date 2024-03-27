@@ -9,10 +9,10 @@ from mpl_multitab import MplMultiTab
 
 # local
 from recipes import dicts
+from recipes.oo import slots
 from recipes.string import indent
 from recipes.pprint import callers
 from recipes.logging import LoggingMixin
-from recipes.oo.slots import SlotHelper, _sanitize_locals
 from recipes.functionals.partial import Partial, PartialTask
 
 # relative
@@ -88,7 +88,7 @@ class TaskFactory(Partial, LoggingMixin):
     def __wrapper__(self, func, *args, **kws):
 
         # resolve placholders and static params
-        task = PlotTask(func, *args, **kws)
+        task = PlotTask(self.ui, func, *args, **kws)
 
         # create TaskRunner, which will run PlotTask when called
         return TaskRunner(task, **task.fig_kws)
@@ -116,11 +116,13 @@ class TaskRunner(_TaskBase):
 class PlotTask(_TaskBase):
     """Plot Task"""
 
-    def __init__(self, func, *args, **kws):
+    def __init__(self, ui, func, *args, **kws):
 
         # split keywords for figure init
         kws, self.fig_kws = dicts.split(kws, FIG_KWS)
 
+        #
+        self.ui = ui
         # resolve placholders and static params
         super().__init__(func, *args, **kws)
 
@@ -152,13 +154,13 @@ class PlotTask(_TaskBase):
             # to replace it after the task executes with the actual figure we
             # want in our tab.
             figure = art.fig
-            mgr = ui[tuple(tab)]._parent()
+            mgr = self.ui[tuple(tab)]._parent()
             mgr.replace_tab(tab[-1], figure, focus=False)
 
         return figure, art
 
 
-class TabTask(SlotHelper, LoggingMixin):
+class TabTask(slots.SlotHelper, LoggingMixin):
 
     __slots__ = ('ui', 'task', 'tab', 'filename', 'overwrite', 'save_kws')
 
@@ -175,7 +177,7 @@ class TabTask(SlotHelper, LoggingMixin):
             self.logger.debug('Figure for task {} will be saved at {}. {}.',
                               task, filename, f'{overwrite = }')
 
-        super().__init__(**_sanitize_locals(locals()))
+        super().__init__(**slots.sanitize(locals()))
 
     def __call__(self, figure, tab, *args, **kws):
 
