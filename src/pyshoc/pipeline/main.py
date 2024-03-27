@@ -141,7 +141,8 @@ def get_sample_images(run, detection=True, show_cutouts=False):
         logger.section('Source Detection')
 
         if detection is True:
-            detection = CONFIG.detection
+            detection = dict(CONFIG.detection)
+            detection.pop('algorithm')
 
     #
     samples = defaultdict(dict)
@@ -153,11 +154,9 @@ def get_sample_images(run, detection=True, show_cutouts=False):
 
 
 def _get_hdu_samples(hdu, detection, show_cutouts):
-
-    stat = CONFIG.samples.params.stat
-    min_depth = CONFIG.samples.params.min_depth
-    n_intervals = CONFIG.samples.params.n_intervals
-    subset = CONFIG.samples.params.subset
+    params = CONFIG.samples.params
+    stat, min_depth, n_intervals, subset = \
+        op.attrgetter('stat', 'min_depth', 'n_intervals', 'subset')(params)
 
     for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
         # Source detection. Reporting happens below.
@@ -665,9 +664,12 @@ def plot_drizzle(fig, *indices, filename):
 # ---------------------------------------------------------------------------- #
 # Tracking
 
-def track(run, reg, paths, ui, overwrite=False, njobs=-1):
+
+def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
 
     logger.section('Source Tracking')
+
+    # setup detection (needed for recovery when tracking lost)
     spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
     spanning = np.add(spanning, 1)
     logger.info('Sources: {} span all observations.', spanning)
@@ -681,11 +683,59 @@ def track(run, reg, paths, ui, overwrite=False, njobs=-1):
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
             # path = products.resolve_path(paths.folders.tracking, hdu)
-            tracker = _track(hdu, img.seg, spanning, coords,
-                             paths, ui, overwrite, njobs=njobs)
+            tracker = _track(reg, hdu, img.seg, spanning, coords,
+                             paths, ui, plot, overwrite, njobs=njobs)
 
     logger.info('Source tracking complete.')
     return spanning
+
+
+@update_defaults(CONFIG.tracking.params)
+def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
+           dilate=0, njobs=-1):
+
+    logger.bind(indent=True).opt(lazy=True).info(
+        'Launching tracker for {0[0]}.\ncoords = {0[1]}',
+        lambda: (motley.darkgreen(hdu.file.name),
+                 pp.nrs.matrix(coords, 2).replace('\n', f'\n{"": >9}'))
+    )
+
+    # Make circular regions for measuring centroids
+    if (cfg := CONFIG.tracking).params.circularize:
+        seg = seg.circularize()
+
+    if njobs == -1:
+        njobs = CONFIG.tracking.params.njobs
+
+    base = products.resolve_path(paths.folders.tracking.folder, hdu)
+    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
+    tracker.reg = reg
+    # tracker.detection.algorithm = CONFIG.detection
+    tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
+    tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
+
+    # plot
+    if plot and cfg.plot:
+        kws, tmp = cfg.plots.positions.split('filename')
+        tmp = str(products.resolve_path(tmp.filename, hdu))
+
+        #                  year, day, nr
+        tab = (*cfg.tab, *get_tab_key(hdu))
+        for j in tracker.use_labels:
+            # plot source location features
+            task = ui.task_factory(tracker.plot.positions_source)(o, o[-1], **kws)
+            ui.add_task(task, (*tab, f'Source {j}'),
+                        tmp.replace('$SOURCE', str(j)), overwrite)
+
+        # plot positions displacement time series
+        kws, outer = cfg.plots.time_series.split(('filename', 'tab'))
+
+        task = ui.task_factory(tracker.plot.displacement_time_series)(o.axes[0], **kws)
+        ui.add_task(task, (*tab, *outer.tab),
+                    products.resolve_path(outer.filename, hdu), overwrite,
+                    add_axes=True)
+
+    return tracker
 
 
 def _tracker_target_files(templates, hdu, sources):
@@ -721,51 +771,6 @@ def _tracker_missing_files(templates, hdu, sources):
         logger.info('First time run for {}.', hdu.file.name)
 
     return missing
-
-
-@update_defaults(CONFIG.tracking.params)
-def _track(hdu, seg, labels, coords, paths, ui, overwrite=False, dilate=0, njobs=-1):
-
-    logger.bind(indent=True).opt(lazy=True).info(
-        'Launching tracker for {0[0]}.\ncoords = {0[1]}',
-        lambda: (motley.darkgreen(hdu.file.name),
-                 pp.nrs.matrix(coords, 2).replace('\n', f'\n{"": >9}'))
-    )
-
-    # Make circular regions for measuring centroids
-    if (cfg := CONFIG.tracking).params.circularize:
-        seg = seg.circularize()
-
-    if njobs == -1:
-        njobs = CONFIG.tracking.params.njobs
-
-    base = products.resolve_path(paths.folders.tracking.folder, hdu)
-    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
-    tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
-    tracker.run(hdu.calibrated, njobs=njobs)
-
-    # plot
-    if cfg.plot:
-        kws, tmp = cfg.plots.positions.split('filename')
-        tmp = str(products.resolve_path(tmp.filename, hdu))
-
-        #                  year, day, nr
-        tab = (*cfg.tab, *get_tab_key(hdu))
-        for j in tracker.use_labels:
-            # plot source location features
-            task = ui.task_factory(tracker.plot.positions_source)(o, o[-1], **kws)
-            ui.add_task(task, (*tab, f'Source {j}'),
-                        tmp.replace('$SOURCE', str(j)), overwrite)
-
-        # plot positions displacement time series
-        kws, outer = cfg.plots.time_series.split(('filename', 'tab'))
-
-        task = ui.task_factory(tracker.plot.displacement_time_series)(o.axes[0], **kws)
-        ui.add_task(task, (*tab, *outer.tab),
-                    products.resolve_path(outer.filename, hdu), overwrite,
-                    add_axes=True)
-
-    return tracker
 
 
 # ---------------------------------------------------------------------------- #

@@ -11,7 +11,6 @@ import numpy as np
 # local
 import motley
 from motley.utils import Filler, GroupTitle
-from motley.formatters import ConditionalFormatter
 from recipes import op
 from recipes.logging import LoggingMixin
 from recipes.containers.sets import OrderedSet
@@ -381,40 +380,40 @@ class MatchedObservations(LoggingMixin):
                            group_header_style, g1_style, no_match_style,
                            **kws))
 
-    def _delta_table(self, tbl, deltas, headers, threshold_warn):
-        #        threshold_warn: int, optional, default=None
-        # If the difference in attribute values for attributes in `closest`
-        #     are greater than `threshold_warn`, a warning is emitted
+    # def _delta_table(self, tbl, deltas, headers, threshold_warn):
+    #     #        threshold_warn: int, optional, default=None
+    #     # If the difference in attribute values for attributes in `closest`
+    #     #     are greater than `threshold_warn`, a warning is emitted
 
-        if threshold_warn is not None:
-            threshold_warn = np.atleast_1d(threshold_warn)
-            assert threshold_warn.size == len(self.closest)
+    #     if threshold_warn is not None:
+    #         threshold_warn = np.atleast_1d(threshold_warn)
+    #         assert threshold_warn.size == len(self.closest)
 
-        # size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
-        # depth = np.product(
-        #     np.array(list(map(np.shape, deltas.values()))).max(0)[[0, -1]])
+    #     # size = sum(sum(map(len, filter(None, g.values()))) for g in (g0, g1))
+    #     # depth = np.product(
+    #     #     np.array(list(map(np.shape, deltas.values()))).max(0)[[0, -1]])
 
-        # dtmp = np.ma.empty((size, depth), 'O')  # len(closest)
-        # dtmp[:] = np.ma.masked
+    #     # dtmp = np.ma.empty((size, depth), 'O')  # len(closest)
+    #     # dtmp[:] = np.ma.masked
 
-        # for key, other in g1.items()
-        #     # populate delta table
-        #     s0 = n + np.size(other)
-        #     delta_mtx = np.ma.hstack(deltas.get(key, [np.ma.masked]))
-        #     dtmp[s0:s0 + np.size(obs), :delta_mtx.shape[-1]] = delta_mtx
+    #     # for key, other in g1.items()
+    #     #     # populate delta table
+    #     #     s0 = n + np.size(other)
+    #     #     delta_mtx = np.ma.hstack(deltas.get(key, [np.ma.masked]))
+    #     #     dtmp[s0:s0 + np.size(obs), :delta_mtx.shape[-1]] = delta_mtx
 
-        headers = list(map('Δ({})'.format, headers))
-        formatters = []
-        fmt_db = {'date': lambda d: d.days}
-        deltas0 = next(iter(deltas.values())).squeeze()
-        for d, w in zip(deltas0, threshold_warn):
-            fmt = ConditionalFormatter('yellow', op.gt,
-                                       type(d)(w.item()), fmt_db.get(kw))
-            formatters.append(fmt)
-        #
-        insert = {ln: [('\n', '>', 'underline')] + ([''] * (len(v) - 2))
-                  for ln, v in tbl.insert.items()}
-        formatters = formatters or None
-        headers *= (depth // len(closest))
-        return Table(dtmp, col_headers=headers, formatters=formatters,
-                     insert=insert, hlines=hlines)
+    #     headers = list(map('Δ({})'.format, headers))
+    #     formatters = []
+    #     fmt_db = {'date': lambda d: d.days}
+    #     deltas0 = next(iter(deltas.values())).squeeze()
+    #     for d, w in zip(deltas0, threshold_warn):
+    #         fmt = ConditionalFormatter('yellow', op.gt,
+    #                                    type(d)(w.item()), fmt_db.get(kw))
+    #         formatters.append(fmt)
+    #     #
+    #     insert = {ln: [('\n', '>', 'underline')] + ([''] * (len(v) - 2))
+    #               for ln, v in tbl.insert.items()}
+    #     formatters = formatters or None
+    #     headers *= (depth // len(closest))
+    #     return Table(dtmp, col_headers=headers, formatters=formatters,
+    #                  insert=insert, hlines=hlines)
