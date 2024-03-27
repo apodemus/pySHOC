@@ -1,6 +1,5 @@
 
 # std
-import itertools as itt
 from pathlib import Path
 from collections import abc
 

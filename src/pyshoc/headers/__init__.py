@@ -1,4 +1,4 @@
 
-from .core import *
-from .utils import *
-from .convert import *
+from .core import shocHeader
+from .convert import convert, get_old_keys
+from .utils import intersection, match_term, table

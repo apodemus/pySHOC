@@ -11,12 +11,12 @@ from loguru import logger
 import motley
 from motley.table import Table
 from motley.table.xlsx import hyperlink_ext
-from recipes import string, op
+from recipes import op, string
 from recipes.functionals import echo
 from recipes.tree import FileSystemNode
 from recipes.containers import ensure, remove
 from recipes.containers.dicts import DictNode
-from recipes.functionals.partial import over, PlaceHolder as o, Map, Partial
+from recipes.functionals.partial import Map, Partial, over, PlaceHolder as o
 
 # relative
 from .. import CONFIG
