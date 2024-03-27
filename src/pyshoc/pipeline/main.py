@@ -415,24 +415,32 @@ def calibration(run, overwrite):
 def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
     files = paths.files.registration
-    # None in [hdu.wcs for hdu in run]
+    if (use_previous := (files.registry.exists() and not overwrite)):
 
-    if do_reg := (overwrite or not files.registry.exists()):
+        logger.info('Loading image registry from file: {}.', files.registry)
+        try:
+            reg = io.deserialize(files.registry)
+        except Exception as err:
+            logger.warning(
+                'Could not load image registry from file: {} due to the '
+                'following exception:\n {}', files.registry, str(err)
+            )
+            use_previous = False
+        else:
+            reg.params = np.load(files.params)
+
+            # retrieve samples from register
+            # TODO: get from fits?
+            samples_cal = {
+                fn: {('', ''): im}
+                for fn, im in zip(run.files.names, list(reg)[1:])
+            }
+
+    if not use_previous:
         # Sample images (after calibration)
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
-    else:
-        logger.info('Loading image registry from file: {}.', files.registry)
-        reg = io.deserialize(files.registry)
-        reg.params = np.load(files.params)
 
-        # retrieve samples from register
-        # TODO: get from fits?
-        samples_cal = {
-            fn: {('', ''): im}
-            for fn, im in zip(run.files.names, list(reg)[1:])
-        }
-        # samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
-
+    #
     if plot:
         # -------------------------------------------------------------------- #
         # Plot calibrated thumbnails if calibratuib data available available
@@ -452,7 +460,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
     # align
     # ------------------------------------------------------------------------ #
-    if do_reg:
+    if not use_previous:
         logger.section('Image Registration (WCS)')
         reg = register(run, samples_cal, paths, ui, plot, overwrite)
 
