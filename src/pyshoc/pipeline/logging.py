@@ -48,8 +48,16 @@ def section(message):
     logger.log('SECTION', message, depth=1)
 
 
+# Update levels
+logger.level('SECTION', no=20)
+logger.__class__.section = staticmethod(section)
+
+for level, icon in cfg.console.icons.items():
+    logger.level(level.upper(), icon=icon)
+
+
 LEVEL_FORMATS = {
-    #
+    # generic level format
     **{level.name: motley.stylize(cfg.console.format,
                                   level=level,
                                   style=markup_to_list(level.color))
@@ -58,12 +66,9 @@ LEVEL_FORMATS = {
     'SECTION':      motley.stylize(cfg.console.section, '',
                                    width=terminal.get_size()[0])
 }
-logger.level('SECTION', no=20)
-logger.__class__.section = staticmethod(section)
 
 
 # ---------------------------------------------------------------------------- #
-
 
 def patch(record):
     # dynamic formatting tweaks
@@ -93,10 +98,6 @@ def formatter(record):
                          **{**record, 'message': '{message}'})
 
 
-# def filter_console(record):
-#     return _console_sink_active
-
-
 def cleanup(logfile):
     logfile = Path(logfile)
     logfile.write_text(motley.ansi.strip(logfile.read_text()))
@@ -104,7 +105,6 @@ def cleanup(logfile):
 
 # ---------------------------------------------------------------------------- #
 # Configure log sinks
-
 
 def config():
     # logger config
@@ -118,7 +118,7 @@ def config():
             # console handler
             'sink':
                 RepeatMessageHandler(
-                    ParagraphWrapper(indent=f'{"⎪ ": >67}'),
+                    ParagraphWrapper(indent=f'{"| ": >67}'),
                     template=cfg.console.repeats
                 ),
             'level':    cfg.console.level,

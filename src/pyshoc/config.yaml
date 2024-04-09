@@ -81,10 +81,9 @@ console:
             fg:     [darkslategrey, B]
 
 
-
-
 # ---------------------------------------------------------------------------- #
-# logging
+# Logging
+
 logging:
     filename:         $INFO/logs/main.log
     # file sink
@@ -101,30 +100,43 @@ logging:
     console:
         level:  info
         catch:  False
+        # log message format
         format: >- # -  chomping indicator strips end newlines
             {elapsed:s|Bb}|
-            {{{name}.{function}:s|green}:{line:d|orange}: <52}|
-            {{level.name: <6}| {message}:|{style}}
+            {{{name}.{function}:s|green}:{line:d|orange}: <52}{level.icon}
+            {{message}:|{style}}
+        # sectioning format
         section: |
 
             {0:━<{width}}
-            {{level.name}: {message}:|B,teal}
+            {level.icon} {{level.name}: {message}:|B,teal}
             {0:━<{width}}
+        # repeated log message
         repeats: |
             { ⤷ [Previous {n_messages} {n_repeats} in {t}]:|kB}
 
+        # level icons
+        icons:
+            section:    🌑
+            success:    🚀
+            info:       🌌
+            debug:      🔧
+            warning:    🚨
+            error:      🔥
+            critical:   💥
+
     # library activation
     activation:
-            pyshoc:                     1
-            pyshoc.headers.convert:     0
-            obstools:                   1
-            mpl_multitab:               1
-            recipes:                    1
-            recipes.io.utils:           0
-            recipes.decorators.base:    0
-            motley.formatter:           0
-            motley.table.xlsx:          1
-            scrawl.moves.machinery:     0
+        pyshoc:                     1
+        pyshoc.headers.convert:     0
+        obstools:                   1
+        mpl_multitab:               1
+        recipes:                    1
+        recipes.io.utils:           0
+        recipes.decorators.base:    0
+        motley.formatter:           0
+        motley.table.xlsx:          1
+        scrawl.moves.machinery:     0
 
 
 # ---------------------------------------------------------------------------- #

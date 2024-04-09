@@ -332,6 +332,7 @@ def write_rsync_script(run, paths, username=CONFIG.remote.username,
 
 def preview(run, paths, info, ui, plot, overwrite):
     logger.section('Overview')
+    logger.info('The following data were loaded:\n{}', run.pformat())
 
     # Print summary table
     daily = run.group_by('date')  # 't.date_for_filename'
