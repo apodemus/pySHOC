@@ -16,7 +16,8 @@ from recipes.functionals import echo
 from recipes.tree import FileSystemNode
 from recipes.containers import ensure, remove
 from recipes.containers.dicts import DictNode
-from recipes.functionals.partial import Map, Partial, over, PlaceHolder as o
+from recipes.containers.dicts.node import balance_depth
+from recipes.functionals.partial import Partial, PlaceHolder as o
 
 # relative
 from .. import CONFIG
@@ -193,18 +194,10 @@ def insert_from(lookup, key, level, insert=0):
     return key
 
 
-def balance_depth(key, depth, insert=''):
-    # balance depth of the branches for table
-    key = list(key)
-    while len(key) < depth:
-        key.insert(-1, insert)
-
-    return tuple(key)
-
-
 # ---------------------------------------------------------------------------- #
 
-def _prepare_headers(products, path_info, to_remove, fixups, fmt, path_stop):
+def _prepare_headers(products, path_info, to_remove, fixups, fmt, path_stop,
+                     title_lookup='tab'):
 
     sections = list(products.flatten().keys())
     headers = DictNode(zip(sections, sections))
@@ -214,7 +207,7 @@ def _prepare_headers(products, path_info, to_remove, fixups, fmt, path_stop):
         headers = headers.map(fixup)
 
     # get section title
-    headers = headers.map(get_titles)
+    headers = headers.map(get_titles, title_lookup)
 
     # remove verbose keys
     if to_remove:
@@ -224,6 +217,7 @@ def _prepare_headers(products, path_info, to_remove, fixups, fmt, path_stop):
     headers = add_path_infos(headers, path_info, fmt, stop=path_stop)
 
     # balance branch depths
+    # headers = headers.balance(insert='') # FIXME
     headers = headers.map(Partial(balance_depth)(o, headers.depth()))
 
     # filter empty row header lines
@@ -410,7 +404,7 @@ def get_previous(run, paths):
     # targets = DataProducts(run, paths)
 
     #
-    debug = logger.bind(indent=' ').opt(lazy=True).info
+    info = logger.bind(indent=' ').opt(lazy=True).info
     pprint = (
         # overview
         lambda: ('overview',  _overview_products_table(overview, paths)),
@@ -422,7 +416,7 @@ def get_previous(run, paths):
         lambda: ('nightly', _nightly_products_table(run, paths))
     )
     for f in pprint:
-        debug('Found previous {0[0]} data products: \n{0[1]}', f)
+        info('Found previous {0[0]} data products: \n{0[1]}', f)
 
     return overview, products
 
@@ -445,7 +439,7 @@ def _overview_products_hstack(overview, paths):
     fixup = Partial(replace_from)({'Overview': 'Registration'}, o, 0, 0)
 
     # path info format
-    fmt = R'{{:<{width:}}: {{!s}/:|turquoise}:|bold}'
+    fmt = R'{{:<{width:}}: {{!s}:|turquoise}:|bold}'
     fmt_subtitle = motley.stylize(fmt, width=13)
     fmt_header = motley.stylize(fmt, width='')
 
@@ -480,20 +474,17 @@ def _overview_products_hstack(overview, paths):
 
 def _write_overview_products_table(overview, paths, filename=None, sheet=None,
                                    overwrite=True):
-
-    out = overview.filter('spreadsheets')
-
-    tbl = Table.from_dict(out,
-                          title='Data Products Overview',
+    #
+    out = overview.filter(('spreadsheets', 'logging')).sorted(['info'])
+    headers = _prepare_headers(out, {}, ('plots', ), {}, '{}', 0, title_lookup='header')
+    tbl = Table.from_dict(out.reshape(headers.get),
+                          title='Overview Data Products ',
                           convert={Path: hyperlink_ext})
 
     return tbl.to_xlsx(
         filename, sheet, overwrite=overwrite,
         formats={...:  ';;;[Blue]@'},
-        widths={'headers':  7,
-                # 'Overview': 4,
-                # 'samples':  7,
-                ...:        7},
+        widths={...:        10},
         align={  # base: '<',
             #    'Overview': dict(horizontal='center',
             #                     vertical='center',
@@ -572,42 +563,43 @@ def _hdu_products_table(run, paths):
     return tbl
 
 
-def _write_hdu_products_xlsx(run, paths, filename=None, sheet=None,
-                             overwrite=True):
+def _write_hdu_products_xlsx(run, paths, filename=None, sheet=None, overwrite=True):
 
     base, files = 'base', 'fits'
     out, templates = _get_hdu_products(run, paths)
 
-    tbl = Table.from_dict(out,
+    # remove verbose keys
+    to_remove = ('filename', 'concat', 'by_file', 'by_date')
+
+    fixups = (
+        # get section title
+        Partial(replace_from)(SPECTRAL, o, -2, 0),
+        # add level header for time series
+        Partial(insert_from)({'lightcurves': 'ts'}, o, 0, -1)
+    )
+
+    # get headers
+    headers = _prepare_headers(out, {}, to_remove, fixups, '{}', -1, 'header')
+
+    tbl = Table.from_dict(out.reshape(headers.get),
                           title='HDU Data Products',
                           convert={Path: hyperlink_ext,
                                    files: hyperlink_ext})
-    # create table
-    # col_sort = op.index(
-
-    # section, tmp = paths.templates['TEL'].find('mosaic').flatten().popitem()
-    # tmp.substitute(TEL=CONFIG.registration.params.survey)
-    # path = rplot_paths.mosaic.parent
-    # out['Images', 'Overview'] = [[(paths.folders.plotting / _)
-    #                               for _ in overview['plotting']]] * len(run)
-
-    # order = ('FITS', 'Images', 'Tracking', 'Lightcurves')
-    # sections, headers, *data = cosort(*zip(*sections), *desired_files.values(),
-    #                                   key=order.index)
 
     # write
-    # header_formatter=str.title
+    widths = {base:       20,
+              files:      5,
+              'headers':  7,
+              'samples':  7}
+    widths = {headers.find(key, True, default=key).flatten().popitem()[1]: val
+              for key, val in widths.items()}
 
     return tbl.to_xlsx(
         filename, sheet, overwrite=overwrite,
-        formats={
-            ...:  ';;;[Blue]@'},
-        widths={base:       14,
-                files:      5,
-                'headers':  7,
-                # 'Overview': 4,
-                'samples':  7,
-                ...:        7},
+        formats={base:  None,
+                 ...:   ';;;[Blue]@'},
+        widths={**widths,
+                ...: 7},
         align={base: '<',
                #    'Overview': dict(horizontal='center',
                #                     vertical='center',
@@ -627,11 +619,10 @@ def _get_nightly_products(run, paths):
     desired_files = get_desired_products(run, templates, by=date)
 
     #
-    tree = DictNode()
-    tree['input', date] = list(desired_files.keys())
-
-    tree.update(desired_files.stack(level=0))
-    return tree, templates
+    products = DictNode()
+    products['input', date] = list(desired_files.keys())
+    products.update(desired_files.stack(level=0))
+    return products, templates
 
 
 def _nightly_products_table(run, paths):
@@ -676,47 +667,34 @@ def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
                                  overwrite=True):
 
     #
-    tree, templates = _get_nightly_products(run, paths)
-    sections = list(tree.flatten().keys())
+    products, templates = _get_nightly_products(run, paths)
+    # sections = list(products.flatten().keys())
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/products.py':626")
-
-    # get relative paths
-    path_info = get_path_info(sections, paths, templates)
-    sx, pp = paths.folders.find('concat').flatten().popitem()
-    *_, keep = path_info[sx]
-    path_info[sx] = (*_get_relative_paths(('lightcurves', 'by_date'), paths, slash=True), keep)
-
-    # # remove verbose keys
+    # remove verbose keys
     to_remove = ('filename', 'concat', 'by_file', 'by_date')
-    headers = Map(remove)(over(sections), *to_remove)
 
-    # get section title
-    headers = Map(replace_from)(SPECTRAL, over(headers), 1)
+    fixups = (
+        # get section title
+        Partial(replace_from)(SPECTRAL, o, -2, 0),
+        # add level header for time series
+        Partial(insert_from)({'lightcurves': 'ts'}, o, 0, -1)
+    )
 
-    # get section titles
-    fmt = motley.stylize(R'{{}: {{!s}:|turquoise}:|bold}')
-    headers = add_path_infos(sections, path_info, fmt)
+    # get headers
+    headers = _prepare_headers(products, {}, to_remove, fixups, '{}', -1, 'header')
 
-    # balance branch depths
-    depth = max(map(len, headers.values()))
-    headers = headers.map(Partial(balance_depth)(o, depth))
-
-    # finally combine headers and data
-    out = DictNode(zip(new, tree.flatten().values()))
-
+    date = 'date'
     tbl = Table.from_dict(
-        tree,
+        products.reshape(headers.get),
         title='Nightly Data Products',
-        convert={Path: hyperlink_ext},
+        convert={Path: hyperlink_ext,
+                 date: str},
         too_wide=False
     )
 
-    date = 'date'
     return tbl.to_xlsx(
         filename, sheet, overwrite=overwrite,
-        formats={date: str,
+        formats={date: None,
                  ...: ';;;[Blue]@'},
         widths={date: 10,
                 ...: 6},

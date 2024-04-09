@@ -351,7 +351,7 @@ def preview(run, paths, info, ui, plot, overwrite):
     )
 
     # write summary spreadsheet
-    path = str(paths.files.info.campaign)
+    path = str(paths.files.info.spreadsheets.campaign)
     filename, *sheet = path.split('::')
 
     run.tabulate.to_xlsx(filename, *sheet, overwrite=True)

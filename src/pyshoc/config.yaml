@@ -34,9 +34,9 @@ folders:
 #     lightcurves:    $PHOT/lightcurves
 
 
-
 # ---------------------------------------------------------------------------- #
-# console info styling
+# Console output styling
+
 console:
     banner:
         show:       True
@@ -141,17 +141,18 @@ logging:
 
 # ---------------------------------------------------------------------------- #
 # Tables
+
 tabulate:
     campaign:
         row_nrs: 1
         summary: True
-        title_style: 
+        title_style:
             fg: [bold, underline]
             bg: 'darkslategrey'
         too_wide: False
 
     obs_groups:
-        title_style: 
+        title_style:
             fg: [teal, underline, bold]
             # bg: 'darkslategrey'
         title_align: '<'
@@ -165,17 +166,68 @@ info:
         # pipeline summary info
         headers:        headers/$HDU.txt
         obslog:         observing-log.tex
-        # 
-        spreadsheets:
+
+    spreadsheets:
+        filenames:
             # These can be separate files if you wish
             campaign:       info.xlsx::Campaign Info
-            overview:       info.xlsx::Data Products Overview
+            overview:       info.xlsx::Overview Products
             by_file:        info.xlsx::Data Products by File
             by_date:        info.xlsx::Data Products by Date
 
+        style:
+            data:
+                font:
+                    name:       Ubuntu Mono
+                    size:       10
+
+            title:
+                font:
+                    size:           14
+                    bold:           True
+                alignment:
+                    horizontal:     center
+                    vertical:       center
+                    wrap_text:      True
+                border:
+                    bottom:         double
+
+            headers:
+                font:
+                    size:           12
+                    bold:           True
+                alignment:
+                    horizontal:     center
+                    vertical:       center
+                    wrap_text:      True
+                # border:
+                #     bottom:         double
+
+            groups:
+                border:
+                    right:          double
+
+            units:
+                # font:
+                alignment:
+                    horizontal:     center
+                    vertical:       top
+                border: 
+                    bottom:         double
+
+            totals:
+                font:
+                    bold:   True
+                border:
+                    bottom: thin
+                    top:    thin
+
+            bottomrule :    double
+
 
 # ---------------------------------------------------------------------------- #
-# scripts for remote file retrieval
+# Remote file sync
+
 remote:
     username:           Null
     server:             astro.cape.saao.ac.za
@@ -206,7 +258,7 @@ calibration:
 
 plotting:
     # global plotting config. Specific plots are configurable per section below
-    
+
     # GUI
     gui:
         title:      pySHOC Photometry Pipeline GUI
@@ -232,6 +284,7 @@ plotting:
 
 samples:
     tab:                [Sample Images] # Detection
+    header:             Sample Images
     folder:             $REGISTRY/samples/
     filename:           $HDU$FRAMES.png
 
@@ -515,8 +568,8 @@ phot:
 # Time Series Analysis
 
 lightcurves:
-
     tab:            Light Curves
+    header:         Light Curves
     folder:         $PHOT/lightcurves/
     formats:        [txt, npy, png, pdf]
 
@@ -635,7 +688,7 @@ lightcurves:
     # ------------------------------------------------------------------------ #
     # Phase folded light curves (If ephemeris available)
     by_cycle:
-        # ephemeris:    Eg: 
+        # ephemeris:    Eg:
         folder:         by_cycle/
         filename:       E$CYCLE.lc.$EXT
 
@@ -675,5 +728,5 @@ lightcurves:
 
 # ---------------------------------------------------------------------------- #
 sde:
-    tab:    Spectral Density Estimates
+    header:    Spectral Density Estimates
 
