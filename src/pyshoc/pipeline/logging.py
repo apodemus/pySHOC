@@ -42,24 +42,24 @@ def markup_to_list(tags):
     return tags.strip('<>').replace('><', ',')
 
 
-level_formats = {
-    level.name: motley.stylize(cfg.console.format,
-                               level=level,
-                               style=markup_to_list(level.color))
-    for level in logger._core.levels.values()
-}
-
-
 # custom level for sectioning
 def section(message):
-    logger.bind(indent=False).log('SECTION', message, depth=1)
+    # bind(indent=False)
+    logger.log('SECTION', message, depth=1)
 
 
-level_formats['SECTION'] = motley.stylize(cfg.console.section, '',
-                                          width=terminal.get_size()[0])
-logger.level('SECTION', no=15)
-Logger = type(logger)
-Logger.section = staticmethod(section)
+LEVEL_FORMATS = {
+    #
+    **{level.name: motley.stylize(cfg.console.format,
+                                  level=level,
+                                  style=markup_to_list(level.color))
+       for level in logger._core.levels.values()},
+    # custom level for sectioning
+    'SECTION':      motley.stylize(cfg.console.section, '',
+                                   width=terminal.get_size()[0])
+}
+logger.level('SECTION', no=20)
+logger.__class__.section = staticmethod(section)
 
 
 # ---------------------------------------------------------------------------- #
@@ -89,7 +89,7 @@ def formatter(record):
     # which is usually fine, except when the message contains braces (eg dict as
     # str), in which case it fails.
 
-    return motley.format(f'{level_formats[record["level"].name]}\n',
+    return motley.format(f'{LEVEL_FORMATS[record["level"].name]}\n',
                          **{**record, 'message': '{message}'})
 
 
@@ -116,8 +116,11 @@ def config():
         # File sink is added by pipeline.cli.setup once output path is known
         handlers=[{
             # console handler
-            'sink':     RepeatMessageHandler(ParagraphWrapper(indent=f'{"| ": >75}'),
-                                             template=cfg.console.repeats),
+            'sink':
+                RepeatMessageHandler(
+                    ParagraphWrapper(indent=f'{"⎪ ": >67}'),
+                    template=cfg.console.repeats
+                ),
             'level':    cfg.console.level,
             'catch':    cfg.console.catch,
             'colorize': False,
