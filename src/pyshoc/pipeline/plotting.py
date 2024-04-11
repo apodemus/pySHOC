@@ -14,7 +14,7 @@ from recipes.string import indent
 from recipes.pprint import callers
 from recipes.logging import LoggingMixin
 from recipes.functionals.partial import Partial, PartialTask
-
+from recipes.containers import ensure
 # relative
 from ..config import CONFIG
 from .logging import logger
@@ -49,25 +49,33 @@ def get_figure(ui, tab, fig, **kws):
     return Figure(**kws)
 
 
-def save_figure(fig, filename, overwrite=False, **kws):
+def save_figure(fig, filenames=(), overwrite=False, **kws):
 
-    if not filename:
-        logger.debug('Not saving {} since filename is {!r}.', fig, filename)
-        return False
+    filenames = (*filenames, kws.pop('filename'))
+    filenames = ensure.tuple(filenames, Path)
+    saved = 0
 
-    filename = Path(filename)
-    if filename.exists():
-        if not overwrite:
-            logger.info('Not overwriting: {!s}', filename)
-            return False
+    if not filenames:
+        logger.debug(
+            'Not saving figure {}: Could not resolve any filenames from {!r}.',
+            fig, filenames
+        )
+        return saved
 
-        logger.info('Overwriting image: {!s}.', filename)
+    for filename in filenames:
+        if filename.exists():
+            if overwrite:
+                logger.info('Overwriting image: {!s}.', filename)
+            else:
+                logger.info('Not overwriting: {!s}', filename)
+                continue
+        else:
+            logger.info('Saving image: {!s}.', filename)
+
         fig.savefig(filename, **kws)
-        return True
+        saved += 1
 
-    logger.info('Saving image: {!s}.', filename)
-    fig.savefig(filename, **kws)
-    return True
+    return saved
 
 
 # alias
@@ -99,7 +107,7 @@ class TaskRunner(_TaskBase):
 
     def __init__(self, task, **fig_kws):
         self.ui = None  # set in `GUI.add_task`
-        self.task = task
+        self.task = task  # PlotTask
         self.fig_kws = fig_kws
 
     def __call__(self, figure, tab, *args, **kws):
@@ -162,9 +170,9 @@ class PlotTask(_TaskBase):
 
 class TabTask(slots.SlotHelper, LoggingMixin):
 
-    __slots__ = ('ui', 'task', 'tab', 'filename', 'overwrite', 'save_kws')
+    __slots__ = ('ui', 'task', 'tab', 'filenames', 'overwrite', 'save_kws')
 
-    def __init__(self, ui, task, tab, filename=None, overwrite=False, **save_kws):
+    def __init__(self, ui, task, tab, filenames=(), overwrite=False, **save_kws):
         # `task` is TaskRunner
 
         self.logger.debug('Creating {0.__name__} for {1}.', type(self), task)
@@ -172,10 +180,10 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         self.ui = ui
         self.tab = tab
 
-        if filename:
-            filename = Path(filename)
+        if len(filenames):
+            filenames = tuple(map(Path, filenames))
             self.logger.debug('Figure for task {} will be saved at {}. {}.',
-                              task, filename, f'{overwrite = }')
+                              task, filenames, f'{overwrite = }')
 
         super().__init__(**slots.sanitize(locals()))
 
@@ -190,7 +198,7 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         figure, art = self.task(figure, tab, *args, **kws)
 
         # save
-        save_fig(figure, self.filename, self.overwrite, **self.save_kws)
+        save_fig(figure, self.filenames, self.overwrite, **self.save_kws)
 
         return art
 
@@ -231,7 +239,7 @@ class GUI(MplMultiTab):
         return self.active
 
     def add_task(self, task, tab,
-                 filename=None, overwrite=False,
+                 filenames=(), overwrite=False,
                  figure=None, add_axes=False,
                  *args, **kws):
 
@@ -243,7 +251,7 @@ class GUI(MplMultiTab):
         # Task requires Figure
         # next line will generate figure to fill the tab, we have to replace it
         # after the task executes with the actual fgure we want in our tab
-        _task = TabTask(self, task, tab, filename, overwrite)
+        _task = TabTask(self, task, tab, filenames, overwrite)
         figure = _task.get_figure(figure, add_axes=add_axes, **task.fig_kws)
 
         if self.delay:

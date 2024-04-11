@@ -248,12 +248,20 @@ class Template(Template):
     def __repr__(self):
         return f'{type(self).__name__}({self.template})'
 
-    def resolve_paths(self, section, **kws):
+    def resolve_paths(self, section, partial=True, **kws):
+
+        if partial:
+            kws = {**{key: f'${key}' for key in set(self.get_identifiers())},
+                   **kws}
+
         if '$EXT' in self.template:
-            if formats := CONFIG[section[0]].find('formats').get('formats'):
-                for ext in formats:
-                    yield Path(self.substitute(**{'EXT': ext, **kws}))
-                return
+            section = ensure.tuple(section)
+            # search upwards in config for `formats`
+            for i in range(1, len(section) + 1)[::-1]:
+                if formats := CONFIG[section[:i]].find('formats').get('formats'):
+                    for ext in formats:
+                        yield Path(self.substitute(**{**kws, 'EXT': ext}))
+                    return
 
             raise ValueError(
                 f'No formats specified in config section {section} for '
@@ -268,7 +276,7 @@ class Template(Template):
 
 class PathConfig(ConfigNode):  # AttributeAutoComplete
     """
-    Filesystem tree helper. Attributes `files` and `folders` point to the full 
+    Filesystem tree helper. Attributes `files` and `folders` point to the full
     system paths for pipeline data products.
     """
 

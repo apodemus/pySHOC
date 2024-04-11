@@ -785,9 +785,16 @@ def _tracker_missing_files(templates, hdu, sources):
 # ---------------------------------------------------------------------------- #
 # Light curves
 
+
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
-    lcs = lc.extract(run, paths, overwrite)
+    output_templates = paths.templates.find('lightcurves', collapse=True)
+    output_templates.freeze()
+    pipeline = lc.Pipeline(run, CONFIG.lightcurves, output_templates,
+                           overwrite, plot)
+
+    # lcs = lc.extract(run, paths, overwrite)
+    lcs = pipeline.run()
 
     if not plot:
         return
@@ -797,7 +804,7 @@ def lightcurves(run, paths, ui, plot=True, overwrite=False):
         tmp = paths.templates['DATE'].lightcurves[step]
         tmp = getattr(tmp, 'concat', tmp)
         #
-        plot_lcs(db, step, ui, tmp, overwrite=False)
+        pipeline.plot(('by_date', step), ui, tmp, overwrite=False)
 
     return lcs
     # for hdu in run:

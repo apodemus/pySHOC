@@ -30,301 +30,33 @@ from .products import resolve_path
 
 
 # ---------------------------------------------------------------------------- #
-SPD = 86400
+# Config
+CONFIG = ConfigNode.load_module(__file__)
 
 # ---------------------------------------------------------------------------- #
-CONFIG = ConfigNode.load_module(__file__)
+# Module constants
+
+SPD = 86400
 
 GROUPINGS = dict(
     by_file='file.name',
     by_date='t.date_for_filename',
     # by_cycle=
 )
+TEMPLATE_KEYS = dict(
+    by_file='HDU',
+    by_date='DATE',
+    # by_cycle=
+)
+
+GRAPHICS_EXT = {'png', 'pdf', 'jpg', 'svg', 'eps'}
 
 
 # ---------------------------------------------------------------------------- #
-
-class LightCurvePlot(TimeSeriesPlot):
-
-    def setup_figure(self, ax, figsize=(14, 8), twinx='period', **kws):
-
-        fig, ax, hax = super().setup_figure(ax, **kws)
-
-        ts = self.parent
-        jd0 = int(ts.t[0]) - 0.5
-        utc0 = Time(jd0, format='jd').utc.iso.split()[0]
-
-        # plot
-        axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45)
-        axp.xaxis.set_minor_formatter(DateTick(utc0))
-        # _rotate_tick_labels(axp, 45, True)
-
-        cfg = CONFIG.plots
-        ax.set(xlabel=cfg.xlabel.bottom, ylabel=cfg.ylabel)
-        axp.set_xlabel(cfg.xlabel.top, labelpad=cfg.xlabel.pad)
-
-        # fig.tight_layout()
-        fig.subplots_adjust(**cfg.subplotspec)
-
-        return fig, ax, hax
-
-    def __call__(self, *data, **kws):
-        kws = {**dict(t0=[0], tscale=SPD, show_masked=True), **kws}
-        super().__call__(*data, **kws)
-
-
-class LightCurve(TimeSeries):
-
-    plot = LightCurvePlot(plims=(-0.1, 99.99))
-
-    @classmethod
-    def load(cls, filename, hdu=None):
-
-        filename = Path(filename)
-        ext = filename.suffix.strip('.')
-        if ext == 'txt':
-            return cls(*lc.io.txt.read(filename))
-
-        if ext == 'npy':
-            cls(*load_memmap(hdu, filename))
-
-        raise ValueError(f'Unsupported format: {ext!r}')
-
-    def save(self, filename, **kws):
-        filename = Path(filename)
-        lc.io.write(filename, self.t, self.x, self.u, **kws)
-
-
-# ---------------------------------------------------------------------------- #
-
-# class ReductionTask(PartialTask):
-#     pass
-
-
-class ReductionStep(PartialTask):
-
-    # __wrapper__ = ReductionTask
-
-    def __init__(self, method, infile, outfile=None, overwrite=False, save=(),
-                 plot=False, *args, **kws):
-
-        super().__init__(method, *args, **kws)
-        self.infile = infile
-        self.outfile = outfile
-        self.overwrite = bool(overwrite)
-        self.plot = plot
-        self.save_kws = dict(save)
-
-        logger.info(f'{method = }; {infile = }; {outfile = }')
-
-    def __call__(self, obs, data=None, **kws):
-
-        # Load result from previous run if available  # FIXME: Manage with cache
-        path = self.outfile
-        if path and (self.overwrite or not (path := resolve_path(path, obs)).exist()):
-            logger.info('Loading lightcurve for {} from {}.', path)
-            return lc.io.read_text(path)
-
-        # Load input data
-        if data is None:
-            infile = resolve_path(self.infile, obs)
-            if not infile.exists():
-                raise FileNotFoundError(repr(str(infile)))
-
-        # Compute
-        logger.debug('File {!s} does not exist. Computing: {}.',
-                     motley.apply(str(path), 'darkgreen'),
-                     ppr.caller(self.__wrapped__))  # args, kws
-        #
-        result = super().__call__(**kws)
-
-        if not isinstance(result, LightCurve):
-            result = LightCurve(*result)
-
-        # save text
-        if self.save is not False:
-            lc.io.write_text(path, *result, **self.save_kws)
-
-        # plot
-        if self.plot is not False:
-            plot = self.plot or {}
-            kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
-            init.setdefault('filename', path.with_suffix('png'))
-            init.setdefault('overwrite', self.overwrite)
-
-            task = PlotTask(**init)
-            task(plotter)(o, result, **kws)
-
-        return result
-
-
-class Pipeline(slots.SlotHelper):
-
-    __slots__ = ('campaign', 'config', 'paths', 'groupings', 'results')
-
-    def __init__(self, campaign, config, overwrite=False, plot=False):
-
-        files = config.find('filenames')
-        config, groupings = config.split(GROUPINGS)
-        config = {**config, 'overwrite': overwrite, 'plot': plot}
-
-        steps = dicts.DictNode()
-        concats = {}
-        groupings = {}
-        for grouping, steps in groupings.items():
-            _, steps = steps.split('folder')
-            self.groupings[grouping] = campaign.group_by(GROUPINGS[grouping]).sorted()
-            # self.steps[grouping] = steps
-
-            infile = '$HDU'
-            for step in steps:
-                section = (grouping, step)
-
-                # for each step there may be a concat request
-                cfg, concat = steps[step].split('concat')
-
-                # load / compute step
-                outfile = files[section]
-                self.steps[grouping][step] = \
-                    ReductionStep(COMPUTE[step], infile, outfile,
-                                  overwrite, plot, **cfg)
-                infile = outfile
-
-                if concat:
-                    # Concatenate
-                    self.concats[section] = \
-                        ReductionStep(concat_phot, infile, concat.filename,
-                                      **concat)
-        #
-        super().__init__(campaign=campaign,
-                         config=config,
-                         groupings=groupings,
-                         steps=steps,
-                         concats=concats,
-                         results=dicts.DictNode())
-
-    def run(self):
-
-        logger.info('Extracting lightcurves for {!r}.', self.campaign[0].target)
-
-        # files = self.campaign.files.lightcurves
-        for grouping, groups in self.groupings.items():
-            steps = self.steps[grouping]
-            for step, worker in steps.items():
-                # steps
-                for gid, obs in groups.items():
-                    self.results[grouping, gid, step] = worker(obs)
-
-                section = (grouping, step)
-                if concat := self.concats.get(section):
-                    # Concatenate
-
-                    from IPython import embed
-                    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':225")
-
-                    files = list(groups.values())
-                    logger.info('Concatenating {} light curves for {} on {}.',
-                                len(files), section)
-
-                    # create TimeSeries
-                    self.results[gid, step, 'concat'] = ts = concat(files)
-                    #     TimeSeries(bjd, rflux.T, rsigma.T)
-
-        #
-        self.results.freeze()
-        return self.results
-
-    def plot(self, section, ui=None, filename_template=None, overwrite=False, **kws):
-
-        grouping, step = section
-        task = ui.task_factory(lc.plot)(o, **kws)
-
-        filenames = {}
-        for date, ts in self.results.items():
-            filenames[date] = filename = \
-                Path(filename_template.substitute(DATE=date)).with_suffix('.png')
-            # add task
-            year, day = date.split('-', 1)
-            tab = (*self.config.tab, year, day, step)
-            ui.add_task(task, tab, filename, overwrite, None, False, ts)
-
-            if ui:
-                ui[tab[:-2]].link_focus()
-
-        return ui
-
+# Utils
 
 def extract(run, paths, overwrite, plot):
     return Pipeline(run, paths, overwrite, plot).run()
-
-    # def produce(self, section, outfile, **kws):
-
-    #     files = self.paths.files.lightcurves
-    #     infile = files[section]
-
-    #     # grouping, step = section
-    #     # steps = list(self.steps)
-    #     # if remaining := steps[steps.index(step):]:
-    #     #     next_, = remaining
-    #     #     outfile = files[(grouping, next_)]
-
-    #     # eg: 'by_file', 'raw'
-    #     grouping, step = section
-    #     config = CONFIG[section]
-    #     compute = COMPUTE[step]
-    #     obs = self.groupings[grouping][section]
-    #     infile = resolve_path(infile, obs)
-    #     outfile = resolve_path(outfile, obs)
-
-    #     logger.info(f'{section = }; {infile = }; {outfile = }; {obs = }')
-
-    #     return load_or_compute(
-    #         # load
-    #         outfile, config['overwrite'],
-    #         # compute
-    #         delayed(compute)(obs, infile, outfile, **kws),
-    #         # save
-    #         _get_save_meta(obs, **config),
-    #         # plot
-    #         _get_plot_config(section, plot)
-    #     )
-
-
-# def load_or_compute(path, overwrite, compute, save, plot):
-
-#     if path and (path.exists() and not overwrite):
-#         # Load
-#         logger.info('Loading lightcurve from {}.', path)
-#         return lc.io.read_text(path)
-
-#     # Compute
-#     logger.debug('File {!s} does not exist. Computing: {}.',
-#                  motley.apply(str(path), 'darkgreen'),
-#                  ppr.caller(compute))  # args, kws
-#     #
-#     data = compute()
-
-#     if not isinstance(data, TimeSeries):
-#         data = TimeSeries(*data)
-
-#     # save text
-#     if save is not False:
-#         lc.io.write_text(path, *data, **(save or {}))
-
-#     # plot
-#     if plot is not False:
-#         plot = plot or {}
-#         kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
-#         init.setdefault('filename', path.with_suffix('png'))
-#         init.setdefault('overwrite', overwrite)
-
-#         task = PlotTask(**init)
-#         task(plotter)(o, data, **kws)
-
-#     return data
-
-
-# ---------------------------------------------------------------------------- #
 
 
 def _get_save_meta(obj, **kws):
@@ -397,22 +129,6 @@ def plotter(fig, ts, **kws):
 plot = plotter
 
 
-# def _plot_helper(ts, filename, overwrite, ui=None, key=None, delay=True, **kws):
-#     if not isinstance(ts, TimeSeries):
-#         ts = TimeSeries(*ts)
-
-#     if not isinstance(kws, abc.MutableMapping):
-#         kws = {}
-
-#     #
-#     fig = get_figure(ui, key, **figkws)
-
-#     if ui and delay and not fig.plot:
-#         ui[key].add_task(plotter, (fig, ts, filename, overwrite), **kws)
-#     else:
-#         plotter(fig, ts, filename, overwrite, **kws)
-
-
 # ---------------------------------------------------------------------------- #
 # Raw
 
@@ -475,10 +191,7 @@ def diff0_phot(ts, c=1, meta=None):
             sigma / fm + sigma.mean(0) / sigma.shape[1])
 
 
-# ---------------------------------------------------------------------------- #
-# Decorrelate
-
-def decorrelate(ts, **kws):
+def diff_phot(ts, **kws):
     logger.info('Decorrelating light curve for photometry.')
     tss = _diff_smooth_tvr(ts, **kws)
     return tss.t, tss.x.T, tss.u.T
@@ -489,8 +202,15 @@ def _diff_smooth_tvr(ts, nwindow, noverlap, smoothing):
     # smoothed differential phot
     s = tv.MovingWindowSmoother(ts.t, ts.x, nwindow, noverlap, smoothing)
     s = np.atleast_2d(s).T - 1
-    # tss = ts - s
     return ts - s
+
+
+# ---------------------------------------------------------------------------- #
+# Decorrelate
+
+def decorrelate(ts, **kws):
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':213")
 
 
 # ---------------------------------------------------------------------------- #
@@ -513,13 +233,273 @@ def concat_phot(files):
 
 # ---------------------------------------------------------------------------- #
 
+def todo(*args, **kws):
+    raise NotImplementedError()
+
 
 COMPUTE = {
-    'raw':      load_memmap,
-    'flagged':  flag_outliers,
-    'diff0':    diff0_phot,
-    'decor':    decorrelate
+    # Time Series
+    'raw':          load_memmap,
+    'flagged':      flag_outliers,
+    'diff0':        diff0_phot,
+    'diff':         diff_phot,
+    'decor':        decorrelate,
+
+    # Spectral density estimates
+    'periodogram':  todo,
+    'lombscargle':  todo,
+    'welch':        todo,
+    'tfr':          todo,
 }
+
+
+# ---------------------------------------------------------------------------- #
+
+class LightCurvePlot(TimeSeriesPlot):
+
+    def setup_figure(self, ax, figsize=(14, 8), twinx='period', **kws):
+
+        fig, ax, hax = super().setup_figure(ax, **kws)
+
+        ts = self.parent
+        jd0 = int(ts.t[0]) - 0.5
+        utc0 = Time(jd0, format='jd').utc.iso.split()[0]
+
+        # plot
+        axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45)
+        axp.xaxis.set_minor_formatter(DateTick(utc0))
+        # _rotate_tick_labels(axp, 45, True)
+
+        cfg = CONFIG.plots
+        ax.set(xlabel=cfg.xlabel.bottom, ylabel=cfg.ylabel)
+        axp.set_xlabel(cfg.xlabel.top, labelpad=cfg.xlabel.pad)
+
+        # fig.tight_layout()
+        fig.subplots_adjust(**cfg.subplotspec)
+
+        return fig, ax, hax
+
+    def __call__(self, *data, **kws):
+        kws = {**dict(t0=[0], tscale=SPD, show_masked=True), **kws}
+        super().__call__(*data, **kws)
+
+
+class LightCurve(TimeSeries):
+
+    plot = LightCurvePlot(plims=(-0.1, 99.99))
+
+    @classmethod
+    def load(cls, filename, hdu=None):
+
+        filename = Path(filename)
+        ext = filename.suffix.strip('.')
+        if ext == 'txt':
+            return cls(*lc.io.txt.read(filename))
+
+        if ext == 'npy':
+            cls(*load_memmap(hdu, filename))
+
+        raise ValueError(f'Unsupported format: {ext!r}')
+
+    def save(self, filename, **kws):
+        filename = Path(filename)
+
+        if (suffix := filename.suffix.strip('.')) == 'txt':
+            lc.io.write(filename, self.t, self.x, self.u, **kws)
+        elif suffix in {'npy', 'dat'}:
+            raise NotImplementedError()
+        else:
+            raise NotImplementedError()
+
+# ---------------------------------------------------------------------------- #
+
+# class ReductionTask(PartialTask):
+#     pass
+
+
+class ReductionStep(PartialTask):
+
+    # __wrapper__ = ReductionTask
+
+    def __init__(self, method, infile, outfiles=(), overwrite=False, save=(),
+                 plot=False, *args, **kws):
+
+        super().__init__(method, *args, **kws)
+        self.infile = infile
+        self.overwrite = bool(overwrite)
+        self.plot = plot
+        self.save_kws = dict(save)
+        self.outfiles, self.plot_files = files = [], []
+
+        for file in outfiles:
+            is_img = (file.suffix.lower().strip('.') in GRAPHICS_EXT)
+            files[is_img].append(file)
+
+        # logger.info(f'{method = }; {infile = }; {outfile = }')
+
+    def __call__(self, obs, data=None, **kws):
+
+        # Load result from previous run if available  # FIXME: Manage with cache
+        if len(obs) > 1:
+            from IPython import embed
+            embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':343")
+            
+        obs = obs[0]
+        for path in self.outfiles:
+            if (path := resolve_path(path, obs)).exists() and not self.overwrite:
+                logger.info('Loading lightcurve for {} from {}.', path)
+                return LightCurve.load(path, obs)
+
+        # Load input data
+        if data is None:
+            infile = resolve_path(self.infile, obs)
+            if not infile.exists():
+                raise FileNotFoundError(repr(str(infile)))
+
+        # Compute
+        path = self.outfiles[0]
+        logger.debug('File {!s} {}. Computing: {}.',
+                     motley.apply(str(path), 'darkgreen'),
+                     (f"will be {('created', 'overwritten')[self.overwrite]}"
+                      if path.exists() else 'does not exist'),
+                     ppr.caller(self.__wrapped__))  # args, kws
+        #
+        result = super().__call__(**kws)
+
+        if not isinstance(result, LightCurve):
+            result = LightCurve(*result)
+
+        # save text
+        if self.save is not False:
+            for path in self.outfiles:
+                result.save(path, **self.save_kws)
+
+        # plot
+        if self.plot is not False:
+            plot = self.plot or {}
+            kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
+            init.setdefault('filenames', self.plot_files)
+            init.setdefault('overwrite', self.overwrite)
+            # load task
+            task = PlotTask(**init)
+            task(plotter)(o, result, **kws)
+
+        return result
+
+
+class Pipeline(slots.SlotHelper):
+
+    __slots__ = ('campaign', 'config', 'groupings', 'steps', 'concats', 'results')
+
+    def __init__(self, campaign, config, output_templates=(), overwrite=False,
+                 plot=False):
+
+        infile = '$HDU'
+        config, groupings = config.split(GROUPINGS)
+        config.pop('by_cycle')  # FIXME
+        config = {**config, 'overwrite': overwrite, 'plot': plot}
+
+        grouped = {}
+        concats = {}
+        steps = dicts.DictNode()
+        groupings = groupings.filter(('folder', 'filename'))
+        for grouping, todo in groupings.items():
+            grouped[grouping] = campaign.group_by(GROUPINGS[grouping]).sorted()
+
+            for step in todo.filter('formats'):
+                section = (grouping, step)
+
+                # for each step there may be a concat request
+                cfg, concat = steps[step].split('concat')
+
+                # load / compute step
+                key = (TEMPLATE_KEYS[grouping], *section)
+                template = output_templates.get((*key, 'filename'), '')
+                template = template or output_templates.get(key, '')
+                outfiles = list(template.resolve_paths(('lightcurves', grouping)))
+
+                steps[grouping][step] = \
+                    ReductionStep(COMPUTE[step], infile, outfiles,
+                                  overwrite, plot=plot, **cfg)
+                infile = outfiles[0]
+
+                if concat:
+                    # Concatenate
+                    concats[section] = \
+                        ReductionStep(concat_phot, infile, concat.filename,
+                                      **concat)
+
+        # Create attributes
+        super().__init__(campaign=campaign,
+                         config=config,
+                         groupings=grouped,
+                         steps=steps,
+                         concats=concats,
+                         results=dicts.DictNode())
+
+    def run(self):
+
+        logger.info('Extracting lightcurves for {!r}.', self.campaign[0].target)
+
+        # files = self.campaign.files.lightcurves
+        for grouping, groups in self.groupings.items():
+            steps = self.steps[grouping]
+            for step, worker in steps.items():
+                # steps
+                try:
+                    for gid, obs in groups.items():
+                        self.results[grouping, gid, step] = worker(obs)
+                except Exception as err:
+                    import sys, textwrap
+                    from IPython import embed
+                    from better_exceptions import format_exception
+                    embed(header=textwrap.dedent(
+                            f"""\
+                            Caught the following {type(err).__name__} at 'lightcurves.py':444:
+                            %s
+                            Exception will be re-raised upon exiting this embedded interpreter.
+                            """) % '\n'.join(format_exception(*sys.exc_info()))
+                    )
+                    raise
+                    
+
+                section = (grouping, step)
+                if concat := self.concats.get(section):
+                    # Concatenate
+                    from IPython import embed
+                    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':225")
+
+                    files = list(groups.values())
+                    logger.info('Concatenating {} light curves for {} on {}.',
+                                len(files), section)
+
+                    # create TimeSeries
+                    self.results[gid, step, 'concat'] = ts = concat(files)
+                    #     TimeSeries(bjd, rflux.T, rsigma.T)
+
+        #
+        self.results.freeze()
+        return self.results
+
+    def plot(self, section, ui=None, filename_template=None, overwrite=False, **kws):
+
+        grouping, step = section
+        task = ui.task_factory(lc.plot)(o, **kws)
+
+        filenames = {}
+        for date, ts in self.results.items():
+            filenames[date] = filename = \
+                Path(filename_template.substitute(DATE=date)).with_suffix('.png')
+            # add task
+            year, day = date.split('-', 1)
+            tab = (*self.config.tab, year, day, step)
+            ui.add_task(task, tab, filename, overwrite, None, False, ts)
+
+            if ui:
+                ui[tab[:-2]].link_focus()
+
+        return ui
+
 
 # def load_raw(hdu, infile, outfile, overwrite=False, plot=False):
 
