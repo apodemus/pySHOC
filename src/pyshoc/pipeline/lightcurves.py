@@ -11,13 +11,12 @@ from mpl_toolkits.axes_grid1.parasite_axes import SubplotHost
 import motley
 from obstools import lightcurves as lc
 from scrawl.ticks import DateTick, _rotate_tick_labels
-from tsa import TimeSeries
 from tsa.smoothing import tv
 from tsa.outliers import MovingWindowDetection
-from tsa.ts.plotting import TimeSeriesPlot, make_twin_relative
+from tsa.ts.plotting import make_twin_relative
 from recipes.oo import slots
 from recipes.config import ConfigNode
-from recipes import dicts, io, pprint as ppr
+from recipes import dicts, pprint as ppr
 from recipes.decorators import update_defaults
 from recipes.functionals.partial import PartialTask, PlaceHolder as o
 
@@ -51,6 +50,9 @@ TEMPLATE_KEYS = dict(
 
 GRAPHICS_EXT = {'png', 'pdf', 'jpg', 'svg', 'eps'}
 
+#
+LightCurve = lc.LightCurve
+
 
 # ---------------------------------------------------------------------------- #
 # Utils
@@ -70,7 +72,7 @@ def _get_save_meta(obj, **kws):
     # HDU
     kws, _ = dicts.split(kws, 'filename', 'folder',  'tab', 'overwrite')
     return dict(**kws,
-                obj_name=obj.target,
+                target=obj.target,
                 meta={'Observing info':
                       {'T0 [UTC]': obj.t[0].utc,
                        'File':     obj.file.name}}
@@ -129,24 +131,6 @@ def plotter(fig, ts, **kws):
 plot = plotter
 
 
-# ---------------------------------------------------------------------------- #
-# Raw
-
-def load_memmap(hdu, filename, outfile=None, **kws):
-
-    logger.info(motley.stylize('Loading data for {:|darkgreen}.'), hdu.file.name)
-
-    # CONFIG.pre_subtract
-    # since the (gain) calibrated frames are being used below,
-    # CCDNoiseModel(hdu.readout.noise)
-
-    # folder = DATAPATH / 'shoc/phot' / hdu.file.stem / 'tracking'
-    #
-    data = io.load_memmap(filename)
-    flux = data['flux']
-
-    return hdu.t.bjd, flux['value'].T, flux['sigma'].T
-
 
 # ---------------------------------------------------------------------------- #
 # Outlier flagging
@@ -193,16 +177,29 @@ def diff0_phot(ts, c=1, meta=None):
 
 def diff_phot(ts, **kws):
     logger.info('Decorrelating light curve for photometry.')
-    tss = _diff_smooth_tvr(ts, **kws)
-    return tss.t, tss.x.T, tss.u.T
+    return _diff_smooth_tvr(ts, **kws)
 
 
 @update_defaults(CONFIG.by_file.diff.params)
 def _diff_smooth_tvr(ts, nwindow, noverlap, smoothing):
     # smoothed differential phot
-    s = tv.MovingWindowSmoother(ts.t, ts.x, nwindow, noverlap, smoothing)
-    s = np.atleast_2d(s).T - 1
-    return ts - s
+    try:
+        sm = tv.MovingWindowSmoother(nwindow, noverlap)
+        s = sm(ts.t, ts.x, smoothing)
+        return ts - np.atleast_2d(s) + 1
+    except Exception as err:
+        import sys, textwrap
+        from IPython import embed
+        from better_exceptions import format_exception
+        embed(header=textwrap.dedent(
+                f"""\
+                Caught the following {type(err).__name__} at 'lightcurves.py':187:
+                %s
+                Exception will be re-raised upon exiting this embedded interpreter.
+                """) % '\n'.join(format_exception(*sys.exc_info()))
+        )
+        raise
+        
 
 
 # ---------------------------------------------------------------------------- #
@@ -239,7 +236,7 @@ def todo(*args, **kws):
 
 COMPUTE = {
     # Time Series
-    'raw':          load_memmap,
+    'raw':          lc.io.load_memmap,
     'flagged':      flag_outliers,
     'diff0':        diff0_phot,
     'diff':         diff_phot,
@@ -252,65 +249,6 @@ COMPUTE = {
     'tfr':          todo,
 }
 
-
-# ---------------------------------------------------------------------------- #
-
-class LightCurvePlot(TimeSeriesPlot):
-
-    def setup_figure(self, ax, figsize=(14, 8), twinx='period', **kws):
-
-        fig, ax, hax = super().setup_figure(ax, **kws)
-
-        ts = self.parent
-        jd0 = int(ts.t[0]) - 0.5
-        utc0 = Time(jd0, format='jd').utc.iso.split()[0]
-
-        # plot
-        axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45)
-        axp.xaxis.set_minor_formatter(DateTick(utc0))
-        # _rotate_tick_labels(axp, 45, True)
-
-        cfg = CONFIG.plots
-        ax.set(xlabel=cfg.xlabel.bottom, ylabel=cfg.ylabel)
-        axp.set_xlabel(cfg.xlabel.top, labelpad=cfg.xlabel.pad)
-
-        # fig.tight_layout()
-        fig.subplots_adjust(**cfg.subplotspec)
-
-        return fig, ax, hax
-
-    def __call__(self, *data, **kws):
-        kws = {**dict(t0=[0], tscale=SPD, show_masked=True), **kws}
-        super().__call__(*data, **kws)
-
-
-class LightCurve(TimeSeries):
-
-    plot = LightCurvePlot(plims=(-0.1, 99.99))
-
-    @classmethod
-    def load(cls, filename, hdu=None):
-
-        filename = Path(filename)
-        ext = filename.suffix.strip('.')
-        if ext == 'txt':
-            return cls(*lc.io.txt.read(filename))
-
-        if ext == 'npy':
-            cls(*load_memmap(hdu, filename))
-
-        raise ValueError(f'Unsupported format: {ext!r}')
-
-    def save(self, filename, **kws):
-        filename = Path(filename)
-
-        if (suffix := filename.suffix.strip('.')) == 'txt':
-            lc.io.write(filename, self.t, self.x, self.u, **kws)
-        elif suffix in {'npy', 'dat'}:
-            raise NotImplementedError()
-        else:
-            raise NotImplementedError()
-
 # ---------------------------------------------------------------------------- #
 
 # class ReductionTask(PartialTask):
@@ -322,20 +260,25 @@ class ReductionStep(PartialTask):
     # __wrapper__ = ReductionTask
 
     def __init__(self, method, infile, outfiles=(), overwrite=False, save=(),
-                 plot=False, *args, **kws):
+                 plot=False, id_=(), *args, **kws):
 
-        super().__init__(method, *args, **kws)
-        self.infile = infile
-        self.overwrite = bool(overwrite)
-        self.plot = plot
-        self.save_kws = dict(save)
-        self.outfiles, self.plot_files = files = [], []
+        # init task
+        super().__init__(method, o, *args, **kws)
 
+        # NOTE:infile, outfiles, plot_files filename templates
+        templates = ConfigNode({'input': infile,
+                                'output': [],
+                                'plots': []})
         for file in outfiles:
             is_img = (file.suffix.lower().strip('.') in GRAPHICS_EXT)
-            files[is_img].append(file)
+            templates[('output', 'plots')[is_img]].append(file)
 
-        # logger.info(f'{method = }; {infile = }; {outfile = }')
+        self.id_ = id_
+        self.plot = plot
+        self.infile = infile
+        self.save_kws = dict(save)
+        self.templates = templates
+        self.overwrite = bool(overwrite)
 
     def __call__(self, obs, data=None, **kws):
 
@@ -343,43 +286,61 @@ class ReductionStep(PartialTask):
         if len(obs) > 1:
             from IPython import embed
             embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':343")
-            
+
         obs = obs[0]
-        for path in self.outfiles:
-            if (path := resolve_path(path, obs)).exists() and not self.overwrite:
-                logger.info('Loading lightcurve for {} from {}.', path)
+        out = [resolve_path(o, obs) for o in self.templates.output]
+        for path in out:
+            if path.exists() and not self.overwrite:
+                logger.info('Loading lightcurve for {} from {}.', obs, path)
                 return LightCurve.load(path, obs)
 
         # Load input data
         if data is None:
-            infile = resolve_path(self.infile, obs)
-            if not infile.exists():
+            if (infile := resolve_path(self.templates.input, obs)).exists():
+                data = LightCurve.load(infile, obs)
+            else:
                 raise FileNotFoundError(repr(str(infile)))
 
         # Compute
-        path = self.outfiles[0]
+        path = out[0]
         logger.debug('File {!s} {}. Computing: {}.',
                      motley.apply(str(path), 'darkgreen'),
                      (f"will be {('created', 'overwritten')[self.overwrite]}"
-                      if path.exists() else 'does not exist'),
+                         if path.exists() else 'does not exist'),
                      ppr.caller(self.__wrapped__))  # args, kws
         #
-        result = super().__call__(**kws)
+        result = super().__call__(data, **kws)
 
         if not isinstance(result, LightCurve):
             result = LightCurve(*result)
 
         # save text
-        if self.save is not False:
-            for path in self.outfiles:
-                result.save(path, **self.save_kws)
+        if self.save_kws is not False:
+            try:
+                for path in out:
+                    result.save(path, **_get_save_meta(obs, **self.save_kws))
+            except Exception as err:
+                import sys
+                import textwrap
+                from IPython import embed
+                from better_exceptions import format_exception
+                embed(header=textwrap.dedent(
+                    f"""\
+                        Caught the following {type(err).__name__} at 'lightcurves.py':381:
+                        %s
+                        Exception will be re-raised upon exiting this embedded interpreter.
+                        """) % '\n'.join(format_exception(*sys.exc_info()))
+                )
+                raise
 
         # plot
         if self.plot is not False:
             plot = self.plot or {}
             kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
-            init.setdefault('filenames', self.plot_files)
             init.setdefault('overwrite', self.overwrite)
+            init.setdefault('filenames',  [resolve_path(p, obs)
+                                           for p in self.templates.plot])
+
             # load task
             task = PlotTask(**init)
             task(plotter)(o, result, **kws)
@@ -411,6 +372,7 @@ class Pipeline(slots.SlotHelper):
 
                 # for each step there may be a concat request
                 cfg, concat = steps[step].split('concat')
+                cfg.setdefault('save', {})
 
                 # load / compute step
                 key = (TEMPLATE_KEYS[grouping], *section)
@@ -450,18 +412,9 @@ class Pipeline(slots.SlotHelper):
                     for gid, obs in groups.items():
                         self.results[grouping, gid, step] = worker(obs)
                 except Exception as err:
-                    import sys, textwrap
-                    from IPython import embed
-                    from better_exceptions import format_exception
-                    embed(header=textwrap.dedent(
-                            f"""\
-                            Caught the following {type(err).__name__} at 'lightcurves.py':444:
-                            %s
-                            Exception will be re-raised upon exiting this embedded interpreter.
-                            """) % '\n'.join(format_exception(*sys.exc_info()))
-                    )
-                    raise
-                    
+                    logger.exception('Lightcurve pipeline failed at step: {!r}; '
+                                     'group: {}', step, gid)
+                    raise err
 
                 section = (grouping, step)
                 if concat := self.concats.get(section):
@@ -500,143 +453,6 @@ class Pipeline(slots.SlotHelper):
 
         return ui
 
-
-# def load_raw(hdu, infile, outfile, overwrite=False, plot=False):
-
-#     logger.info(f'{infile = }; {outfile = }')
-
-#     # _load(('raw', hdu, ))
-#     name = 'raw'
-#     data = load_or_compute(
-#         # load
-#         resolve_path(outfile, hdu),
-#         CONFIG.by_file[name].get('overwrite', overwrite),
-#         # compute
-#         delayed(load_memmap)(hdu, resolve_path(infile, hdu)),
-#         # save
-#         _get_save_meta(hdu, title=CONFIG[name].title),
-#         # plot
-#         _get_plot_config('by_file', name)
-#     )
-
-
-# def load_flagged(hdu, paths, overwrite=False, plot=False):
-
-#     files = paths.files
-
-#     infile = files.lightcurves[section]
-#     outfile = files.lightcurves['flagged']
-#     produce(section, infile, outfile, hdu, overwrite, plot)
-
-#     name = 'flagged'
-#     return load_or_compute(
-#         # load
-#         resolve_path(files.lightcurves[name], hdu),
-#         CONFIG.by_file[name].get('overwrite', overwrite),
-#         # compute
-#         delayed(_flag_outliers)(hdu,
-#                                 resolve_path(files.tracking.source_info, hdu),
-#                                 resolve_path(files.lightcurves.raw, hdu),
-#                                 overwrite),
-#         # save
-#         _get_save_meta(hdu, title=CONFIG[name].title),
-#         # plot
-#         _get_plot_config(('by_file', name))
-#     )
-
-
-# def _flag_outliers(section, hdu, infile, outfile, overwrite):
-#     # load memmap
-#     t, flux, sigma = produce(('by_file', 'raw'), infile, outfile, overwrite)
-#     # bjd = t.bjd
-#     # flux = flag_outliers(t, flux)
-#     return t, flag_outliers(t, flux), sigma
-
-
-# def diff0_phot(hdu, paths, overwrite=False, plot=False):
-#     # filename = folder / f'raw/{hdu.file.stem}-phot-raw.txt'
-#     # bjd, flux, sigma = load_phot(hdu, filename, overwrite)
-#     name = 'diff0'
-#     save = _get_save_meta(hdu, title=CONFIG[name].title)
-#     # processing metadata added by `_diff0_phot`
-#     meta = save['meta']['Processing'] = {}
-
-#     return load_or_compute(
-#         # load
-#         resolve_path(paths.files.lightcurves.by_file[name].filename, hdu),
-#         overwrite,
-#         # compute
-#         delayed(_diff0_phot)(hdu, paths, meta=meta, overwrite=overwrite),
-#         # save
-#         save,
-#         # plot
-#         _get_plot_config(('by_file', name))
-
-#     )
-
-
-# ---------------------------------------------------------------------------- #
-# Decorrelate
-
-# def decor(ts, campaign, paths, overwrite, **kws):
-
-#     kws = {**CONFIG.by_file.decor, **kws}
-#     save = _get_save_meta(campaign[0], title=kws.pop('title'))
-#     info = save['meta']['Observing info']
-#     info.pop('File')
-#     info['Files'] = ', '.join(campaign.files.names)
-
-#     meta = save['meta']['Processing'] = kws
-
-#     bjd, rflux, rsigma = load_or_compute(
-#         # load
-#         resolve_path(paths.files.lightcurves.decor, campaign[0]), overwrite,
-#         # compute
-#         delayed(_decor)(ts, **kws),
-#         # save
-#         save,
-#         # plot
-#         _get_plot_config(('by_date', 'decor'))
-#     )
-
-#     return TimeSeries(bjd, rflux.T, rsigma.T)
-
-# # save text
-# filename = paths
-# lc.io.write_text(
-#     filename,
-#     tss.t, tss.x.T, tss.u.T,
-#     title='Differential (smoothed) ragged-aperture light curve for {}.',
-#     obj_name=campaign[0].target,
-#     meta={'Observing info':
-#           {'T0 [UTC]': Time(tss.t[0], format='jd').utc,
-#            # 'Files':    ', '.join(campaign.files.names)
-#            }}
-# )
-
-
-# def concat_phot(campaign, paths, section, overwrite=None, plot=False, **meta):
-
-#     # Adjust meta info
-#     save = _get_save_meta(campaign[0], **meta)
-#     info = save['meta']['Observing info']
-#     info.pop('File')
-#     info['Files'] = ', '.join(campaign.files.names)
-
-#     # ('by_file', 'decor', 'concat')
-#     _, step, _ = section
-#     out_group = 'by_date'
-#     return load_or_compute(
-#         # load
-#         resolve_path(paths.files.lightcurves[section], campaign[0]),
-#         overwrite,
-#         # compute
-#         delayed(_concat_phot)(campaign, paths, section, overwrite, plot),
-#         # save
-#         save,
-#         # plot
-#         _get_plot_config((out_group, step))
-#     )
 
 
 # def lag_scatter(x, ):
