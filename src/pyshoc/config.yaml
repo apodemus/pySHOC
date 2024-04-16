@@ -98,7 +98,7 @@ logging:
 
     # Console logging sink
     console:
-        level:  info
+        level:  debug
         catch:  False
         # log message format
         format: >- # -  chomping indicator strips end newlines
@@ -109,7 +109,7 @@ logging:
         section: |
 
             {0:━<{width}}
-            {level.icon} {{level.name}: {message}:|B,teal}
+            {level.icon} {message:|B,teal}
             {0:━<{width}}
         # repeated log message
         repeats: |
@@ -695,7 +695,6 @@ lightcurves:
         stacked:
             title:      Orbit phased light curves for {}
             filename:   lcs-stacked.png
-
 
         phased:
             title:      Orbit phased light curve for {}

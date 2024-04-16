@@ -45,11 +45,12 @@ from .logging import logger, config as config_logging
 # logging config
 config_logging()
 
+
 # plot config
 rcParams.update({
-    'font.size': CONFIG.plotting.font.size,
+    'font.size':        CONFIG.plotting.font.size,
     'axes.labelweight': CONFIG.plotting.axes.labelweight,
-    'image.cmap': CONFIG.plotting.cmap
+    'image.cmap':       CONFIG.plotting.cmap
 })
 # rc('text', usetex=False)
 
@@ -286,8 +287,8 @@ def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
 # Setup / Load data
 
 def init(paths, telescope, target, overwrite):
-    root = paths.folders.root
 
+    root = paths.folders.root
     run = shocCampaign.load(root, obstype='object')
 
     # update info if given
@@ -356,7 +357,7 @@ def preview(run, paths, info, ui, plot, overwrite):
 
     run.tabulate.to_xlsx(filename, *sheet, overwrite=True)
     logger.info('The table above is available in spreadsheet format at:\n'
-                '{!s:}', path)
+                '    {!s:}', path)
 
     # Sample images prior to calibration and header info
     return compute_preview(run, paths, ui, plot, overwrite)
@@ -847,10 +848,12 @@ def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
         if not is_interactive():
             app = QtWidgets.QApplication(sys.argv)
 
-    # GUI
-    ui = GUI(title=CONFIG.plotting.gui.title,
-             pos=CONFIG.plotting.gui.pos,
-             active=plot)
+        # GUI
+        ui = GUI(title=CONFIG.plotting.gui.title,
+                 pos=CONFIG.plotting.gui.pos,
+                 active=plot)
+    else:
+        ui = None
 
     # ------------------------------------------------------------------------ #
     # Setup / Load data
@@ -878,7 +881,7 @@ def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    spanning = track(run, reg, paths, ui, overwrite, njobs)
+    spanning = track(run, reg, paths, ui, plot, overwrite, njobs)
 
     # ------------------------------------------------------------------------ #
     # Photometry

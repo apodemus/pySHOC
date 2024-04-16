@@ -383,7 +383,7 @@ def _get_desired_products(items, templates, key, **kws):
 
     rows = DictNode()
     for val, (section, template) in itt.product(items, templates.items()):
-        files = template.resolve_paths(section, **{key: val, **kws})
+        files = template.resolve_paths(section[0], **{key: val, **kws})
         rows[(val, *section)] = {file.suffix.strip('.'): file for file in files}
 
     return rows

@@ -18,7 +18,7 @@ from recipes.string import numbered, pluralize
 from recipes.containers.dicts import AttrDict, AutoVivify
 
 # relative
-from . import MATCH, shocCampaign
+from .core import MATCH, shocCampaign
 
 
 def move_to_backup(file, ext='bak'):
