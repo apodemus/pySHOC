@@ -12,6 +12,7 @@ from platformdirs import user_config_path, user_data_path
 
 # local
 import motley
+from recipes import op
 from recipes.shell import bash
 from recipes.string import sub
 from recipes.config import ConfigNode
@@ -22,15 +23,14 @@ from recipes.functionals.partial import Partial, placeholder as o
 
 
 # ---------------------------------------------------------------------------- #
-
-
-def get_username():
-    return pwd.getpwuid(os.getuid())[0]
-
-
-# ---------------------------------------------------------------------------- #
 # Load package config
 CONFIG = ConfigNode.load_module(__file__)
+
+GROUPING = {
+    'by_file':  ('HDU',  'file.stem'),
+    'by_date':  ('DATE', 't.date_for_filename'),
+    'by_orbit': ('E',    't.orbits_partial')
+}
 
 
 # load cmasher if needed
@@ -46,6 +46,11 @@ for _ in CONFIG.select('cmap').filtered(values=None).flatten().values():
 
 # user details
 # ---------------------------------------------------------------------------- #
+
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
+
+
 user_config_path = user_config_path('pyshoc')
 
 # calibration database default
@@ -98,71 +103,7 @@ _section_aliases = dict(
 
 
 # ---------------------------------------------------------------------------- #
-# def resolve_paths(self, output):        # resolve files / folders
-
-#     resolve_folders(output)
-#     resolve_files()
-#     # All paths resolved as far as possbile(barring $HDU $DATE templates)
-
-#     # add file parent folders to node.folders
-#     # note, ordinary dict here so we can save path and nested paths below
-#     folders = ConfigNode()
-#     for section, path in files.map(Path.parent.fget).flatten().items():
-#         # replace 'filename' with 'folder'
-#         if section[-1] == 'filename':
-#             section = (*section[:-1], 'folder')
-
-#         if original := self.folders.get(section):
-#             assert original == path
-#             section = (*section, 'folder')
-#         #
-#         folders[section] = path
-
-#     self['folders'] = folders
-
-
-# def resolve_folders(folders, output):
-#     # resolve internal folder references $HDU etc. Prefix paths when needed.
-
-#     # path $ substitutions
-#     # folders = self.folders
-#     folders['output'] = ''
-#     substitutions = resolve_internal_path_refs(folders, **_section_aliases)
-
-#     # Convert folders to absolute paths
-#     folders = folders.map(sub, substitutions)
-#     return _prefix_paths(folders, output)
-
-
-# def resolve_files(files, folders):
-#     # convert filenames to absolute paths where necessary
-
-#     # find config sections where 'filename' given as relative path, and
-#     # there is also a 'folder' given in the same group. Prefix the filename
-#     # with the folder path.
-
-#     # sub internal path refs
-#     substitutions = get_internal_path_refs(folders, **_section_aliases)
-
-#     files = files.map(sub, substitutions).map(Path)
-#     needs_prefix = files.filter(values=Path.is_absolute)
-
-#     for section, path in needs_prefix.flatten().items():
-#         if prefix := get_folder(folders, section):
-#             files[section] = prefix / path
-
-#     # make sure everything converted to full path
-#     assert len(files.filter(values=Path.is_absolute)) == 0
-
-#     return files
-
-
-# def get_folder(folders, section):
-#     for end in range(1, len(section) + 1)[::-1]:
-#         if (folder_key := section[:end]) in folders:
-#             folder = folders[folder_key]
-#             return getattr(folder, 'folder', folder)
-
+# Path template resolution
 
 def resolve_internal_path_refs(folders, **aliases):
     return _resolve_internal_path_refs(get_internal_path_refs(folders, **aliases))
@@ -235,24 +176,64 @@ def _ignore_any(ignore):
 
     return wrapper
 
+
 # ---------------------------------------------------------------------------- #
 
-
 class Template(Template):
+
+    def __init__(self, template):
+        super().__init__(str(template))
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.template})'
+
+    def __str__(self):
+        return self.template
 
     def get_identifiers(self):
         # NOTE: python 3.11 has Template.get_identifiers
         _, keys, *_ = zip(*self.pattern.findall(self.template))
         return keys
 
-    def __repr__(self):
-        return f'{type(self).__name__}({self.template})'
+    def resolve_path(self, hdu=None, frames=(), partial=False, **kws):
+        subs = self.get_subs(hdu, frames, partial, **kws)
+        return self.sub(partial, **subs, **kws)
 
-    def resolve_paths(self, section, partial=True, **kws):
+    def get_subs(self, hdu=None, frames=(), partial=False, **kws):
+        identifiers = set(self.get_identifiers())
 
+        # convert kws to uppercase
+        subs = {key.upper(): str(val) for key, val in kws.items()}
+
+        missing = identifiers - set(subs)
+        if not partial and (missing & ({'HDU', 'DATE', 'E'})):
+            assert hdu
+
+        for grouping, (key, attr) in GROUPING.items():
+            if hdu and key in missing:
+                subs[key] = op.AttrGetter(attr)(hdu)
+
+        if 'FRAMES' in missing:
+            j, k = frames or kws.pop('FRAMES')
+            if j and k and (j, k) != (0, hdu.nframes):
+                subs['FRAMES'] = '{j}-{k}'.format(j=j, k=k)
+            else:
+                subs['FRAMES'] = ''
+
+        return subs
+
+    def sub(self, partial=False, **kws):
         if partial:
-            kws = {**{key: f'${key}' for key in set(self.get_identifiers())},
-                   **kws}
+            return type(self)(self.safe_substitute(**kws))
+        else:
+            return Path(self.substitute(**kws))
+
+    def resolve_paths(self, hdu=None, section=(), partial=False, **kws):
+        return list(self._resolve_paths(hdu, section, partial, **kws))
+
+    def _resolve_paths(self, hdu, section, partial, **kws):
+
+        kws = self.get_subs(hdu, partial=partial, **kws)
 
         if '$EXT' in self.template:
             section = ensure.tuple(section)
@@ -260,23 +241,24 @@ class Template(Template):
             for i in range(1, len(section) + 1)[::-1]:
                 if formats := CONFIG[section[:i]].find('formats').get('formats'):
                     for ext in formats:
-                        yield Path(self.substitute(**{**kws, 'EXT': ext}))
+                        yield self.sub(partial, **{**kws, 'EXT': ext})
                     return
 
             raise ValueError(
                 f'No formats specified in config section {section} for '
-                f'template: {self.template} '
+                f'template: {self}.'
             )
 
         # expand braced expressions
-        yield from map(Path, bash.brace_expand(self.substitute(**kws)))
+        for tmp in bash.brace_expand(self.template):
+            yield Template(tmp).sub(partial, **kws)
 
 
 # ---------------------------------------------------------------------------- #
 
 class PathConfig(ConfigNode):  # AttributeAutoComplete
     """
-    Filesystem tree helper. Attributes `files` and `folders` point to the full
+    Filesystem trse helper. Attributes `files` and `folders` point to the full
     system paths for pipeline data products.
     """
 
@@ -344,7 +326,8 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
                        .filter(('root', 'input'))
                        .filter(_ignore_any(ignore))
                        .filter(values=_is_special)
-                       .filter(values=Path.exists))
+                       .filter(values=Path.exists)
+                       .flatten().values())
 
         if not required:
             logger.debug('All folders in output tree already exist.')

@@ -1,7 +1,6 @@
 
 # std
 from pathlib import Path
-from collections import abc
 
 # third-party
 import numpy as np
@@ -9,7 +8,7 @@ from mpl_toolkits.axes_grid1.parasite_axes import SubplotHost
 
 # local
 import motley
-from obstools import lightcurves as lc
+from obstools import lightcurves as lcs
 from scrawl.ticks import DateTick, _rotate_tick_labels
 from tsa.smoothing import tv
 from tsa.outliers import MovingWindowDetection
@@ -17,15 +16,17 @@ from tsa.ts.plotting import make_twin_relative
 from recipes.oo import slots
 from recipes.config import ConfigNode
 from recipes import dicts, pprint as ppr
+from recipes.logging import LoggingMixin
 from recipes.decorators import update_defaults
 from recipes.functionals.partial import PartialTask, PlaceHolder as o
 
 # relative
 from ..timing import Time
+from ..config import GROUPING
 from ..core import shocCampaign
 from .logging import logger
 from .plotting import PlotTask
-from .products import resolve_path
+from obstools.lightcurves import io
 
 
 # ---------------------------------------------------------------------------- #
@@ -37,21 +38,8 @@ CONFIG = ConfigNode.load_module(__file__)
 
 SPD = 86400
 
-GROUPINGS = dict(
-    by_file='file.name',
-    by_date='t.date_for_filename',
-    # by_cycle=
-)
-TEMPLATE_KEYS = dict(
-    by_file='HDU',
-    by_date='DATE',
-    # by_cycle=
-)
-
-GRAPHICS_EXT = {'png', 'pdf', 'jpg', 'svg', 'eps'}
-
-#
-LightCurve = lc.LightCurve
+# alias
+LightCurve = lcs.LightCurve
 
 
 # ---------------------------------------------------------------------------- #
@@ -79,21 +67,21 @@ def _get_save_meta(obj, **kws):
                 )
 
 
-def _get_plot_config(section, cli_flag):
+# def _get_plot_config(section, cli_flag):
 
-    if cli_flag is False:
-        return False
+#     if cli_flag is False:
+#         return False
 
-    kws, specific = CONFIG.plots.split(GROUPINGS)
-    specific = specific[section]
+#     kws, specific = CONFIG.plots.split(GROUPING)
+#     specific = specific[section]
 
-    if specific is False:
-        return False
+#     if specific is False:
+#         return False
 
-    if not isinstance(specific, abc.MutableMapping):
-        specific = {}
+#     if not isinstance(specific, abc.MutableMapping):
+#         specific = {}
 
-    return {**kws, **specific}
+#     return {**kws, **specific}
 
 
 def plotter(fig, ts, **kws):
@@ -131,6 +119,11 @@ def plotter(fig, ts, **kws):
 plot = plotter
 
 
+# ---------------------------------------------------------------------------- #
+# Load
+def load_memmap(hdu, filename, **kws):
+    return lcs.io.load_memmap(filename, hdu, **kws)
+
 
 # ---------------------------------------------------------------------------- #
 # Outlier flagging
@@ -159,61 +152,67 @@ def flag_outliers(ts, nwindow, noverlap, method, **kws):
 
 
 # ---------------------------------------------------------------------------- #
-# Differential
+# Decompose Atmospheric / Stellar variability
 
-def diff0_phot(ts, c=1, meta=None):
+def median_scale(ts, ref=1, meta=None):
 
-    t, flux, sigma = ts  # load_flagged(hdu, paths, overwrite)
+    t, flux, sigma = ts
 
-    # Zero order differential
-    fm = np.ma.median(flux[:, c])
+    # Scale by median flux of reference source
+    fm = np.ma.median(flux[:, ref])
     if meta:
         meta['Flux scale'] = fm
 
-    return (t,
-            np.ma.MaskedArray(flux.data / fm, flux.mask),
-            sigma / fm + sigma.mean(0) / sigma.shape[1])
+    return LightCurve(t,
+                      np.ma.MaskedArray(flux.data / fm, flux.mask),
+                      sigma / fm + sigma.mean(0) / sigma.shape[1])
 
 
-def diff_phot(ts, **kws):
+def diff_phot(ts, meta=None, **kws):
     logger.info('Decorrelating light curve for photometry.')
-    return _diff_smooth_tvr(ts, **kws)
+
+    tss = median_scale(ts, meta=meta)
+    sm = _diff_smooth_tvr(tss, **kws)
+
+    if meta:
+        meta['Differential Photometry'] = kws
+
+    return sm
 
 
 @update_defaults(CONFIG.by_file.diff.params)
 def _diff_smooth_tvr(ts, nwindow, noverlap, smoothing):
-    # smoothed differential phot
     try:
+        # smoothed differential phot
         sm = tv.MovingWindowSmoother(nwindow, noverlap)
         s = sm(ts.t, ts.x, smoothing)
         return ts - np.atleast_2d(s) + 1
     except Exception as err:
-        import sys, textwrap
+        import sys
+        import textwrap
         from IPython import embed
         from better_exceptions import format_exception
         embed(header=textwrap.dedent(
-                f"""\
-                Caught the following {type(err).__name__} at 'lightcurves.py':187:
+            f"""\
+                Caught the following {type(err).__name__} at 'lightcurves.py':194:
                 %s
                 Exception will be re-raised upon exiting this embedded interpreter.
                 """) % '\n'.join(format_exception(*sys.exc_info()))
         )
         raise
-        
 
 
 # ---------------------------------------------------------------------------- #
 # Decorrelate
 
 def decorrelate(ts, **kws):
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':213")
+    raise NotImplementedError()
 
 
 # ---------------------------------------------------------------------------- #
 # Concatenate
 
-def concat_phot(files):
+def concatenate(files):
     # stack time series for target run
 
     # _, step = section
@@ -221,7 +220,7 @@ def concat_phot(files):
 
     # data = zip(*(produce(section, compute, paths[section], None, hdu, overwrite)
     #              for hdu in campaign))
-    data = (lc.io.txt.read(filename) for filename in files)
+    data = (lcs.io.txt.read(filename) for filename in files)
 
     # data
     bjd, rflux, rsigma = map(np.ma.hstack, data)
@@ -234,20 +233,25 @@ def todo(*args, **kws):
     raise NotImplementedError()
 
 
-COMPUTE = {
-    # Time Series
-    'raw':          lc.io.load_memmap,
+# Time Series Analysis
+TSA = {
+    'raw':          load_memmap,
     'flagged':      flag_outliers,
-    'diff0':        diff0_phot,
+    # 'diff0':        median_scale,
     'diff':         diff_phot,
     'decor':        decorrelate,
+}
 
-    # Spectral density estimates
+# Spectral density estimates
+SDE = {
+    'acf':          todo,
     'periodogram':  todo,
     'lombscargle':  todo,
     'welch':        todo,
     'tfr':          todo,
 }
+
+KNOWN_STEPS = {*TSA, *SDE}
 
 # ---------------------------------------------------------------------------- #
 
@@ -259,7 +263,7 @@ class ReductionStep(PartialTask):
 
     # __wrapper__ = ReductionTask
 
-    def __init__(self, method, infile, outfiles=(), overwrite=False, save=(),
+    def __init__(self, method, infile, outfiles=(), /, overwrite=False, save=(),
                  plot=False, id_=(), *args, **kws):
 
         # init task
@@ -270,8 +274,8 @@ class ReductionStep(PartialTask):
                                 'output': [],
                                 'plots': []})
         for file in outfiles:
-            is_img = (file.suffix.lower().strip('.') in GRAPHICS_EXT)
-            templates[('output', 'plots')[is_img]].append(file)
+            cat = ('plots', 'output')[io.SupportedFileType.check(str(file))]
+            templates[cat].append(file)
 
         self.id_ = id_
         self.plot = plot
@@ -287,17 +291,17 @@ class ReductionStep(PartialTask):
             from IPython import embed
             embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':343")
 
-        obs = obs[0]
-        out = [resolve_path(o, obs) for o in self.templates.output]
+        hdu = obs[0]
+        out = [o.resolve_path(hdu) for o in self.templates.output]
         for path in out:
             if path.exists() and not self.overwrite:
-                logger.info('Loading lightcurve for {} from {}.', obs, path)
-                return LightCurve.load(path, obs)
+                logger.info('Loading lightcurve for {} from {}.', hdu, path)
+                return LightCurve.load(path, hdu)
 
         # Load input data
         if data is None:
-            if (infile := resolve_path(self.templates.input, obs)).exists():
-                data = LightCurve.load(infile, obs)
+            if (infile := self.templates.input.resolve_path(hdu)).exists():
+                data = LightCurve.load(infile, hdu)
             else:
                 raise FileNotFoundError(repr(str(infile)))
 
@@ -316,30 +320,16 @@ class ReductionStep(PartialTask):
 
         # save text
         if self.save_kws is not False:
-            try:
-                for path in out:
-                    result.save(path, **_get_save_meta(obs, **self.save_kws))
-            except Exception as err:
-                import sys
-                import textwrap
-                from IPython import embed
-                from better_exceptions import format_exception
-                embed(header=textwrap.dedent(
-                    f"""\
-                        Caught the following {type(err).__name__} at 'lightcurves.py':381:
-                        %s
-                        Exception will be re-raised upon exiting this embedded interpreter.
-                        """) % '\n'.join(format_exception(*sys.exc_info()))
-                )
-                raise
+            for path in out:
+                result.save(path, **_get_save_meta(hdu, **self.save_kws))
 
         # plot
         if self.plot is not False:
             plot = self.plot or {}
             kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
             init.setdefault('overwrite', self.overwrite)
-            init.setdefault('filenames',  [resolve_path(p, obs)
-                                           for p in self.templates.plot])
+            init.setdefault('filenames',  [tmp.resolve_path(hdu)
+                                           for tmp in self.templates.plot])
 
             # load task
             task = PlotTask(**init)
@@ -348,48 +338,87 @@ class ReductionStep(PartialTask):
         return result
 
 
-class Pipeline(slots.SlotHelper):
+class Pipeline(slots.SlotHelper, LoggingMixin):
 
     __slots__ = ('campaign', 'config', 'groupings', 'steps', 'concats', 'results')
 
     def __init__(self, campaign, config, output_templates=(), overwrite=False,
-                 plot=False):
+                 plot=True):
 
         infile = '$HDU'
-        config, groupings = config.split(GROUPINGS)
-        config.pop('by_cycle')  # FIXME
+        config, groupings = config.split(GROUPING)
         config = {**config, 'overwrite': overwrite, 'plot': plot}
+        groupings = groupings.filter(('folder', 'filename'))
 
         grouped = {}
         concats = {}
         steps = dicts.DictNode()
-        groupings = groupings.filter(('folder', 'filename'))
+
         for grouping, todo in groupings.items():
-            grouped[grouping] = campaign.group_by(GROUPINGS[grouping]).sorted()
+            template_key, attr = GROUPING[grouping]
+            grouped[grouping] = campaign.group_by(attr).sorted()
 
-            for step in todo.filter('formats'):
+            for step, cfg in todo.filter('formats').items():
+                if step not in KNOWN_STEPS:
+                    raise KeyError(
+                        f'Unknown reduction step: {step} in section: {grouping}.'
+                        f'The following steps are recognised:\n'
+                        f'Time Series Analysis: {tuple(TSA)}'
+                        f'Spectral Density Esitmators: {tuple(SDE)}'
+                    )
+
                 section = (grouping, step)
+                tmp_sec = ('lightcurves', grouping)
 
-                # for each step there may be a concat request
-                cfg, concat = steps[step].split('concat')
-                cfg.setdefault('save', {})
+                # for each step there may be a concat / sde request
+                cfg, concat = cfg.split('concat')
+                cfg, sde = cfg.split(SDE)
+                params = cfg.pop('params', {})
+                _plot = cfg.pop('plot', plot)
+                plot = _plot if plot else False
+
+                if 'plot' in cfg:
+                    from IPython import embed
+                    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':403")
 
                 # load / compute step
-                key = (TEMPLATE_KEYS[grouping], *section)
+                key = (template_key, *section)
                 template = output_templates.get((*key, 'filename'), '')
                 template = template or output_templates.get(key, '')
-                outfiles = list(template.resolve_paths(('lightcurves', grouping)))
+                outfiles = list(template.resolve_paths(section=tmp_sec, partial=True))
 
-                steps[grouping][step] = \
-                    ReductionStep(COMPUTE[step], infile, outfiles,
-                                  overwrite, plot=plot, **cfg)
+                # Add task
+                if worker := TSA.get(step, ()) or SDE.get(step, ()):
+                    #
+                    self.logger.opt(lazy=True).bind(indent=True).info(
+                        'Adding reduction step {0[0].__name__!r} for section '
+                        '{0[1]}: {0[2]}.',
+                        lambda: (worker, section,
+                                 f'\n{ppr.pformat(params)}' if params else '')
+                    )
+
+                    steps[section] = \
+                        ReductionStep(worker, infile, outfiles, overwrite,
+                                      save=cfg, plot=plot, **params)
+
+                # Concatenate
+                if concat:
+                    _, template = (output_templates.find(step).find('concat')
+                                   .flatten().popitem())
+                    outfiles = list(template.resolve_paths(section=tmp_sec, partial=True))
+                    concats[section] = \
+                        ReductionStep(concatenate, infile, outfiles, **concat)
+
+                # ??
                 infile = outfiles[0]
 
-                if concat:
-                    # Concatenate
-                    concats[section] = \
-                        ReductionStep(concat_phot, infile, concat.filename,
-                                      **concat)
+                # Spectral Density Estimation
+                if sde:
+                    #
+                    # _, template = output_templates.find(step).find('concat').flatten().popitem()
+
+                    from IPython import embed
+                    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':418")
 
         # Create attributes
         super().__init__(campaign=campaign,
@@ -437,7 +466,7 @@ class Pipeline(slots.SlotHelper):
     def plot(self, section, ui=None, filename_template=None, overwrite=False, **kws):
 
         grouping, step = section
-        task = ui.task_factory(lc.plot)(o, **kws)
+        task = ui.task_factory(lcs.plot)(o, **kws)
 
         filenames = {}
         for date, ts in self.results.items():
@@ -452,7 +481,6 @@ class Pipeline(slots.SlotHelper):
                 ui[tab[:-2]].link_focus()
 
         return ui
-
 
 
 # def lag_scatter(x, ):

@@ -35,6 +35,7 @@ from recipes.functionals.partial import PlaceHolder as o
 
 # relative
 from .. import CONFIG, shocCampaign
+from ..config import _is_special, Template
 from . import products, lightcurves as lc
 from .plotting import GUI
 from .calibrate import calibrate
@@ -187,10 +188,7 @@ def get_intervals(hdu, subset, n_intervals):
 
 
 # ---------------------------------------------------------------------------- #
-def get_tab_key(hdu):
-    year, day = str(hdu.date_for_filename).split('-', 1)
-    return (year, day, hdu.file.nr)
-
+# plotting
 
 def plot_sample_images(run, samples, path_template=None, overwrite=True,
                        thumbnails=None, ui=None):
@@ -235,9 +233,9 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
         # grouping
         tab = get_tab_key(hdu)
 
-        for (j, k), image in samples[hdu.file.name].items():
+        for frames, image in samples[hdu.file.name].items():
             # get filename
-            filename = products.resolve_path(path_template, hdu, j, k)
+            filename = path_template.resolve_path(hdu, frames=frames)
 
             # add tab to ui
             key = (*section, *tab)
@@ -251,7 +249,13 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
         ui[section].link_focus()
 
 
+def get_tab_key(hdu):
+    year, day = str(hdu.date_for_filename).split('-', 1)
+    return (year, day, hdu.file.nr)
+
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
+
+
 def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
 
     # portion = mit.chunked(sample_images, len(run))
@@ -279,9 +283,6 @@ def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
 
 #     return art
 
-# ---------------------------------------------------------------------------- #
-# plotting
-
 
 # ---------------------------------------------------------------------------- #
 # Setup / Load data
@@ -303,6 +304,13 @@ def init(paths, telescope, target, overwrite):
         missing_telescope_info = run[~np.array(run.attrs.telescope, bool)]
         missing_telescope_info.attrs.set(repeat(telescope=info.pop('telescope')))
         run.attrs.set(repeat(info))
+
+    # create output folders for templated paths
+    logger.info('Creating folders for templated paths.')
+    templated = set(paths.folders.select(values=_is_special).flatten().values())
+    for tmp, hdu in itt.product(templated, run):
+        path = Template(tmp).resolve_path(hdu)
+        path.mkdir(parents=True, exist_ok=True)
 
     # write script for remote data retrieval
     if ((files := paths.files.remote).get('rsync_script') and
@@ -377,9 +385,11 @@ def compute_preview(run, paths, ui, plot, overwrite, show_cutouts=False):
 
     thumbnails = None
     if plot:
+        filename = paths.files.samples.plots.thumbnails.raw
         thumbnails = plot_thumbnails(samples, ui,
                                      **{'overwrite': overwrite,
-                                        **CONFIG.samples.plots.thumbnails.raw})
+                                        **CONFIG.samples.plots.thumbnails.raw,
+                                        'filename': filename})
     # source regions
     # if not any(products['Images']['Source Regions']):
     #     sample_images = products['Images']['Samples']
@@ -393,7 +403,7 @@ def headers_to_txt(run, paths, overwrite):
         def showfile(h): return h.relative_to(paths.folders.output)
 
     for hdu in run:
-        headfile = products.resolve_path(paths.files.info.headers, hdu)
+        headfile = paths.templates.HDU.info.headers.resolve_path(hdu)
         if not headfile.exists() or overwrite:
             logger.info('Writing fits header to text at {}.', showfile(headfile))
             hdu.header.totextfile(headfile, overwrite=overwrite)
@@ -457,7 +467,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # Plot calibrated sample images
         # -------------------------------------------------------------------- #
         plot_sample_images(run, samples_cal,
-                           paths.files.samples.filename, overwrite,
+                           paths.templates.HDU.samples.filename, overwrite,
                            thumbs, ui)
 
     # align
@@ -475,8 +485,10 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         if outer.show:
             survey = config.params.survey
             task = ui.task_factory(reg.mosaic)(names=run.files.stems, **inner)
+            _, template = paths.templates.find('mosaic').flatten().popitem()
+
             ui.add_task(task, (*outer.tab, survey.upper()),
-                        str(outer.filename).replace('$TEL', survey),
+                        template.substitute(TEL=survey),
                         outer.get('overwrite', overwrite))
 
             # TODO mark target
@@ -598,13 +610,13 @@ def register(run, samples, paths, ui, plot, overwrite):
     return reg
 
 
-def save_samples_fits(run, samples, wcss, filename_template, overwrite):
+def save_samples_fits(run, samples, wcss, path_template, overwrite):
     # save samples as fits with wcs
 
     for (file, subs), wcs in zip(samples.items(), wcss):
         hdu = run[file]
-        for (j, k), image in subs.items():
-            filename = products.resolve_path(filename_template, hdu, j, k)
+        for frames, image in subs.items():
+            filename = path_template.resolve_path(hdu, frames=frames)
 
             if overwrite or not filename.exists():
                 # remove header comment
@@ -674,7 +686,6 @@ def plot_drizzle(fig, *indices, filename):
 # ---------------------------------------------------------------------------- #
 # Tracking
 
-
 def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
 
     logger.section('Source Tracking')
@@ -684,12 +695,12 @@ def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
     spanning = np.add(spanning, 1)
     logger.info('Sources: {} span all observations.', spanning)
 
-    filenames = paths.files.tracking
+    templates = paths.templates.HDU.tracking
     images_labels = list(itt.islice(zip(reg, reg.labels_per_image), 1, None))
     overwrite = overwrite or CONFIG.tracking.get(overwrite, False)
     for i, (hdu, (img, labels)) in enumerate(zip(run, images_labels), 1):
         # check if we need to run
-        if overwrite or _tracker_missing_files(filenames, hdu, spanning):
+        if overwrite or _tracker_missing_files(templates, hdu, spanning):
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
             # path = products.resolve_path(paths.folders.tracking, hdu)
@@ -717,75 +728,89 @@ def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
     if njobs == -1:
         njobs = CONFIG.tracking.params.njobs
 
-    base = products.resolve_path(paths.folders.tracking.folder, hdu)
+    base = Template(paths.folders.tracking.folder).resolve_path(hdu)
     tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
     tracker.reg = reg
     # tracker.detection.algorithm = CONFIG.detection
     tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
     tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
+    
+
+    
 
     # plot
+    SAVE_KWS = ('filename', 'overwrite')
     if plot and cfg.plot:
-        kws, tmp = cfg.plots.positions.split('filename')
-        tmp = str(products.resolve_path(tmp.filename, hdu))
+        tmp = paths.templates.HDU.tracking.plots
+
+        kws, save = cfg.plots.positions.split(SAVE_KWS)
+        save.setdefault('overwrite', overwrite)
+        save.pop('filename', '')
 
         #                  year, day, nr
         tab = (*cfg.tab, *get_tab_key(hdu))
-        for j in tracker.use_labels:
+        for i, j in enumerate(tracker.use_labels):
             # plot source location features
-            task = ui.task_factory(tracker.plot.positions_source)(o, o[-1], **kws)
-            ui.add_task(task, (*tab, f'Source {j}'),
-                        tmp.replace('$SOURCE', str(j)), overwrite)
+            task = ui.task_factory(tracker.plot.positions_source)(o, i, **kws)
+            save['filenames'] = tmp.positions.resolve_paths(hdu, source=j)
+            ui.add_task(task, (*tab, f'Source {j}'), **save)
 
         # plot positions displacement time series
-        kws, outer = cfg.plots.time_series.split(('filename', 'tab'))
+        kws, save = cfg.plots.time_series.split(SAVE_KWS)
+        save.setdefault('overwrite', overwrite)
+        save.pop('filename', '')
+        save['filenames'] = tmp.time_series.resolve_paths(hdu)
 
+        tab = (*tab, *kws.pop('tab'))
         task = ui.task_factory(tracker.plot.displacement_time_series)(o.axes[0], **kws)
-        ui.add_task(task, (*tab, *outer.tab),
-                    products.resolve_path(outer.filename, hdu), overwrite,
-                    add_axes=True)
+        ui.add_task(task, tab, **save, add_axes=True)
 
     return tracker
 
 
 def _tracker_target_files(templates, hdu, sources):
-    desired = templates.map(products.resolve_path, hdu)
-    files, position_plots = desired.split('positions')
-    target_files = {
-        key: products.resolve_path(path, hdu)
-        for key, path in files.flatten().items()
-    }
+
+    target_files = templates.filter('plots').map(Template.resolve_path, hdu)
 
     # plots
-    key, position_plots = position_plots.flatten().popitem()
-    position_plots = str(position_plots)
-    target_files.update({
-        (*key, i): Path(position_plots.replace('$SOURCE', str(i)))
-        for i in sources
-    })
+    for key, tmp in templates.plots.items():
+        if 'SOURCE' in tmp.get_identifiers():
+            target_files.update({
+                ('plots', key, i): list(tmp.resolve_paths(hdu, source=i))
+                for i in sources
+            })
+        else:
+            target_files['plots', key] = list(tmp.resolve_paths(hdu))
+
+    # plot_file_temps.items()
     return target_files
 
 
 def _tracker_missing_files(templates, hdu, sources):
-    target_files = _tracker_target_files(templates, hdu, sources)
-    missing = {key: file
-               for key, file in target_files.items()
-               if not file.exists()}
 
-    if missing and (missing != target_files):
+    target_files = _tracker_target_files(templates, hdu, sources)
+
+    missing = []
+    first_time_run = True
+    for file in mit.collapse(target_files.flatten().values()):
+        if file.exists():
+            first_time_run = False
+        else:
+            missing.append(file)
+
+    if first_time_run:
+        logger.info('First time run for {}.', hdu.file.name)
+    elif missing:
         logger.bind(indent=4).opt(lazy=True).info(
             'Source Tracker for {0[0]} missing some target files:\n{0[1]}.',
-            lambda: (hdu.file.name, pp.pformat(missing, rhs=str))
+            lambda: (hdu.file.name, pp.pformat(missing, fmt=str))
         )
-    else:
-        logger.info('First time run for {}.', hdu.file.name)
 
     return missing
 
 
 # ---------------------------------------------------------------------------- #
 # Light curves
-
 
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
@@ -817,7 +842,7 @@ def lightcurves(run, paths, ui, plot=True, overwrite=False):
     #     load_or_compute(file, overwrite, LOADERS[step], (hdu, file))
 
 
-def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws):
+def plot_lcs(lcs, step, ui=None, path_template=None, overwrite=False, **kws):
 
     section = CONFIG.lightcurves.tab
     task = ui.task_factory(lc.plot)(o, **kws)
@@ -825,7 +850,7 @@ def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws)
     filenames = {}
     for date, ts in lcs.items():
         filenames[date] = filename \
-            = Path(filename_template.substitute(DATE=date)).with_suffix('.png')
+            = Path(path_template.substitute(DATE=date)).with_suffix('.png')
         year, day = date.split('-', 1)
         tab = (*section, year, day, step)
         ui.add_task(task, tab, filename, overwrite, None, False, ts)
@@ -839,7 +864,7 @@ def plot_lcs(lcs, step, ui=None, filename_template=None, overwrite=False, **kws)
 # Main
 # ---------------------------------------------------------------------------- #
 
-def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
+def main(paths, target, telescope, njobs, plot, gui, show_cutouts, overwrite):
     #
     # from obstools.phot import PhotInterface
 
@@ -881,7 +906,7 @@ def main(paths, target, telescope, top, njobs, plot, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    spanning = track(run, reg, paths, ui, plot, overwrite, njobs)
+    track(run, reg, paths, ui, plot, overwrite, njobs)
 
     # ------------------------------------------------------------------------ #
     # Photometry

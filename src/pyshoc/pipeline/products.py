@@ -11,7 +11,7 @@ from loguru import logger
 import motley
 from motley.table import Table
 from motley.table.xlsx import hyperlink_ext
-from recipes import op, string
+from recipes import op
 from recipes.functionals import echo
 from recipes.tree import FileSystemNode
 from recipes.containers import ensure, remove
@@ -21,7 +21,7 @@ from recipes.functionals.partial import Partial, PlaceHolder as o
 
 # relative
 from .. import CONFIG
-from ..config import Template
+from ..config import GROUPING, Template
 from .utils import get_file_age
 
 
@@ -66,14 +66,6 @@ class ProductNode(FileSystemNode):
 
 # ---------------------------------------------------------------------------- #
 
-# GROUPINGS = dict(
-#     by_file='file.stems',
-#     by_date='t.date_for_filename',
-#     # by_cycle=
-# )
-GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
-                            'date':  'DATE',
-                            'cycle': 'E'}
 
 # SAMPLE = ['sample']
 # SERIES = ['raw', 'flagged', 'diff0', 'diff', 'decor']
@@ -89,85 +81,6 @@ SPECTRAL = dict(zip(
 #                            (SERIES, 'Light Curves'),
 #                            (SPECTRAL, 'Spectral Density Estimates')])
 #      )
-
-
-# class DataProducts(LoggingMixin):
-
-#     GROUPING_TO_TEMPLATE_KEY = {'file':  'HDU',
-#                                 'date':  'DATE',
-#                                 'cycle': 'E'}
-
-#     GROUPING_SORT_ATTR = {'file':  't.t0',
-#                           'date':  't.date_for_filename', }
-#     # 'cycle': 'E'}
-
-#     _remove_keys = ('by_file', 'by_date', 'concat')
-
-#     def __init__(self, run, paths, groupings=('file', 'date')):
-#         self.campaign = run
-#         self.paths = paths
-#         for g in groupings:
-#             names, targets = self.resolve(g)
-#             self.targets = {g: targets}
-
-#     def get_templates(self, key):
-
-#         # Get template tree
-#         tmp = self.paths.templates[key].copy()
-#         tmp = tmp.filter(('tracking', 'plots'))  # FIXME
-#         tmp, lcs = tmp.split('lightcurves')
-#         lcs = lcs.map(op.AttrGetter('template'))
-
-#         return DictNode({**tmp.flatten(),
-#                         **lcs.map(Template).flatten()}).flatten()
-
-#     def resolve(self, by):
-#         by = by.lower()
-#         if by == 'cycle':
-#             raise ValueError('TODO')
-
-#         key = GROUPING_TO_TEMPLATE_KEY[by]
-#         if by == 'file':
-#             # sort rows
-#             stems = self.campaign.sort_by('t.t0').files.stems
-#             templates = self.get_templates('HDU')
-#             files = _get_desired_products(stems, templates, key, FRAMES='')
-
-#         if by == 'date':
-#             # sort rows
-#             dates = sorted(set(self.campaign.attrs('t.date_for_filename')))
-#             templates = self.get_templates('DATE')
-#             files = _get_desired_products(dates, templates, key)
-
-#         #
-#         files = files.reshape(Partial(remove)(o, self.to_remove))
-#         return files.stack(level=0)
-
-#     # def get_desired_products(self, items, templates,  key, **kws):
-
-#     #     rows = DictNode()
-#     #     for val, (section, template) in itt.product(items, templates.items()):
-#     #         files = template.resolve_paths(section, **{key: val, **kws})
-#     #         rows[(val, *section)] = {file.suffix.strip('.'): file for file in files}
-
-#     #     return rows
-
-#     def write_xlsx(self, overview):
-
-#         paths = self.paths
-#         run = self.campaign
-#         sheets = paths.files.info.spreadsheets
-
-#         # Overview
-#         filename, *sheet = str(sheets.overview).split('::')
-
-#         # HDU
-#         filename, *sheet = str(sheets.by_file).split('::')
-#         _write_hdu_products_xlsx(run, paths, overview, filename, *sheet)
-
-#         # DATE
-#         filename, *sheet = str(sheets.by_date).split('::')
-#         return _write_nightly_products_xlsx(run, paths, filename, *sheet)
 
 
 # ---------------------------------------------------------------------------- #
@@ -297,9 +210,9 @@ def _get_relative_paths(section, paths, depth=-1, order=1, slash=None,
     ancestors = []
     for i, slash in itr:
         if ((i <= depth) and (section[0] != 'input')
-                    and (folder := paths.get_folder(section[:i])) and (folder != parent)
-                    and isinstance(folder, Path)
-                ):
+                and (folder := paths.get_folder(section[:i])) and (folder != parent)
+                and isinstance(folder, Path)
+            ):
             #
             if folder.is_relative_to(parent):
                 yield f'/{folder.relative_to(parent)!s}{slash}'
@@ -329,26 +242,6 @@ def sanitize_filename(name):
     return name.lower().replace(' ', '')
 
 
-def resolve_path(path, hdu, *frames, **kws):
-
-    if isinstance(path, DictNode):
-        raise TypeError(f'{type(path)}')
-
-    path = str(path)
-    subs = {'$HDU':  hdu.file.stem,
-            '$DATE': str(hdu.t.date_for_filename)}
-
-    if frames and '$FRAMES' in path:
-        j, k = frames
-        if j and k and (j, k) != (0, hdu.nframes):
-            subs['$FRAMES'] = '{j}-{k}'.format(j=j, k=k)
-        else:
-            subs['$FRAMES'] = ''
-
-    # if '$SOURCE' in path and kws.:
-    return Path(string.sub(path, {**subs, **kws}))
-
-
 def _get_templates(paths, key):
 
     # Get template tree
@@ -364,26 +257,29 @@ def _get_templates(paths, key):
 def get_desired_products(run, templates, by):
 
     by = by.lower()
-    key = GROUPING_TO_TEMPLATE_KEY[by]
+    key, attr = GROUPING[f'by_{by}']
+
+    run = run.sort_by('t.t0')
     if by == 'file':
         # sort rows
-        stems = run.sort_by('t.t0').files.stems
+        stems = run.attrs(attr)
         return _get_desired_products(stems, templates, key, FRAMES='')
 
     if by == 'date':
         # sort rows
-        dates = sorted(set(run.attrs('t.date_for_filename')))
+        dates = sorted(set(run.attrs(attr)))
         return _get_desired_products(dates, templates, key)
 
     if by == 'cycle':
-        raise ValueError('TODO')
+        orbits = list(itt.collapse(run.attrs(attr)))
+        return _get_desired_products(orbits, templates, key)
 
 
 def _get_desired_products(items, templates, key, **kws):
 
     rows = DictNode()
     for val, (section, template) in itt.product(items, templates.items()):
-        files = template.resolve_paths(section[0], **{key: val, **kws})
+        files = template.resolve_paths(section=section[0], **{key: val, **kws})
         rows[(val, *section)] = {file.suffix.strip('.'): file for file in files}
 
     return rows
