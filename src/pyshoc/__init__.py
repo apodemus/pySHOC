@@ -1,5 +1,5 @@
 """
-pyshoc - Data analysis tools for the Sutherland High-Speed Optical Cameras.
+pyshoc - Analysis tools for data from the Sutherland High-Speed Optical Cameras.
 """
 
 # std

@@ -13,10 +13,7 @@ import motley
 from motley.utils import Filler, GroupTitle
 from recipes import op
 from recipes.logging import LoggingMixin
-from recipes.containers.sets import OrderedSet
-
-# relative
-from .utils import str2tup
+from recipes.containers import sets, ensure
 
 
 def proximity_groups(self, other, keys, null=None):
@@ -45,7 +42,7 @@ def proximity_groups(self, other, keys, null=None):
     """
 
     if not (self and other and keys):
-        #vals = self.attrs(*keys) if self else (None, )
+        # vals = self.attrs(*keys) if self else (None, )
         yield (null, ), self, other, None
         return
 
@@ -176,9 +173,9 @@ class MatchedObservations(LoggingMixin):
         )
 
         # create the GroupedRun for science frame and calibration frames
-        self.exact = exact = str2tup(exact)
-        self.closest = closest = str2tup(closest)
-        self.attrs = OrderedSet(filter(None, exact + closest))
+        self.exact = exact = ensure.tuple(exact)
+        self.closest = closest = ensure.tuple(closest)
+        self.attrs = sets.OrderedSet(filter(None, exact + closest))
 
         if not self.attrs:
             raise ValueError('Need at least one `key` (attribute name) by which'
@@ -291,7 +288,7 @@ class MatchedObservations(LoggingMixin):
         highlight = {}
         insert = defaultdict(list)
         head_keys = np.array([*g0.group_id[0]])
-        attrs = OrderedSet(tmp.tabulate.attrs) - self.attrs
+        attrs = sets.OrderedSet(tmp.tabulate.attrs) - self.attrs
         for i, gid in enumerate(self.matches.keys()):
             obs = g0[gid]
             other = g1[gid]

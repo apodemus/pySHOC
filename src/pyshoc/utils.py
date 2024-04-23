@@ -6,17 +6,11 @@ from copy import copy
 from astropy.io import fits
 
 
-def str2tup(keys):
-    if isinstance(keys, str):
-        keys = (keys, )
-    return keys
-
-
-def combine_single_images(ims, func):   
+def combine_single_images(ims, func):
     """Combine a run consisting of single images."""
-    
-     # TODO MERGE WITH shocObs.combine????
-    
+
+    # TODO MERGE WITH shocObs.combine????
+
     header = copy(ims[0][0].header)
     data = func([im[0].data for im in ims], 0)
 

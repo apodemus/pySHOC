@@ -10,13 +10,13 @@ from loguru import logger
 from matplotlib import rcParams
 
 # local
+from obstools.sites.saao import telescopes
 from recipes import io
 from recipes.string import most_similar
 from recipes.containers.dicts import groupby
 
 # relative
 from .. import CONFIG, shocHDU
-from ..core import get_tel
 from .._version import version as VERSION
 from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
@@ -108,7 +108,7 @@ def resolve_aperture(_ctx, _param, value):
 
 def resolve_tel(_ctx, param, value):
     if value is not None:
-        return get_tel(value)
+        return telescopes.get_name(value)
 
 
 def resolve_target(_ctx, _param, value):

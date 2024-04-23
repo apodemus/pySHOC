@@ -29,10 +29,12 @@ from motley.utils import ALIGNMENT_MAP_INV, vstack
 from motley.table.attrs import AttrTable, AttrColumn as Column
 from obstools.image.hdu import ImageHDU
 from obstools.image.noise import StdDev
-from obstools.stats import median_scaled_median
+from obstools.sites.saao import telescopes as tel
+from obstools.math.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes import pprint
+from recipes.containers import ensure
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.mapping import pformat
@@ -44,10 +46,8 @@ from recipes.string import named_items, strings, sub, indent as indented
 # relative
 from . import headers
 from .config import CONFIG
-from .utils import str2tup
 from .printing import BraceContract
 from .readnoise import readNoiseTables
-from .tel_info import get_tel, tel_info
 from .timing import Trigger, shocTiming
 
 
@@ -72,12 +72,7 @@ PIXEL_SIZE = 13e-6  # m
 
 # Diffraction limits for shoc in pixels assuming
 # green light:  λ = 5e-7
-
-# F_RATIOS = {'1.9m': 4.85 }
 DIFF_LIMS = {'1.9m':   1.22 * 5e-7 * 4.85 / PIXEL_SIZE}
-#    '1.0m':  ,
-#    'lesedi':,
-#    'salt':  }
 
 # ----------------------------- module constants ----------------------------- #
 
@@ -103,8 +98,7 @@ MATCH['darks'] = MATCH['dark'] = MATCH_DARKS = (ATT_EQUAL_DARK, ATT_CLOSE_DARK)
 REGEX_ROLLED = re.compile(r'\._X([0-9]+)')
 
 
-# ----------------------------- helper functions ----------------------------- #
-
+# ----------------------------- utility functions ---------------------------- #
 
 def hms_latex(x, precision=0):
     return R'\hms{{{:02.0f}}}{{{:02.0f}}}{{{:04.1f}}}'.format(
@@ -139,8 +133,8 @@ def slice_size(s):
 def slice_sizes(l):
     return list(map(slice_size, l))
 
-# ------------------------------ Helper classes ------------------------------ #
 
+# ------------------------------ Helper classes ------------------------------ #
 
 class Binning:
     """Simple class to represent CCD pixel binning."""
@@ -443,7 +437,7 @@ class shocHDU(ImageHDU, Messenger):
 
         #
         self.camera = f'SHOC{SERIAL_NRS.index(header["SERNO"]) + 1}'
-        self.location = getattr(tel_info.get(self.telescope), 'loc', None)
+        self.location = getattr(tel.info.get(self.telescope), 'loc', None)
         self._coords = None     # placeholder
         self._wcs = None
         # # field of view
@@ -517,7 +511,7 @@ class shocHDU(ImageHDU, Messenger):
 
     @filters.setter
     def filters(self, filters):
-        self._filters = Filters(*str2tup(filters))
+        self._filters = Filters(*ensure.tuple(filters))
         self._filters.to_header(self.header)
 
     @property
@@ -526,9 +520,9 @@ class shocHDU(ImageHDU, Messenger):
 
     @telescope.setter
     def telescope(self, telescope):
-        tel = tel_info[telescope]
-        self.header['TELESCOP'] = tel.name
-        self.location = tel.loc
+        telecope = tel.info[telescope]
+        self.header['TELESCOP'] = telecope.name
+        self.location = telecope.loc
 
     @property
     def target(self):
@@ -560,9 +554,9 @@ class shocHDU(ImageHDU, Messenger):
             return
 
         year, month, day, *_ = tuple(self.t.t0.ymdhms)
-        tel = get_tel(self.telescope, metric=False)
+        telescope = tel.get_name(self.telescope, metric=False)
 
-        path = (f'/data/{tel}/{SERVER_NAMES[self.camera]}/'
+        path = (f'/data/{telescope}/{SERVER_NAMES[self.camera]}/'
                 f'{year}/{month:0>2d}{day:0>2d}/'
                 f'{self.file.name}')
 
@@ -719,7 +713,7 @@ class shocHDU(ImageHDU, Messenger):
     # def set_calibrators(self)
 
     def get_fov(self):
-        fov = tel_info[self.telescope].fov
+        fov = tel.info[self.telescope].fov
         # scale by fractional size of subframe image
         full_frame = np.floor_divide(1028, tuple(self.binning))
         return fov * (slice_size(self.subrect) / full_frame)
@@ -1393,11 +1387,11 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # Standardize naming convention for telscopes
         said = False
         for hdu in run:
-            if hdu.telescope and (tel := tel_info[hdu.telescope].name) != hdu.telescope:
+            if hdu.telescope and (scope := tel.info[hdu.telescope].name) != hdu.telescope:
                 if not said:
                     cls.logger.info('Switching to metric names for telescopes.')
                     said = True
-                hdu.telescope = tel
+                hdu.telescope = scope
 
         return run
 
