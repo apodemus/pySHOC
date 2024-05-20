@@ -20,7 +20,7 @@ from recipes import io, pprint as ppr
 from recipes.decorators import raises
 
 # relative
-from .core import shocCampaign
+from ..core import shocCampaign
 
 
 def get_tree(root, extension=''):
