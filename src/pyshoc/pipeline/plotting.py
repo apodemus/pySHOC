@@ -5,16 +5,19 @@ from pathlib import Path
 
 # third-party
 from matplotlib.figure import Figure
-from mpl_multitab import MplMultiTab
+from mpl_multitab import MplMultiTab, QtGui
 
 # local
+from scrawl.utils import save_figure
 from recipes import dicts
 from recipes.oo import slots
 from recipes.string import indent
 from recipes.pprint import callers
-from recipes.logging import LoggingMixin
-from recipes.functionals.partial import Partial, PartialTask
 from recipes.containers import ensure
+from recipes.logging import LoggingMixin
+from recipes.pprint.callers import Callable
+from recipes.functionals.partial import Partial, PartialTask
+
 # relative
 from ..config import CONFIG
 from .logging import logger
@@ -50,41 +53,6 @@ def get_figure(ui, tab, fig, **kws):
     return Figure(**kws)
 
 
-def save_figure(fig, filenames=(), overwrite=False, **kws):
-
-    filenames = list(filenames)
-    if fn := kws.pop('filename', ()):
-        filenames.append(fn)
-    filenames = ensure.tuple(filenames, Path)
-    saved = 0
-
-    if not filenames:
-        logger.debug(
-            'Not saving figure {}: Could not resolve any filenames from {!r}.',
-            fig, filenames
-        )
-        return saved
-
-    for filename in filenames:
-        if filename.exists():
-            if overwrite:
-                logger.info('Overwriting image: {!s}.', filename)
-            else:
-                logger.info('Not overwriting: {!s}', filename)
-                continue
-        else:
-            logger.info('Saving image: {!s}.', filename)
-
-        fig.savefig(filename, **kws)
-        saved += 1
-
-    return saved
-
-
-# alias
-save_fig = save_figure
-
-
 # ---------------------------------------------------------------------------- #
 
 class _TaskBase(PartialTask, LoggingMixin):
@@ -99,7 +67,7 @@ class TaskFactory(Partial, LoggingMixin):
     def __wrapper__(self, func, *args, **kws):
 
         # resolve placholders and static params
-        task = PlotTask(self.ui, func, *args, **kws)
+        task = PlotTask(func, self.ui, *args, **kws)
 
         # create TaskRunner, which will run PlotTask when called
         return TaskRunner(task, **task.fig_kws)
@@ -127,12 +95,13 @@ class TaskRunner(_TaskBase):
 class PlotTask(_TaskBase):
     """Plot Task"""
 
-    def __init__(self, ui, func, *args, **kws):
+    def __init__(self, func, ui, *args, **kws):
 
         # split keywords for figure init
         kws, self.fig_kws = dicts.split(kws, FIG_KWS)
         kws, self.save_kws = dicts.split(kws, SAVE_KWS)
-        if 'filename' in func.__code__.co_varnames:
+
+        if 'filename' in Callable(func).sig.parameters:
             kws['filename'] = self.save_kws['filename']
 
         #
@@ -144,9 +113,9 @@ class PlotTask(_TaskBase):
         # Call signature for tasks requires: figure, tab
 
         # Fill dynamic parameter values
-        nfree = self.nfree
-        if nfree:
-            args = (*self._get_args((figure, *([tab] * (nfree == 2)))), *args)
+        nreq = self.nreq
+        if nreq:
+            args = (*self._get_args((figure, *([tab] * (nreq == 2)))), *args)
             kws = self._get_kws(kws)
 
         if self._keywords:
@@ -163,7 +132,7 @@ class PlotTask(_TaskBase):
         # plot
         art = func(*args, **kws)
 
-        if not (self.nfree or self._keywords):
+        if not (self.nreq or self._keywords):
             # We will have generated a figure to fill the tab in the ui, we have
             # to replace it after the task executes with the actual figure we
             # want in our tab.
@@ -235,6 +204,8 @@ class GUI(MplMultiTab):
         #
         super().__init__((), title, pos)
 
+        self.setWindowIcon(QtGui.QIcon('/home/hannes/Pictures/mCV.jpg'))
+        
         self.active = bool(active)
         self.delay = active and delay
 

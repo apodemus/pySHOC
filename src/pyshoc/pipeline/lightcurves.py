@@ -4,15 +4,11 @@ from pathlib import Path
 
 # third-party
 import numpy as np
-from mpl_toolkits.axes_grid1.parasite_axes import SubplotHost
 
 # local
-import motley
 from obstools import lightcurves as lcs
-from scrawl.ticks import DateTick, _rotate_tick_labels
 from tsa.smoothing import tv
 from tsa.outliers import MovingWindowDetection
-from tsa.ts.plotting import make_twin_relative
 from recipes.oo import slots
 from recipes.config import ConfigNode
 from recipes import dicts, pprint as ppr
@@ -21,22 +17,14 @@ from recipes.decorators import update_defaults
 from recipes.functionals.partial import PartialTask, PlaceHolder as o
 
 # relative
-from ..timing import Time
 from ..config import GROUPING
 from ..core import shocCampaign
 from .logging import logger
-from .plotting import PlotTask
-from obstools.lightcurves import io
 
 
 # ---------------------------------------------------------------------------- #
 # Config
 CONFIG = ConfigNode.load_module(__file__)
-
-# ---------------------------------------------------------------------------- #
-# Module constants
-
-SPD = 86400
 
 # alias
 LightCurve = lcs.LightCurve
@@ -82,41 +70,6 @@ def _get_save_meta(obj, **kws):
 #         specific = {}
 
 #     return {**kws, **specific}
-
-
-def plotter(fig, ts, **kws):
-    #
-    # logger.debug('{}.', pformat(locals()))
-    ax = SubplotHost(fig, 1, 1, 1)
-    fig.add_subplot(ax)
-
-    #
-    jd0 = int(ts.t[0]) - 0.5
-    utc0 = Time(jd0, format='jd').utc.iso.split()[0]
-    #
-
-    # plot
-    axp = make_twin_relative(ax, -(ts.t[0] - jd0) * SPD, 1, 45)
-    tsp = ts.plot(ax, t0=[0], tscale=SPD,
-                  **{**dict(plims=(-0.1, 99.99), show_masked=True), **kws})
-    axp.xaxis.set_minor_formatter(DateTick(utc0))
-    _rotate_tick_labels(axp, 45, True)
-
-    cfg = CONFIG.plots
-    ax.set(xlabel=cfg.xlabel.bottom, ylabel=cfg.ylabel)
-    axp.set_xlabel(cfg.xlabel.top, labelpad=cfg.xlabel.pad)
-
-    # fig.tight_layout()
-    fig.subplots_adjust(**cfg.subplotspec)
-
-    # if overwrite or not filename.exists():
-    #     save_fig(fig, filename)
-
-    return fig
-
-
-# alias
-plot = plotter
 
 
 # ---------------------------------------------------------------------------- #
@@ -255,88 +208,6 @@ KNOWN_STEPS = {*TSA, *SDE}
 
 # ---------------------------------------------------------------------------- #
 
-# class ReductionTask(PartialTask):
-#     pass
-
-
-class ReductionStep(PartialTask):
-
-    # __wrapper__ = ReductionTask
-
-    def __init__(self, method, infile, outfiles=(), /, overwrite=False, save=(),
-                 plot=False, id_=(), *args, **kws):
-
-        # init task
-        super().__init__(method, o, *args, **kws)
-
-        # NOTE:infile, outfiles, plot_files filename templates
-        templates = ConfigNode({'input': infile,
-                                'output': [],
-                                'plots': []})
-        for file in outfiles:
-            cat = ('plots', 'output')[io.SupportedFileType.check(str(file))]
-            templates[cat].append(file)
-
-        self.id_ = id_
-        self.plot = plot
-        self.infile = infile
-        self.save_kws = dict(save)
-        self.templates = templates
-        self.overwrite = bool(overwrite)
-
-    def __call__(self, obs, data=None, **kws):
-
-        # Load result from previous run if available  # FIXME: Manage with cache
-        if len(obs) > 1:
-            from IPython import embed
-            embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':343")
-
-        hdu = obs[0]
-        out = [o.resolve_path(hdu) for o in self.templates.output]
-        for path in out:
-            if path.exists() and not self.overwrite:
-                logger.info('Loading lightcurve for {} from {}.', hdu, path)
-                return LightCurve.load(path, hdu)
-
-        # Load input data
-        if data is None:
-            if (infile := self.templates.input.resolve_path(hdu)).exists():
-                data = LightCurve.load(infile, hdu)
-            else:
-                raise FileNotFoundError(repr(str(infile)))
-
-        # Compute
-        path = out[0]
-        logger.debug('File {!s} {}. Computing: {}.',
-                     motley.apply(str(path), 'darkgreen'),
-                     (f"will be {('created', 'overwritten')[self.overwrite]}"
-                         if path.exists() else 'does not exist'),
-                     ppr.caller(self.__wrapped__))  # args, kws
-        #
-        result = super().__call__(data, **kws)
-
-        if not isinstance(result, LightCurve):
-            result = LightCurve(*result)
-
-        # save text
-        if self.save_kws is not False:
-            for path in out:
-                result.save(path, **_get_save_meta(hdu, **self.save_kws))
-
-        # plot
-        if self.plot is not False:
-            plot = self.plot or {}
-            kws, init = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
-            init.setdefault('overwrite', self.overwrite)
-            init.setdefault('filenames',  [tmp.resolve_path(hdu)
-                                           for tmp in self.templates.plot])
-
-            # load task
-            task = PlotTask(**init)
-            task(plotter)(o, result, **kws)
-
-        return result
-
 
 class Pipeline(slots.SlotHelper, LoggingMixin):
 
@@ -371,21 +242,17 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
                 tmp_sec = ('lightcurves', grouping)
 
                 # for each step there may be a concat / sde request
-                cfg, concat = cfg.split('concat')
                 cfg, sde = cfg.split(SDE)
+                concat = cfg.pop('concat', {})
                 params = cfg.pop('params', {})
                 _plot = cfg.pop('plot', plot)
                 plot = _plot if plot else False
-
-                if 'plot' in cfg:
-                    from IPython import embed
-                    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':403")
 
                 # load / compute step
                 key = (template_key, *section)
                 template = output_templates.get((*key, 'filename'), '')
                 template = template or output_templates.get(key, '')
-                outfiles = list(template.resolve_paths(section=tmp_sec, partial=True))
+                outfiles = template.resolve_paths(section=tmp_sec, partial=True)
 
                 # Add task
                 if worker := TSA.get(step, ()) or SDE.get(step, ()):
@@ -399,13 +266,13 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
 
                     steps[section] = \
                         ReductionStep(worker, infile, outfiles, overwrite,
-                                      save=cfg, plot=plot, **params)
+                                      save=cfg, name=section,  plot=plot, **params)
 
                 # Concatenate
                 if concat:
                     _, template = (output_templates.find(step).find('concat')
                                    .flatten().popitem())
-                    outfiles = list(template.resolve_paths(section=tmp_sec, partial=True))
+                    outfiles = template.resolve_paths(section=tmp_sec, partial=True)
                     concats[section] = \
                         ReductionStep(concatenate, infile, outfiles, **concat)
 
@@ -439,11 +306,11 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
                 # steps
                 try:
                     for gid, obs in groups.items():
-                        self.results[grouping, gid, step] = worker(obs)
+                        self.results[grouping, gid, step] = previous = worker(obs)
                 except Exception as err:
                     logger.exception('Lightcurve pipeline failed at step: {!r}; '
                                      'group: {}', step, gid)
-                    raise err
+                    # raise err
 
                 section = (grouping, step)
                 if concat := self.concats.get(section):
@@ -472,6 +339,7 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
         for date, ts in self.results.items():
             filenames[date] = filename = \
                 Path(filename_template.substitute(DATE=date)).with_suffix('.png')
+
             # add task
             year, day = date.split('-', 1)
             tab = (*self.config.tab, year, day, step)
@@ -481,6 +349,98 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
                 ui[tab[:-2]].link_focus()
 
         return ui
+
+
+def get_tab_key(hdu):
+    year, day = str(hdu.date_for_filename).split('-', 1)
+    return (year, day, hdu.file.nr)
+
+
+class ReductionStep(PartialTask):
+
+    # __wrapper__ = ReductionTask
+
+    def __init__(self, func, infile, outfiles=(), /, overwrite=False, save=(),
+                 plot=False, name=(), *args, **kws):
+
+        # init task
+        # Placeholder here for time series
+        super().__init__(func, o, *args, **kws)
+
+        # NOTE: infile, outfiles, plot_files are path templates
+        templates = ConfigNode({'input': infile,
+                                'output': [],
+                                'plots': []}).freeze()
+        for file in outfiles:
+            cat = ('plots', 'output')[lcs.io.SupportedFileType.check(str(file))]
+            templates[cat].append(file)
+
+        self.name = name
+        self.plot = plot
+        self.save_kws = dict(save)
+        self.templates = templates
+        self.overwrite = bool(overwrite)
+
+    def __call__(self, obs, data=None, **kws):
+
+        # Load result from previous run if available  # TODO: Manage with cache
+        if len(obs) > 1:
+            from IPython import embed
+            embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':343")
+
+        hdu = obs[0]
+        out = [o.resolve_path(hdu) for o in self.templates.output]
+        for path in out:
+            if path.exists() and not self.overwrite:
+                logger.info('Loading lightcurve for {} from {}.', hdu, path)
+                result = LightCurve.load(path, hdu)
+                break
+        else:
+            # Load input data
+            if data is None:
+                if (infile := self.templates.input.resolve_path(hdu)).exists():
+                    data = LightCurve.load(infile, hdu)
+                else:
+                    raise FileNotFoundError(repr(str(infile)))
+
+            # Compute
+            path = out[0]
+            logger.debug('File {!s} {}. Computing: {}.',
+                         #  motley.apply(str(path), 'darkgreen'),
+                         path,
+                         (f"will be {('created', 'overwritten')[self.overwrite]}"
+                          if path.exists() else 'does not exist'),
+                         ppr.caller(self.__wrapped__))  # args, kws
+            #
+            result = super().__call__(data, **kws)
+
+        # ensure LightCurve
+        if not isinstance(result, LightCurve):
+            result = LightCurve(*result)
+
+        # save text
+        if self.save_kws is not False:
+            for path in out:
+                if self.overwrite or not path.exists():
+                    result.save(path, **_get_save_meta(hdu, **self.save_kws))
+
+        # plot
+        if self.plot is not False:
+            plot = {} if self.plot is True else self.plot
+            params, kws = dicts.split(plot, ('ui', 'keys', 'filename', 'overwrite'))
+            kws = {**kws,
+                   'overwrite': self.overwrite,
+                   'filenames':  [tmp.resolve_path(hdu)
+                                  for tmp in self.templates.plots]}
+
+            # load task
+            if ui := kws.pop('ui', None):
+                grouping, step = self.name
+                tab = (CONFIG.tab, grouping, *get_tab_key(hdu), step)
+                task = ui.task_factory(result.plot)(*result, **params)
+                ui.add_task(task, tab, **kws)
+
+        return result
 
 
 # def lag_scatter(x, ):

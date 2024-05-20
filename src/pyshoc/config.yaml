@@ -261,9 +261,10 @@ plotting:
 
     # GUI
     gui:
+        active:     True
+        delay:      False
         title:      pySHOC Photometry Pipeline GUI
         pos :       N
-        delay:      True
 
     # matplotlib rc params
     cmap:               cmr.voltage
@@ -271,7 +272,6 @@ plotting:
         size:           14
     axes:
         labelweight:    bold
-
 
 
 # aliases
@@ -371,30 +371,33 @@ registration:
         filename:       drizzle.fits
         pixfrac:        0.5
 
-    plots:
-        mosaic:
-            show:       True
-            tab:        [Overview, Mosaic]
-            filename:   $REGISTRY/mosaic/mosaic.$TEL.png
+        plot:
+            cmap:           cmr.chroma
+            filename:       drizzle.png
 
-            cmap:       cmr.chroma
-            alpha:      0.5
+    mosaic:
+        show:       False
+        tab:        [Overview, Mosaic]
+        filename:   $REGISTRY/mosaic/mosaic.$TEL.png
 
-        alignment:
-            show:       True
-            tab:        [Registration, Alignment Fit]
-            filename:   $REGISTRY/alignment/$HDU.aligned.png
+        cmap:       cmr.chroma
+        alpha:      0.5
 
-        clusters:
-            show:               True
-            tab:                [Registration, Source IDs]
-            filename:           $REGISTRY/source-ids.$TEL.png
+    alignment:
+        show:       True
+        tab:        [Registration, Alignment Fit]
+        filename:   $REGISTRY/alignment/$HDU.aligned.png
 
-            centres:            True
-            frames:             True
-            nrs:                True
-            show_bandwidth:     True
-            trim_labels:        False
+    clusters:
+        show:               True
+        tab:                [Registration, Source IDs]
+        filename:           $REGISTRY/source-ids.$TEL.png
+
+        centres:            True
+        frames:             True
+        nrs:                True
+        show_bandwidth:     True
+        trim_labels:        False
 # alias
 # reg: *image_registration
 
@@ -491,9 +494,11 @@ tracking:
 
         positions:
         # -------------------------------------------------------------------- #
-            filename:           positions-$SOURCE.png
-
+            filename:           positions-$SOURCE.{png,pdf}
+            overwrite:          False
             figsize:            [12, 6.5]
+            # dpi:                600
+
             legend:             False
             show:               [avg, weights, caption]  #  nulls, pixel
 
@@ -523,7 +528,7 @@ tracking:
                 va:     bottom
                 ha:     left
                 bbox:       # these are matplotlib.patch.Patch properties
-                    boxstyle:    round
+                    boxstyle:   round
                     facecolor:  lightgrey
 
             cbar:
@@ -549,7 +554,8 @@ tracking:
         # -------------------------------------------------------------------- #
         time_series:
             tab:            Time Series
-            filename:       displacement-ts.png
+            filename:       displacements.{png,pdf}
+            overwrite:      False
             figsize:        [12, 5]
 
 
@@ -573,24 +579,31 @@ lightcurves:
     folder:         $PHOT/lightcurves/
     formats:        [txt, npy, png, pdf]
 
+    # time series plot parameters
     plots:
         # save
-        # formats:    []
-
+            # formats:    []
         # figure
-        subplotspec:
-            top:        0.81
-            bottom:     0.1
-            left:       0.065
-            right:      0.94
+        fig:
+            size:           [14, 8]
+            margins:
+                top:        0.81
+                bottom:     0.1
+                left:       0.065
+                right:      0.94
 
-        # time series plot parametes
-        plims:          [-0.1, 99.99]
-        xlabel:
-            top:        Time (UTC)
-            bottom:     Δt (s)
-            pad:        -17.5
-        ylabel:         Relative Flux
+
+        axes:
+            plims:          [-0.1, 99.99]
+            labels:
+                x:
+                    top:        Time (UTC)
+                    bottom:     Δt (s)
+                    pad:        -17.5
+                    ticks:
+                        rotation:   45
+                y:
+                    left:       Relative Flux
 
     # Data Products by file
     # ------------------------------------------------------------------------ #
@@ -601,9 +614,6 @@ lightcurves:
         raw:
             filename:   $HDU.raw.$EXT
             title:      Raw contour aperture light curve for {}.
-
-            acf:
-                filename: $HDU.raw.acf.{npy,pdf,png}
 
         # Flag outliers
         flagged:
@@ -617,18 +627,21 @@ lightcurves:
                 noverlap:   50%
                 kmax:       0.1%
 
-        # Scaled by median flux of reference source
-        diff0:
-            title:      Median scaled contour aperture light curve for {}.
-            filename:   $HDU.diff0.$EXT
+            acf:
+                filename: $HDU.oflag.acf.{npy,pdf,png}
 
-            plot:
-                hist:   True
+        # Scaled by median flux of reference source
+        # diff0:
+        #     title:      Median scaled contour aperture light curve for {}.
+        #     filename:   $HDU.diff0.$EXT
+
+        #     plot:
+        #         hist:   True
 
         # Differential with Total Variational (TV) smoothing
         diff:
             title:      Differential light curve (via total variational smoothing) for {}.
-            filename:   $HDU.diff.$EXT
+            filename:   $HDU.tvr.$EXT
             plot:
                 hist:   True
 
@@ -639,7 +652,7 @@ lightcurves:
                 smoothing:      0.1
 
             acf:
-                filename: $HDU.diff.acf.{npy,pdf,png}
+                filename: $HDU.tvr.acf.{npy,pdf,png}
 
         # decorrelate  via Maximum entropy spectrum.
         # Do by file since more likely heteroscedastic
@@ -711,17 +724,17 @@ lightcurves:
         # # Spectral Analysis
         # periodogram:
         #     title:      'Periodogram'
-        #     filename:   E$CYCLE.pg.txt
+        #     filename:   E$ORBIT.pg.txt
         #     plot:       True
 
         # lombscargle:
         #     title:      'Lomb-Scargle Periodogram'
-        #     filename:   E$CYCLE.ls.txt
+        #     filename:   E$ORBIT.ls.txt
         #     plot:       True
 
         # welch:
         #     title:      'Welch Periodogram'
-        #     filename:   E$CYCLE.welch.txt
+        #     filename:   E$ORBIT.welch.txt
         #     plot:       True
 
 

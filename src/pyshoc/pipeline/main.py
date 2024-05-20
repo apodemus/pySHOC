@@ -481,7 +481,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
         # DSS mosaic
         # -------------------------------------------------------------------- #
-        inner, outer = config.plots.mosaic.split(('show', 'tab', 'filename'))
+        inner, outer = config.mosaic.split(('show', 'tab', 'filename'))
         if outer.show:
             survey = config.params.survey
             task = ui.task_factory(reg.mosaic)(names=run.files.stems, **inner)
@@ -575,8 +575,8 @@ def register(run, samples, paths, ui, plot, overwrite):
                 plot_config[name][key[-1]] = kws
 
         if ui:
-            ui[config.plots.alignment.tab].link_focus()
-            ui[config.plots.clusters.tab].link_focus()
+            ui[config.alignment.tab].link_focus()
+            ui[config.clusters.tab].link_focus()
 
     # Align with survey image
     # ------------------------------------------------------------------------ #
@@ -814,23 +814,23 @@ def _tracker_missing_files(templates, hdu, sources):
 
 def lightcurves(run, paths, ui, plot=True, overwrite=False):
 
-    output_templates = paths.templates.find('lightcurves', collapse=True)
-    output_templates.freeze()
+    output_templates = paths.templates.find('lightcurves', collapse=True).freeze()
+    plot = {'ui': ui} if plot else plot
     pipeline = lc.Pipeline(run, CONFIG.lightcurves, output_templates,
                            overwrite, plot)
 
     # lcs = lc.extract(run, paths, overwrite)
     lcs = pipeline.run()
 
-    if not plot:
-        return
+    # if not plot:
+    #     return
 
-    for step, db in lcs.items():
-        # get path template
-        tmp = paths.templates['DATE'].lightcurves[step]
-        tmp = getattr(tmp, 'concat', tmp)
-        #
-        pipeline.plot(('by_date', step), ui, tmp, overwrite=False)
+    # for step, db in lcs.items():
+    #     # get path template
+    #     tmp = paths.templates['DATE'].lightcurves[step]
+    #     tmp = getattr(tmp, 'concat', tmp)
+    #     #
+    #     pipeline.plot(('by_date', step), ui, tmp, overwrite=False)
 
     return lcs
     # for hdu in run:
@@ -925,7 +925,7 @@ def main(paths, target, telescope, njobs, plot, gui, show_cutouts, overwrite):
         survey = cfg.params.survey.upper()
         ui['Overview'].move_tab('Mosaic', 0)
         ui['Overview', 'Mosaic'].move_tab(survey, 0)
-        ui.set_focus(*cfg.plots.mosaic.tab, survey)
+        ui.set_focus(*cfg.mosaic.tab, survey)
 
         ui.show()
 

@@ -210,9 +210,9 @@ def _get_relative_paths(section, paths, depth=-1, order=1, slash=None,
     ancestors = []
     for i, slash in itr:
         if ((i <= depth) and (section[0] != 'input')
-                and (folder := paths.get_folder(section[:i])) and (folder != parent)
-                and isinstance(folder, Path)
-            ):
+                    and (folder := paths.get_folder(section[:i])) and (folder != parent)
+                    and isinstance(folder, Path)
+                ):
             #
             if folder.is_relative_to(parent):
                 yield f'/{folder.relative_to(parent)!s}{slash}'
@@ -301,16 +301,17 @@ def get_previous(run, paths):
 
     #
     info = logger.bind(indent=' ').opt(lazy=True).info
-    pprint = (
+    pprint = [
         # overview
         lambda: ('overview',  _overview_products_table(overview, paths)),
 
         # hdu products
-        lambda: ('hdu', _hdu_products_table(run, paths)),
-
-        # nightly data products
-        lambda: ('nightly', _nightly_products_table(run, paths))
-    )
+        lambda: ('hdu', _hdu_products_table(run, paths))
+    ]
+    # nightly data products
+    if 'DATE' in paths.templates:
+        pprint.append(lambda: ('nightly', _nightly_products_table(run, paths)))
+        
     for f in pprint:
         info('Found previous {0[0]} data products: \n{0[1]}', f)
 
