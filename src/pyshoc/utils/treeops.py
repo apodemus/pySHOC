@@ -20,7 +20,7 @@ from recipes import io, pprint as ppr
 from recipes.decorators import raises
 
 # relative
-from ..core import shocCampaign
+from ..core import Campaign
 
 
 def get_tree(root, extension=''):
@@ -74,8 +74,8 @@ def make_tree(src, dest, grouping, naming, extensions='*'):
 
     # load data
     if isinstance(src, (str, Path)):
-        src = shocCampaign.load(src, recurse=True)
-    elif not isinstance(src, shocCampaign):
+        src = Campaign.load(src, recurse=True)
+    elif not isinstance(src, Campaign):
         raise TypeError('Invalid source')
 
     # make grouping
@@ -190,8 +190,8 @@ def partition_by_source(src, dest=None, extensions='*', move=True,
     # load data
     if isinstance(src, (str, Path)):
         root = Path(src)
-        src = shocCampaign.load(src, recurse=True)
-    elif isinstance(src, shocCampaign):
+        src = Campaign.load(src, recurse=True)
+    elif isinstance(src, Campaign):
         # get common parent folder
         root = get_common_parent(src.files.paths)
     else:

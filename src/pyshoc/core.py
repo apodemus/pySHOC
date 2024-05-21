@@ -20,10 +20,10 @@ from astropy.coordinates import SkyCoord
 
 # local
 from scrawl.image import plot_image_grid
+from pyxides import Grouped, OfType
+from pyxides.vectorize import MethodMapper, repeat
 from motley.utils import vstack
 from motley.table.attrs import AttrColumn as Column
-from pyxides import Groups, OfType
-from pyxides.vectorize import MethodVectorizer, repeat
 from obstools.image.hdu import ImageHDU
 from obstools.image.noise import StdDev
 from obstools.sites.saao import telescopes as tel
@@ -41,7 +41,7 @@ from recipes.string import named_items, strings, sub
 # relative
 from . import headers
 from .config import CONFIG
-from .timing import Trigger, shocTiming
+from .timing import Timing, Trigger
 from .readnoise import readNoiseTables
 from .pprint import BraceContract, TableHelper, hms
 
@@ -358,7 +358,7 @@ class Messenger:
 # ------------------------------ HDU Subclasses ------------------------------ #
 
 
-class shocHDU(ImageHDU, Messenger):
+class HDU(ImageHDU, Messenger):
 
     __shoc_hdu_types = {}
 
@@ -376,7 +376,7 @@ class shocHDU(ImageHDU, Messenger):
 
     def __new__(cls, data, header, obstype=None, *args, **kws):
 
-        # handle direct init here eg: >>> shocDarkHDU(data, header)
+        # handle direct init here eg: >>> DarkHDU(data, header)
         if cls in cls.__shoc_hdu_types.values():
             return super().__new__(cls)
 
@@ -402,12 +402,12 @@ class shocHDU(ImageHDU, Messenger):
                 suffix = 'Master'
                 age = ''
 
-        # Choose subtypes of `shocHDU` here - simpler than using `match_header`
-        class_name = f'shoc{age}{kind}{suffix}'
+        # Choose subtypes of `HDU` here - simpler than using `match_header`
+        class_name = f'{age}{kind}{suffix}'
         if class_name != cls.__name__:
             cls.logger.debug('Identified hdu class={!r}, obstype={!r}.',
-                            class_name, obstype)
-        if class_name not in ('shocHDU', *cls.__shoc_hdu_types):
+                             class_name, obstype)
+        if class_name not in ('HDU', *cls.__shoc_hdu_types):
             # pylint: disable=no-member
             cls.logger.warning('Unknown OBSTYPE: {!r:}.', obstype)
 
@@ -480,6 +480,10 @@ class shocHDU(ImageHDU, Messenger):
     def nframes(self):
         """Total number of images in observation"""
         return 1 if (self.ndim == 2) else self.shape[0]
+    
+    @property
+    def nfiles(self):
+        return 1
 
     @property
     def obstype(self):
@@ -649,7 +653,7 @@ class shocHDU(ImageHDU, Messenger):
         # will not yet have all the correct keywords available yet to identify
         # old vs new shoc data at init.
         # try:
-        return shocTiming(self)
+        return Timing(self)
         # except:
         #     return UnknownTime
 
@@ -825,7 +829,7 @@ class shocHDU(ImageHDU, Messenger):
         # TODO: self.calibrated ???
         combined = func(self.data, *args, **kws)
 
-        hdu = shocHDU(combined, self.header)
+        hdu = HDU(combined, self.header)
 
         if sigma_func is None:
             if func is np.mean:
@@ -909,7 +913,7 @@ class shocHDU(ImageHDU, Messenger):
 
 # FILENAME_TRANS = str.maketrans({'-': '', ' ': '-'})
 
-class shocOldHDU(shocHDU):
+class OldHDU(HDU):
     def __init__(self, data, header, *args, **kws):
 
         super().__init__(data, header, *args, **kws)
@@ -921,10 +925,10 @@ class shocOldHDU(shocHDU):
 
     # @lazyproperty
     # def timing(self):
-    #     return shocTimingOld(self)
+    #     return TimingOld(self)
 
 
-class shocCalibrationHDU(shocHDU):
+class CalibrationHDU(HDU):
     _combine_func = None  # place-holder
 
     # TODO: set target=''
@@ -936,7 +940,7 @@ class shocCalibrationHDU(shocHDU):
         return super().combine(func or self._combine_func, args, **kws)
 
 
-class shocDarkHDU(shocCalibrationHDU):
+class DarkHDU(CalibrationHDU):
     # TODO: don't pprint filters since irrelevant
 
     filename_format = '{obstype}-{camera}-{binning}-{readout}'
@@ -959,7 +963,7 @@ class shocDarkHDU(shocCalibrationHDU):
         super().__init__(data, header, obstype, *args, **kws)
 
 
-class shocFlatHDU(shocCalibrationHDU):
+class FlatHDU(CalibrationHDU):
 
     filename_format = '{obstype}-{t.date:d}-{telescope}-{camera}-{binning}-{filters}'
     _combine_func = staticmethod(median_scaled_median)
@@ -970,33 +974,33 @@ class shocFlatHDU(shocCalibrationHDU):
         super().__init__(data, header, obstype, *args, **kws)
 
 
-class shocOldDarkHDU(shocOldHDU, shocDarkHDU):
+class OldDarkHDU(OldHDU, DarkHDU):
     pass
 
 
-class shocOldFlatHDU(shocOldHDU, shocDarkHDU):
+class OldFlatHDU(OldHDU, DarkHDU):
     pass
 
-# class shocBiasHDU(shocDarkHDU):
+# class BiasHDU(DarkHDU):
 #     # alias
 #     pass
 
 
-class shocMaster(shocCalibrationHDU):
+class Master(CalibrationHDU):
     pass
 
 
-class shocDarkMaster(shocMaster, shocDarkHDU):
+class DarkMaster(Master, DarkHDU):
     pass
 
 
-class shocFlatMaster(shocMaster, shocFlatHDU):
+class FlatMaster(Master, FlatHDU):
     pass
 
 
 # ------------------------------------- ~ ------------------------------------ #
 
-class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
+class Campaign(PhotCampaign, OfType(HDU), Messenger):
 
     # Pretty repr
     pretty = BraceContract(brackets='', per_line=1, indent=4,  hang=True)
@@ -1031,11 +1035,11 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     @classmethod
     def new_groups(cls, *keys, **kws):
-        return shocObsGroups(cls, *keys, **kws)
+        return GroupedObs(cls, *keys, **kws)
 
     # def map(self, func, *args, **kws):
     #     """Map and arbitrary function onto the data of each observation"""
-    #     shocHDU.data.get
+    #     HDU.data.get
 
     # @expose.args
     @classmethod
@@ -1187,7 +1191,7 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
 
     def combine(self, func=None, args=(), **kws):
         """
-        Combine each `shocHDU` in the campaign into a 2D image by calling `func`
+        Combine each `HDU` in the campaign into a 2D image by calling `func`
         on each data stack.  Can be used to compute image statistics or compute
         master flat / dark image for calibration.
 
@@ -1232,8 +1236,8 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         header = headers.intersection(self)
         header['FRAME'] = self[0].header['date']  # HACK: need date for flats!
         header['NAXIS'] = 3                  # avoid misidentification as master
-        hdu = shocHDU(np.concatenate([_3d(hdu.data) for hdu in self]),
-                      header)
+        hdu = HDU(np.concatenate([_3d(hdu.data) for hdu in self]),
+                  header)
         msg = self.message(f'Stacked {len(self)} files.')
         hdu.header.add_history(msg)
         return hdu
@@ -1242,11 +1246,11 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         return self.combine(func, *args, **kws).stack().combine(func, *args, **kws)
 
     def subtract(self, other):
-        if isinstance(other, shocCampaign) and len(other) == 1:
+        if isinstance(other, Campaign) and len(other) == 1:
             other = other[0]
 
         if not isinstance(other, fits.PrimaryHDU):
-            raise TypeError(f'Expected shocHDU, got {type(other)}')
+            raise TypeError(f'Expected HDU, got {type(other)}')
 
         if len(other.shape) > 2:
             raise TypeError(
@@ -1430,17 +1434,19 @@ class shocCampaign(PhotCampaign, OfType(shocHDU), Messenger):
         # TODO: header keyword
 
 
-class shocObsGroups(Groups):
+class GroupedObs(Grouped):
     """
-    Emulates dict to hold multiple shocCampaign instances keyed by their shared
+    Emulates dict to hold multiple Campaign instances keyed by their shared
     common attributes. The attribute names given in groupId are the ones by
-    which the run is separated into unique segments (which are also shocCampaign
+    which the run is separated into unique segments (which are also Campaign
     instances). This class attempts to eliminate the tedium of computing
     calibration frames for different observational setups by enabling loops
     over various such groupings.
     """
+    
+    tabulate = Campaign.tabulate
 
-    def __init__(self, factory=shocCampaign, *args, **kws):
+    def __init__(self, factory=Campaign, *args, **kws):
         # set default default factory ;)
         super().__init__(factory, *args, **kws)
 
@@ -1449,24 +1455,24 @@ class shocObsGroups(Groups):
         i = itt.count()
         return pformat(self, lhs=lambda s: f'{next(i):<{w}}: {s}', hang=True)
 
-    def tabulate(self, attrs=None, titled=True, **kws):
-        """
-        Get a dictionary of tables (`motley.table.Table` objects) for this
-        grouping. This method assists pretty printing groups of observation
-        sets.
+    # def tabulate(self, attrs=None, titled=True, **kws):
+    #     """
+    #     Get a dictionary of tables (`motley.table.Table` objects) for this
+    #     grouping. This method assists pretty printing groups of observation
+    #     sets.
 
-        Parameters
-        ----------
-        kws
+    #     Parameters
+    #     ----------
+    #     kws
 
-        Returns
-        -------
+    #     Returns
+    #     -------
 
-        """
-        return shocCampaign.tabulate.get_tables(
-            self, attrs, titled=titled, filler_text='NO MATCH', 
-            **{**CONFIG.tabulate.obs_groups, **kws}
-        )
+    #     """
+    #     return Campaign.tabulate.get_tables(
+    #         self, attrs, titled=titled, filler_text='NO MATCH',
+    #         **{**CONFIG.tabulate.obs_groups, **kws}
+    #     )
 
     def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):
         """
@@ -1480,8 +1486,8 @@ class shocObsGroups(Groups):
         print(self.pformat(titled, braces, headers, vspace, **kws))
 
     #
-    combine = MethodVectorizer('combine')  # , convert=shocCampaign
-    stack = MethodVectorizer('stack')  # , convert=shocCampaign
+    combine = MethodMapper('combine')  # , output=Campaign
+    stack = MethodMapper('stack')  # , output=Campaign
 
     def merge_combine(self, func=None, *args, **kws):
         #
@@ -1536,7 +1542,7 @@ class shocObsGroups(Groups):
 
         Returns
         ------
-        Bias subtracted shocObsGroups
+        Bias subtracted GroupedObs
         """
 
         return self._comap_method(other, 'subtract', handle_missing)

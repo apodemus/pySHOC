@@ -399,7 +399,7 @@ class Date(time.Time):
 # ******************************************************************************
 
 
-class shocTiming(LoggingMixin):
+class Timing(LoggingMixin):
     """
     Time stamps and corrections for SHOC data.
 
@@ -476,7 +476,7 @@ class shocTiming(LoggingMixin):
     # TODO: option to do flux weighted time stamps!!
 
     def __new__(cls, hdu):
-        kls = shocTimingOld if 'Old' in hdu.__class__.__name__ else shocTiming
+        kls = TimingOld if 'Old' in hdu.__class__.__name__ else Timing
         return super().__new__(kls)
 
     def __getnewargs__(self):
@@ -485,11 +485,11 @@ class shocTiming(LoggingMixin):
 
     def __init__(self, hdu, **kws):
         """
-        Create the timing interface for a shocHDU
+        Create the timing interface for a HDU
 
         Parameters
         ----------
-        hdu : pyshoc.core.shocHDU
+        hdu : pyshoc.core.HDU
 
         location : astropy.coordinates.EarthLocation, optional
             Location of the observation (used for barycentric corrections),
@@ -595,9 +595,9 @@ class shocTiming(LoggingMixin):
             # server
             logger.info('Computing timestamps for {}, rolled over from {}.',
                         hdu.file.name, hdu.rollover.parent)
-            from .core import shocHDU
+            from .core import HDU
 
-            assert isinstance(self.hdu.rollover.parent, shocHDU)
+            assert isinstance(self.hdu.rollover.parent, HDU)
             return self.hdu.rollover.parent.t[-1] + self.delta
 
         # Timing keys in order of accuracy
@@ -645,6 +645,11 @@ class shocTiming(LoggingMixin):
     @property
     def t0_flagged(self):
         return f'{self.t0.iso}{self.trigger.t0_flag}'
+
+    @property
+    def tn(self):
+        # final timestamp (mid frame)
+        return self.t[-1]
 
     @lazyproperty
     def expose(self):
@@ -884,11 +889,11 @@ class shocTiming(LoggingMixin):
                            before='HEAD')
 
 
-class shocTimingOld(shocTiming):
+class TimingOld(Timing):
 
     def stamp(self, j, t0=None, coords=None):
         #
-        shocTiming.stamp(self, j)
+        Timing.stamp(self, j)
 
         # set KCT / EXPOSURE in header
         header = self.header

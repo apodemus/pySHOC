@@ -16,7 +16,7 @@ from recipes.string import most_similar
 from recipes.containers.dicts import groupby
 
 # relative
-from .. import CONFIG, shocHDU
+from .. import CONFIG, HDU
 from .._version import version as VERSION
 from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
@@ -166,16 +166,16 @@ def setup(root, output, overwrite, use_cache):
 
     # set detection algorithm
     if algorithm := CONFIG.detection.get('algorithm', None):
-        shocHDU.detection.algorithm = algorithm
+        HDU.detection.algorithm = algorithm
 
     # update cache locations
-    # shocHDU.get_sample_image.__cache__.disable()
-    # shocHDU.detection.__call__.__cache__.disable()
+    # HDU.get_sample_image.__cache__.disable()
+    # HDU.detection.__call__.__cache__.disable()
     if use_cache:
         enable_local_caching({
             # get_hdu_image_products: paths.folders.cache / 'image-samples.pkl'
-            shocHDU.get_sample_image:              paths.folders.cache / 'sample-images.pkl',
-            shocHDU.detection._algorithm.__call__: paths.folders.cache / 'source-regions.pkl'
+            HDU.get_sample_image:              paths.folders.cache / 'sample-images.pkl',
+            HDU.detection._algorithm.__call__: paths.folders.cache / 'source-regions.pkl'
         })
 
     return paths, overwrite
@@ -194,9 +194,9 @@ def enable_local_caching(mapping):
 # required=True)
 #
 @click.option('-o', '--output', type=click.Path(),
-              default='./.pyshoc',  # show_default=True,
+              default='./pyshoc',  # show_default=True,
               help='Output folder for data products. Default creates the '
-                   '".pyshoc" folder under the root input folder.')
+                   '"pyshoc" folder under the root input folder.')
 #
 @click.option('-t', '--target',
               callback=resolve_target,
@@ -251,7 +251,9 @@ def enable_local_caching(mapping):
                    'configurable in `config.yaml`')
 #
 @click.option('--plot/--no-plot', default=True,
-              help='Show figure windows.')
+              help='Switch plotting on or off.')
+@click.option('--gui/--no-gui', default=True,
+              help='Use mpl-multitab gui to embed interactive plots.')
 @click.option('--cutouts/--no-cutouts', default=True,
               help='Display source cutouts in terminal.')
 @click.version_option()
@@ -260,7 +262,7 @@ def main(files_or_folder, output='./.pyshoc',
          top=5, apertures='ragged',
          sub=..., njobs=-1,
          overwrite=False, cache=None,
-         plot=True, cutouts=True):
+         plot=True, gui=True, cutouts=True):
     """
     Main entry point for pyshoc pipeline command line interface.
     """
@@ -286,7 +288,7 @@ def main(files_or_folder, output='./.pyshoc',
     # try:
 
     # pipeline main routine
-    pipeline.main(paths, target, telescope, top, njobs, plot, cutouts, overwrite)
+    pipeline.main(paths, target, telescope, njobs, plot, gui, cutouts, overwrite)
 
     # except Exception as err:
     #     # catch errors so we can safely shut down any remaining processes

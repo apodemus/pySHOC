@@ -23,7 +23,7 @@ except PackageNotFoundError:
 
 # ---------------------------------------------------------------------------- #
 # register HDU classes (must happen before CalDB init)
-register_hdu(shocHDU)
+register_hdu(HDU)
 
 # Load calibration database
 calDB = CalDB(CONFIG.calibration.folder)

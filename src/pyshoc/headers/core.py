@@ -50,7 +50,7 @@ HEADER_KEYS_MISSING_OLD = \
 
 # ---------------------------------------------------------------------------- #
 
-class shocHeader(Header):
+class Header(Header):
     """Extend the pyfits.Header class for interactive user input"""
 
     def __init__(self, cards=(), copy=False):

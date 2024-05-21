@@ -13,7 +13,7 @@ import motley
 from motley.utils import Filler, GroupTitle
 from recipes import op
 from recipes.logging import LoggingMixin
-from recipes.containers import sets, ensure
+from recipes.containers import ensure, sets
 
 
 def proximity_groups(self, other, keys, null=None):
@@ -23,7 +23,7 @@ def proximity_groups(self, other, keys, null=None):
 
     Parameters
     ----------
-    self, other : shocCampaign
+    self, other : Campaign
         Observation sets to be matched.
     keys : tuple of str
         Attributes according to which the grouping and matching will be done.
@@ -37,7 +37,7 @@ def proximity_groups(self, other, keys, null=None):
         observations in the sub groups. If no matching observations exist in one 
         of the observations sets for a particular subgroup, (null, ) is used as 
         the group identifier.
-    sub0, sub1 : shocCampaign
+    sub0, sub1 : Campaign
         The sub groups of matched observations.
     """
 
@@ -108,18 +108,18 @@ class MatchedObservations(LoggingMixin):
 
         Parameters
         ----------
-        a, b: shocCampaign
+        a, b: Campaign
             Observation runs from which matching files will be chosen to match
             those in the other list.
         """
         data = dict(a=a, b=b)
         for k, v in data.items():
-            if isinstance(v, dict):  # shocObsGroups
+            if isinstance(v, dict):  # GroupedObs
                 data[k] = v.to_list()
-            elif not isinstance(v, abc.Container):  # (shocCampaign, MockRun)
+            elif not isinstance(v, abc.Container):  # (Campaign, MockRun)
                 raise ValueError(
                     f'Cannot match objects of type {type(a)} and {type(b)}. '
-                    f'Please ensure you pass `shocCampaign` or `shocObsGroups`'
+                    f'Please ensure you pass `Campaign` or `GroupedObs`'
                     f' instances to this class.'
                 )
 
@@ -150,7 +150,7 @@ class MatchedObservations(LoggingMixin):
             `other` that have no match in this observation set, keep those
             observations in the grouping and substitute `None` as the value for
             the corresponding key in the resulting dict. This parameter affects
-            only matches in the grouping of the `other` shocCampaign.
+            only matches in the grouping of the `other` Campaign.
             Observations without matches in `self` (this run) are always kept so
             that full set of observations are always accounted for in the
             resultant grouping. A consequence of setting this to False (the
@@ -160,9 +160,9 @@ class MatchedObservations(LoggingMixin):
 
         Returns
         -------
-        out0, out1: shocObsGroups
+        out0, out1: GroupedObs
             a dict-like object keyed on the attribute values of `keys` and
-            mapping to unique `shocCampaign` instances
+            mapping to unique `Campaign` instances
         """
 
         self.logger.bind(indent=True).info(
@@ -270,7 +270,7 @@ class MatchedObservations(LoggingMixin):
             [description]
         """
 
-        # create temporary shocCampaign instance so we can use the builtin
+        # create temporary Campaign instance so we can use the builtin
         # pprint machinery
         g0, g1 = self.left, self.right
         tmp = g0.default_factory()

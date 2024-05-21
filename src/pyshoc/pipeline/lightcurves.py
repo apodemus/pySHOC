@@ -17,8 +17,8 @@ from recipes.decorators import update_defaults
 from recipes.functionals.partial import PartialTask, PlaceHolder as o
 
 # relative
+from ..core import Campaign
 from ..config import GROUPING
-from ..core import shocCampaign
 from .logging import logger
 
 
@@ -39,7 +39,7 @@ def extract(run, paths, overwrite, plot):
 
 def _get_save_meta(obj, **kws):
     # Campaign
-    if isinstance(obj, shocCampaign):
+    if isinstance(obj, Campaign):
         save = _get_save_meta(obj[0], **kws)
         info = save['meta']['Observing info']
         info.pop('File')

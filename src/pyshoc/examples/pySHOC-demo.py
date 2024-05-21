@@ -11,13 +11,13 @@ from pathlib import Path
 
 # third-party
 from matplotlib import rc
-from pyshoc import shocCampaign
+from pyshoc import Campaign
 from IPython.display import HTML, display
 from pySHOC import MATCH_DARKS, MATCH_FLATS
 
 # local
 from scrawl.image import ImageDisplay
-from obstools.stats import median_scaled_median
+from obstools.math.stats import median_scaled_median
 
 
 # setup logging
@@ -39,7 +39,7 @@ root_folder = Path('/media/Oceanus/UCT/Observing/data/sources/J1928-5001')
 fig_folder = Path('/home/hannes/Documents/papers/dev/J1928/figures')
 rc('savefig', directory=fig_folder)
 
-run = shocCampaign.load(root_folder / 'SHOC/raw')
+run = Campaign.load(root_folder / 'SHOC/raw')
 print(run)
 run.pprint()
 
@@ -51,7 +51,7 @@ run.pprint()
 # OBSTYPE discovery + grouping
 g = run.guess_obstype()
 tables = g.pprint();  
-# notice `shocHDU.guess_obstype` identifies frames correctly from the 
+# notice `HDU.guess_obstype` identifies frames correctly from the 
 # distribution of pixel values, despite incorrect header info!
 
 
@@ -59,7 +59,7 @@ tables = g.pprint();
 
 
 # Apply the guessed observation type labels (flat / dark / bad)
-# Note this updates the attributes of the shocHDU's, but leaves the fits 
+# Note this updates the attributes of the HDU's, but leaves the fits 
 # headers untouched
 for obstype, r in g.items():
     # set attributes on HDU objects - not yet in header
@@ -110,7 +110,7 @@ mbias = gdark.merge_combine(np.median)
 # read all those files and select the correct ones with a few lines of code 
 # similar to what was done above. 
 # For example:
-# darks = shocCampaign.load_dir('/media/Oceanus/UCT/Observing/data/darks')
+# darks = Campaign.load_dir('/media/Oceanus/UCT/Observing/data/darks')
 #_ = run_src.match(darks, *MATCH_DARKS, keep_nulls=False, report=True)
 
 

@@ -18,7 +18,7 @@ from recipes.string import numbered, pluralize
 from recipes.containers.dicts import AttrDict, AutoVivify
 
 # relative
-from .core import MATCH, shocCampaign
+from .core import MATCH, Campaign
 
 
 def move_to_backup(file, ext='bak'):
@@ -129,15 +129,15 @@ class CalDB(DB, logging.LoggingMixin):
         else:
             if not kind:
                 raise ValueError('Require `kind` parameter to be given if no `new` '
-                                 'observations (shocCampaign object) are '
+                                 'observations (Campaign object) are '
                                  'provided.')
 
             # look for new files
             new = self.get_new_files(kind, master)
             if new:
-                shocCampaign.logger = self.logger
-                new = shocCampaign.load(new)
-                shocCampaign.logger = shocCampaign.Logger()
+                Campaign.logger = self.logger
+                new = Campaign.load(new)
+                Campaign.logger = Campaign.Logger()
                 # logger.info('Loaded {:d} {:s}.', i, pluralize('file', new))
 
             close = True
@@ -178,7 +178,7 @@ class CalDB(DB, logging.LoggingMixin):
 
         Parameters
         ----------
-        run : shocCampaign
+        run : Campaign
             Observations to get calibration files for.
         kind : {'dark', 'flat'}
             The kind of calibration files required.
@@ -188,8 +188,8 @@ class CalDB(DB, logging.LoggingMixin):
 
         Returns
         -------
-        shocObsGroups
-            The matched and grouped `shocCampaign`s.
+        GroupedObs
+            The matched and grouped `Campaign`s.
         """
         from .config import CONFIG
 
@@ -220,7 +220,7 @@ class CalDB(DB, logging.LoggingMixin):
             # load
             with logging.disabled('obstools.campaign'):
                 # catch repetative log message. Will emit below for loop.
-                cal = grp[key] = shocCampaign.load(mock.attrs('filename'),
+                cal = grp[key] = Campaign.load(mock.attrs('filename'),
                                                 obstype=kind)
                 i += 1
 

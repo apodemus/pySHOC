@@ -19,7 +19,7 @@ from recipes.string import pluralize
 from scrawl.image import ImageDisplay
 
 # relative
-from .. import CONFIG, MATCH, calDB, shocCampaign
+from .. import CONFIG, MATCH, Campaign, calDB
 
 
 # ---------------------------------------------------------------------------- #
@@ -44,7 +44,7 @@ def calibrate(run, path=None, overwrite=False):
 
     Parameters
     ----------
-    run : pyshoc.shocCampaign
+    run : pyshoc.Campaign
         Observing run containing multiple `hdu`s (fits files).
     path : Path-like, optional
         File system location for searching for calibration frames, by default
@@ -54,11 +54,11 @@ def calibrate(run, path=None, overwrite=False):
 
     Returns
     -------
-    gobj: pyshoc.shocObsGroup
+    gobj: pyshoc.ObsGroup
         Observing campaign grouped by calibration groups.
-    master_dark: pyshoc.shocObsGroup
+    master_dark: pyshoc.ObsGroup
         Grouped master dark frames.
-    master_flats: pyshoc.shocObsGroup
+    master_flats: pyshoc.ObsGroup
         Grouped master flat frames.
     """
 
@@ -105,14 +105,14 @@ def split(run, kind):
                 >>> run.attrs.set(repeat(obstype='object'))
             on the appropriate set of files.'''))
 
-    cal = grp.pop(kind, shocCampaign())
+    cal = grp.pop(kind, Campaign())
 
     # drop unnecessary calibration stacks
     if cal:
         need = set(run.missing(kind))
         gcal = cal.group_by(*MATCH[kind][0])
         if unneeded := set(gcal.keys()) - need:
-            dropping = shocCampaign()
+            dropping = Campaign()
             for u in unneeded:
                 dropping.join(gcal.pop(u))
             logger.info('Discarding unnecessary calibration frames: {:s}.',
@@ -137,7 +137,7 @@ def find(run, kind, path=None, ignore_masters=False):
         if path:
             logger.info('Searching for calibration frames in path: {!r:}.', path)
             # get calibrators from provided path.
-            xcal = shocCampaign.load(path)
+            xcal = Campaign.load(path)
             _, gcal = run.match(xcal, *attrs)
 
             xcal = gcal.to_list()

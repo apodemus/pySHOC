@@ -34,8 +34,8 @@ from recipes.string import remove_prefix, shared_prefix
 from recipes.functionals.partial import PlaceHolder as o
 
 # relative
-from .. import CONFIG, shocCampaign
-from ..config import _is_special, Template
+from .. import CONFIG, Campaign
+from ..config import Template, _is_special
 from . import products, lightcurves as lc
 from .plotting import GUI
 from .calibrate import calibrate
@@ -290,7 +290,7 @@ def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
 def init(paths, telescope, target, overwrite):
 
     root = paths.folders.root
-    run = shocCampaign.load(root, obstype='object')
+    run = Campaign.load(root, obstype='object')
 
     # update info if given
     info = check_required_info(run, telescope, target)
@@ -343,13 +343,6 @@ def preview(run, paths, info, ui, plot, overwrite):
     logger.section('Overview')
     logger.info('The following data were loaded:\n{}', run.pformat())
 
-    # Print summary table
-    daily = run.group_by('date')  # 't.date_for_filename'
-    logger.bind(indent=' ').info(
-        'Observations of {} by date:\n{:s}\n', info['target'],
-        daily.pformat(titled=repr)
-    )
-
     # write observation log latex table
     paths.files.info.obslog.write_text(
         run.tabulate.to_latex(
@@ -358,6 +351,16 @@ def preview(run, paths, info, ui, plot, overwrite):
             label=f'tbl:obs-log:{info["target"]}'
         )
     )
+    
+    # Print nightly summary table
+    nightly = run.group_by('date_for_filename')
+    logger.bind(indent=' ').info(
+        'Observations of {} by date:\n{:s}\n', info['target'],
+        nightly.pformat(titled=repr)
+    )
+    # Write nightly summary table to latex
+    
+    
 
     # write summary spreadsheet
     path = str(paths.files.info.spreadsheets.campaign)
@@ -496,12 +499,26 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # Drizzle
         # -------------------------------------------------------------------- #
         if config.drizzle.show:
-            filename = paths.files.registration.drizzle
-            task = ui.task_factory(plot_drizzle)(fig=o, filename=filename)
-            ui.add_task(task, config.drizzle.tab,
-                        filename.with_suffix('.png'), overwrite)
+            try:
+                filename = paths.files.registration.drizzle.filename
+                task = ui.task_factory(plot_drizzle)(fig=o, filename=filename)
+                ui.add_task(task, config.drizzle.tab,
+                            paths.files.registration.drizzle.plot, overwrite)
+            except Exception as err:
+                import sys
+                import textwrap
+                from IPython import embed
+                from better_exceptions import format_exception
+                embed(header=textwrap.dedent(
+                    f"""\
+                        Caught the following {type(err).__name__} at 'main.py':501:
+                        %s
+                        Exception will be re-raised upon exiting this embedded interpreter.
+                        """) % '\n'.join(format_exception(*sys.exc_info()))
+                )
+                raise
 
-    logger.success(' Image Registration complete!')
+    logger.success('Image Registration complete!')
 
     return reg
 
@@ -509,12 +526,11 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 def _registry_plot_tasks(run, paths, overwrite):
 
     # config
-    inner, outer = CONFIG.registration.plots.split(
-        ('show', 'tab', 'filename', 'overwrite'))
-    input_config = {'alignment': {},
-                    'clusters': {},
-                    'mosaic': {},
-                    **inner}
+    SAVE_KWS = ('show', 'tab', 'filename', 'overwrite')
+    inner, outer = CONFIG.registration.split(SAVE_KWS)
+    inner = inner.filter(('folder', 'filenames'))
+    
+    input_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **inner}
     input_config['mosaic']['connect'] = False
 
     # alignment
@@ -522,7 +538,7 @@ def _registry_plot_tasks(run, paths, overwrite):
     # get alignment reference hdus. These don't have plots for themselves
     _, indices = run.group_by('telescope', return_index=True)
     indices = np.hstack([idx for idx in indices.values()])
-    desired_files = products._resolve_by_file(run[indices], templates)
+    desired_files = products.get_desired_products(run[indices], templates, 'file')
 
     section = outer.alignment.tab
     ovr = outer.alignment.get('overwrite', overwrite)
@@ -535,8 +551,11 @@ def _registry_plot_tasks(run, paths, overwrite):
 
     # mosaic / clusters
     templates = paths.templates['TEL'].flatten()
+    telescopes = set(run.attrs.telescope)
+    if len(telescopes) > 1:
+        telescopes.add('all')
     tel_products = products._get_desired_products(
-        sorted({*run.attrs.telescope, 'all'})[::-1], templates, 'TEL')
+        sorted(telescopes)[::-1], templates, 'TEL')
 
     for tel, files in tel_products.items():
         for key, file in zip(templates.keys(), files):
@@ -734,9 +753,6 @@ def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
     # tracker.detection.algorithm = CONFIG.detection
     tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
     tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
-    
-
-    
 
     # plot
     SAVE_KWS = ('filename', 'overwrite')
@@ -749,6 +765,7 @@ def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
 
         #                  year, day, nr
         tab = (*cfg.tab, *get_tab_key(hdu))
+        logger.success('Tracker plots: {}', tab)
         for i, j in enumerate(tracker.use_labels):
             # plot source location features
             task = ui.task_factory(tracker.plot.positions_source)(o, i, **kws)
@@ -922,10 +939,10 @@ def main(paths, target, telescope, njobs, plot, gui, show_cutouts, overwrite):
         logger.section('Launching GUI')
         # activate tab switching callback (for all tabs)
         cfg = CONFIG.registration
-        survey = cfg.params.survey.upper()
-        ui['Overview'].move_tab('Mosaic', 0)
-        ui['Overview', 'Mosaic'].move_tab(survey, 0)
-        ui.set_focus(*cfg.mosaic.tab, survey)
+        # survey = cfg.params.survey.upper()
+        # ui['Overview'].move_tab('Mosaic', 0)
+        # ui['Overview', 'Mosaic'].move_tab(survey, 0)
+        # ui.set_focus(*cfg.mosaic.tab, survey)
 
         ui.show()
 
