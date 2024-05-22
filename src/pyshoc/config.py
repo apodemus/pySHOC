@@ -24,7 +24,10 @@ from recipes.functionals.partial import Partial, placeholder as o
 # ---------------------------------------------------------------------------- #
 # Load package config
 CONFIG = ConfigNode.load_module(__file__)
+# coerce list to tuple so we can cache safely
+CONFIG.detection['roundness'] = tuple(CONFIG.detection.roundness)
 
+# 
 GROUPING = {
     'by_file':  ('HDU',  'file.stem'),
     'by_date':  ('DATE', 't.date_for_filename'),
