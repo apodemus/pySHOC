@@ -341,10 +341,10 @@ def write_rsync_script(run, paths, username=CONFIG.remote.username,
 
     remotes = list(map(str, run.calls.get_server_path(None)))
     prefix = f'{server}:{shared_prefix(remotes)}'
-    filelist = paths.files.remote.rsync_script
+    filelist = paths.files.remote.rsync_files
     io.write_lines(filelist, [remove_prefix(_, prefix) for _ in remotes])
 
-    outfile = paths.files.remote.rsync_files
+    outfile = paths.files.remote.rsync_script
     outfile.write_text(
         f'sudo rsync -arvzh --info=progress2 '
         f'--files-from={filelist!s} --no-implied-dirs '
