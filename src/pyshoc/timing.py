@@ -4,6 +4,7 @@ Functions for time-stamping SHOC data and writing time stamps to FITS headers.
 
 
 # std
+import re
 import inspect
 
 # third-party
@@ -19,6 +20,7 @@ from loguru import logger
 # local
 import motley
 from obstools.airmass import Young94, altitude
+from recipes import pprint
 from recipes.oo import Null
 from recipes.logging import LoggingMixin
 from recipes.containers.dicts import invert
@@ -30,13 +32,49 @@ from recipes.containers.dicts import invert
 # TODO: Q: are gps times in UTC / UT1 ??
 
 
-# --------------------------------- constants -------------------------------- #
+# Module constants
+# ---------------------------------------------------------------------------- #
 
 # SHOC Exposure dead time in frame transfer mode
 DEAD_TIME = 0.00676  # seconds           header['vshift'] * 1024 ????
 TIMEZONE = +2 * u.hour  # SAST is UTC + 2
 
-# ----------------------------- Helper Functions ----------------------------- #
+
+# Utils
+# ---------------------------------------------------------------------------- #
+
+class HMS:
+    """Sexagesimal time formatter"""
+
+    def __call__(self, t):
+        return self.hms(t)
+
+    @staticmethod
+    def hms(t):
+        """sexagesimal formatter"""
+        return pprint.hms(t.to('s').value, unicode=True, precision=1)
+
+    @staticmethod
+    def latex(t, precision=0):
+        """
+        % \hms latex command
+        \newcommand{\hms}[3]{%
+        \ensuremath{{#1}^{\mathrm{h}}{#2}^{\mathrm{m}}{#3}^{\mathrm{s}}}%
+        }
+        """
+        return R'\hms{{{:02.0f}}}{{{:02.0f}}}{{{:04.1f}}}'.format(
+            *pprint.nrs.sexagesimal(t.value, precision=precision)
+        )
+
+
+# singleton for API
+hms = HMS()
+
+
+# ---------------------------------------------------------------------------- #
+
+def to_sec(t):
+    return t.value / 86400
 
 
 def is_lazy(_):
@@ -75,8 +113,8 @@ def timing_info_table(run):
            for obs in run]
     return Table(tbl, chead=['TYPE'] + keys)
 
-
-# -------------------------------- Exceptions -------------------------------- #
+# Exceptions
+# ---------------------------------------------------------------------------- #
 
 
 class UnknownTimeException(Exception):
@@ -90,8 +128,9 @@ class UnknownLocation(Exception):
 class UnknownPointing(Exception):
     pass
 
-# ------------------------------ Helper Classes ------------------------------ #
 
+# Helper Classes
+# ---------------------------------------------------------------------------- #
 
 class _UnknownTime(Null):
 
@@ -124,17 +163,6 @@ class _UnknownTime(Null):
 
 # singleton
 UnknownTime = _UnknownTime()
-
-
-# class HMSrepr:
-#     """
-#     Mixin class that provided numerical objects with `hms` property for pretty
-#     representation
-#     """
-
-#     @property
-#     def hms(self):
-#         return ppr.hms(self, unicode=True, precision=1)
 
 
 # class Duration(float, HMSrepr):``
@@ -396,8 +424,7 @@ class Date(time.Time):
     #     return kls()
 
 
-# ******************************************************************************
-
+# ---------------------------------------------------------------------------- #
 
 class Timing(LoggingMixin):
     """
@@ -818,7 +845,7 @@ class Timing(LoggingMixin):
         """write the timing data for the stack to file(s)."""
 
         def make_header_line(info, fmt, delimiter):
-            import re
+
             matcher = re.compile(r'%-?(\d{1,2})')
             padwidths = [int(matcher.match(f).groups()[0]) for f in fmt]
             padwidths[0] -= 2

@@ -166,6 +166,7 @@ info:
         # pipeline summary info
         headers:        headers/$HDU.txt
         obslog:         observing-log.tex
+        summary:        nightly-log.tex
 
     spreadsheets:
         filenames:

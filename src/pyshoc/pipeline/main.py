@@ -31,7 +31,7 @@ from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
 from recipes import io, not_null, op, pprint as pp
 from recipes.string import remove_prefix, shared_prefix
-from recipes.functionals.partial import PlaceHolder as o
+from recipes.functionals.partial import PlaceHolder as o, Partial
 
 # relative
 from .. import CONFIG, Campaign
@@ -40,7 +40,7 @@ from . import products, lightcurves as lc
 from .plotting import GUI
 from .calibrate import calibrate
 from .logging import logger, config as config_logging
-
+from ..timing import TimeDelta
 
 # ---------------------------------------------------------------------------- #
 # logging config
@@ -80,6 +80,20 @@ CONSOLE_CUTOUTS_TITLE = CONFIG.console.cutouts.pop('title')
 
 # ---------------------------------------------------------------------------- #
 # Utility Helpers
+
+def single_valued(items):
+    value = (many := set(items)).pop()
+    if many:
+        raise ValueError(f'Not single valued: { {*many, value} }')
+    return value
+
+
+def csv(values):
+    try:
+        return single_valued(values)
+    except ValueError:
+        return ', '.join(map(str, values))
+
 
 def check_single_target(run):
 
@@ -291,6 +305,7 @@ def init(paths, telescope, target, overwrite):
 
     root = paths.folders.root
     run = Campaign.load(root, obstype='object')
+    run = run.sort_by('t.t0')
 
     # update info if given
     info = check_required_info(run, telescope, target)
@@ -351,16 +366,29 @@ def preview(run, paths, info, ui, plot, overwrite):
             label=f'tbl:obs-log:{info["target"]}'
         )
     )
-    
+
     # Print nightly summary table
     nightly = run.group_by('date_for_filename')
     logger.bind(indent=' ').info(
         'Observations of {} by date:\n{:s}\n', info['target'],
         nightly.pformat(titled=repr)
     )
+
     # Write nightly summary table to latex
-    
-    
+    summarize = {
+        'telescope':        single_valued,
+        'camera':           single_valued,
+        'filters.name':     single_valued,
+        'nfiles':           sum,
+        'nframes':          sum,
+        'timing.t0':        op.itemgetter(0),
+        'timing.tn':        op.itemgetter(-1),
+        'timing.exp':       csv,
+        'timing.duration':  Partial(sum)(o, TimeDelta(0, format='sec'))
+    }
+    tbl = nightly.tabulate.summarize(summarize)
+    tbl.to_latex(paths.files.info.summary)
+    logger.info('Night log written to: {!s}.', paths.files.info.summary)
 
     # write summary spreadsheet
     path = str(paths.files.info.spreadsheets.campaign)
@@ -529,7 +557,7 @@ def _registry_plot_tasks(run, paths, overwrite):
     SAVE_KWS = ('show', 'tab', 'filename', 'overwrite')
     inner, outer = CONFIG.registration.split(SAVE_KWS)
     inner = inner.filter(('folder', 'filenames'))
-    
+
     input_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **inner}
     input_config['mosaic']['connect'] = False
 

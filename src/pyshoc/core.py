@@ -23,7 +23,7 @@ from scrawl.image import plot_image_grid
 from pyxides import Grouped, OfType
 from pyxides.vectorize import MethodMapper, repeat
 from motley.utils import vstack
-from motley.table.attrs import AttrColumn as Column
+from motley.table.attrs import AttrTable, AttrColumn as Column
 from obstools.image.hdu import ImageHDU
 from obstools.image.noise import StdDev
 from obstools.sites.saao import telescopes as tel
@@ -31,6 +31,7 @@ from obstools.math.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes.containers import ensure
+from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.mapping import pformat
 from recipes.pprint.formatters import Decimal
@@ -41,9 +42,9 @@ from recipes.string import named_items, strings, sub
 # relative
 from . import headers
 from .config import CONFIG
-from .timing import Timing, Trigger
+from .timing import Timing, Trigger, hms, to_sec
 from .readnoise import readNoiseTables
-from .pprint import BraceContract, TableHelper, hms
+from .pprint import BraceContract
 
 
 # ---------------------------------------------------------------------------- #
@@ -480,7 +481,7 @@ class HDU(ImageHDU, Messenger):
     def nframes(self):
         """Total number of images in observation"""
         return 1 if (self.ndim == 2) else self.shape[0]
-    
+
     @property
     def nfiles(self):
         return 1
@@ -1000,6 +1001,84 @@ class FlatMaster(Master, FlatHDU):
 
 # ------------------------------------- ~ ------------------------------------ #
 
+class TableHelper(AttrTable):
+    # def write(self, path):
+
+    def to_latex(self, style='table', booktabs=True, unicodemath=False,
+                 timing_flags=None, tabsize=2, **kws):
+        #
+        tabulate = TableHelper.from_columns({
+            'timing.t0.iso':   Column('$t_0$', unit='UTC',
+                                      flags=op.attrgetter('t.trigger.t0_flag')),
+            'telescope':       Column('Telescope'),
+            'camera':          Column('Camera'),
+            'filters.name':    Column('Filter'),
+            'nframes':         Column('n', total=True),
+            'readout.mode':    Column('Readout Mode'),
+            'binning':         Column('Binning', unit='y, x', align='^',
+                                      fmt=R'{0.y}\times{0.x}'),
+            'timing.exp':      Column(R'$t_{\mathrm{exp}}$', fmt=str, unit='s',
+                                      flags=op.attrgetter('t.trigger.texp_flag')),
+            'timing.duration': Column('Duration', fmt=hms.latex, unit='hh:mm:ss',
+                                      total=True)}
+        )
+
+        tabulate.target = self.target
+        if timing_flags is None:
+            if unicodemath:
+                # †  ‡  §
+                timing_flags = {-1: '!',  # ⚠ not commonly available in all fonts
+                                0:  '↓',
+                                1:  '⟳'}
+            else:
+                timing_flags = {-1: '!',
+                                0:  '*',
+                                1:  R'\dagger'}  # '
+
+        # change flags symbols temporarily
+        with temporary(Trigger, FLAG_SYMBOLS=timing_flags):
+            # get table
+            table = tabulate(title=False, col_groups=None,
+                             footnotes=Trigger.get_flags(), **kws)
+
+        return table.to_latex(style='table', booktabs=True, tabsize=tabsize)
+
+    def to_xlsx(self, path, sheet=None, overwrite=False):
+        tabulate = AttrTable.from_columns({
+            'file.name':          Column('filename',
+                                         align='<'),
+            'timing.t0.datetime': Column('Time', '[UTC]',
+                                         fmt='YYYY-MM-DD HH:MM:SS',
+                                         convert=str,
+                                         align='<'),
+            'timing.exp':         Column('Exposure', '[s]',
+                                         fmt='0.?????',
+                                         align='<'),
+            'timing.duration':    Column(convert=to_sec,
+                                         fmt='[HH]"ʰ"MM"ᵐ"SS"ˢ"', unit='[hms]',
+                                         total=True),
+            'telescope':          ...,
+            'filters.name':       Column('Filter'),
+            'camera':             ...,
+            'readout.mode':       Column(convert=str, align='<'),
+            # 'nframes':            Column('n', total=True),
+            # 'binning':            Column('bin', unit='y, x', header_level=1),
+            'binning.y':          ...,
+            'binning.x':          ...,
+
+        },
+            header_levels={'binning': 1},
+            show_groups=False,
+            title='Observational Setup'
+        )
+
+        tabulate.target = self.target
+        return tabulate.to_xlsx(path, sheet, overwrite=overwrite,
+                                align={...: '^'}, header_formatter=str.title)
+
+
+# ---------------------------------------------------------------------------- #
+
 class Campaign(PhotCampaign, OfType(HDU), Messenger):
 
     # Pretty repr
@@ -1017,7 +1096,7 @@ class Campaign(PhotCampaign, OfType(HDU), Messenger):
                                       fmt=Decimal(0, thousands=' ')),
          'binning':            Column('bin', unit='y, x', align='^'),
          'readout.mode':       ...,
-         'timing.t0':          Column('t0', unit='UTC',
+         'timing.t0.iso':      Column('t0', unit='UTC',
                                       flags=op.attrgetter('t.trigger.t0_flag')),
          'timing.exp':         Column('tExp', fmt=str, unit='s',
                                       flags=op.attrgetter('t.trigger.texp_flag')),
@@ -1443,7 +1522,7 @@ class GroupedObs(Grouped):
     calibration frames for different observational setups by enabling loops
     over various such groupings.
     """
-    
+
     tabulate = Campaign.tabulate
 
     def __init__(self, factory=Campaign, *args, **kws):
