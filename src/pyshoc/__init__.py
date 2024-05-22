@@ -11,7 +11,12 @@ from astropy.io.fits.hdu.base import register_hdu
 # relative
 from .caldb import CalDB
 from .config import CONFIG
-from .core import *
+from .core import (
+    HDU, MATCH, Binning, CalibrationHDU, Campaign, DarkHDU, DarkMaster,
+    FilenameHelper, Filters, FlatHDU, FlatMaster, GroupedObs, Master,
+    Messenger, OldDarkHDU, OldFlatHDU, OldHDU, OutAmpMode, ReadoutMode,
+    RollOverState, TableHelper
+)
 
 
 # ---------------------------------------------------------------------------- #

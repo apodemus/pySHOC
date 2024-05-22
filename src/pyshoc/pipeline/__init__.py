@@ -18,7 +18,7 @@ if CONFIG.console.banner.pop('show', True):
 # tracking.CONFIG = CONFIG.tracking
 # tracking.CONFIG['filenames'] = CONFIG.tracking.filenames
 
-
+# TODO: Enum
 SUPPORTED_APERTURES = [
     'square',
     'ragged',

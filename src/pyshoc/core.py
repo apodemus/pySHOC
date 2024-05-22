@@ -42,9 +42,9 @@ from recipes.string import named_items, strings, sub
 # relative
 from . import headers
 from .config import CONFIG
-from .timing import Timing, Trigger, hms, to_sec
-from .readnoise import readNoiseTables
 from .pprint import BraceContract
+from .readnoise import readNoiseTables
+from .timing import Timing, Trigger, hms, to_sec
 
 
 # ---------------------------------------------------------------------------- #

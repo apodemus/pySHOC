@@ -31,16 +31,17 @@ from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
 from recipes import io, not_null, op, pprint as pp
 from recipes.string import remove_prefix, shared_prefix
-from recipes.functionals.partial import PlaceHolder as o, Partial
+from recipes.functionals.partial import Partial, PlaceHolder as o
 
 # relative
 from .. import CONFIG, Campaign
+from ..timing import TimeDelta
 from ..config import Template, _is_special
 from . import products, lightcurves as lc
 from .plotting import GUI
 from .calibrate import calibrate
 from .logging import logger, config as config_logging
-from ..timing import TimeDelta
+
 
 # ---------------------------------------------------------------------------- #
 # logging config
