@@ -4,7 +4,6 @@ import os
 import pwd
 import itertools as itt
 from pathlib import Path
-from string import Template
 
 # third-party
 from loguru import logger
@@ -14,9 +13,9 @@ from platformdirs import user_config_path, user_data_path
 import motley
 from recipes import op
 from recipes.shell import bash
-from recipes.string import sub
 from recipes.config import ConfigNode
 from recipes.functionals import always
+from recipes.string import Template, sub
 from recipes.containers.dicts import DictNode
 from recipes.containers import ensure, replace
 from recipes.functionals.partial import Partial, placeholder as o
@@ -181,20 +180,6 @@ def _ignore_any(ignore):
 
 class Template(Template):
 
-    def __init__(self, template):
-        super().__init__(str(template))
-
-    def __repr__(self):
-        return f'{type(self).__name__}({self.template})'
-
-    def __str__(self):
-        return self.template
-
-    def get_identifiers(self):
-        # NOTE: python 3.11 has Template.get_identifiers
-        _, keys, *_ = zip(*self.pattern.findall(self.template))
-        return keys
-
     def resolve_path(self, hdu=None, frames=(), partial=False, **kws):
         subs = self.get_subs(hdu, frames, partial, **kws)
         return self.sub(partial, **subs, **kws)
@@ -223,10 +208,10 @@ class Template(Template):
         return subs
 
     def sub(self, partial=False, **kws):
+        obj = super().sub(partial, **kws)
         if partial:
-            return type(self)(self.safe_substitute(**kws))
-        else:
-            return Path(self.substitute(**kws))
+            return obj
+        return Path(obj)
 
     def resolve_paths(self, hdu=None, section=(), partial=False, **kws):
         return list(self._resolve_paths(hdu, section, partial, **kws))
