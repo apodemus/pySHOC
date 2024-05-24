@@ -528,24 +528,10 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # Drizzle
         # -------------------------------------------------------------------- #
         if config.drizzle.show:
-            try:
-                filename = paths.files.registration.drizzle.filename
-                task = ui.task_factory(plot_drizzle)(fig=o, filename=filename)
-                ui.add_task(task, config.drizzle.tab,
-                            paths.files.registration.drizzle.plot, overwrite)
-            except Exception as err:
-                import sys
-                import textwrap
-                from IPython import embed
-                from better_exceptions import format_exception
-                embed(header=textwrap.dedent(
-                    f"""\
-                        Caught the following {type(err).__name__} at 'main.py':501:
-                        %s
-                        Exception will be re-raised upon exiting this embedded interpreter.
-                        """) % '\n'.join(format_exception(*sys.exc_info()))
-                )
-                raise
+            filename = paths.files.registration.drizzle.filename
+            task = ui.task_factory(plot_drizzle)(fig=o, filename=filename)
+            ui.add_task(task, config.drizzle.tab,
+                        paths.files.registration.drizzle.plot, overwrite)
 
     logger.success('Image Registration complete!')
 
@@ -556,11 +542,11 @@ def _registry_plot_tasks(run, paths, overwrite):
 
     # config
     SAVE_KWS = ('show', 'tab', 'filename', 'overwrite')
-    inner, outer = CONFIG.registration.split(SAVE_KWS)
-    inner = inner.filter(('folder', 'filenames'))
+    inner_config, outer_config = CONFIG.registration.split(SAVE_KWS)
+    inner_config = inner_config.filter(('folder', 'filenames'))
 
-    input_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **inner}
-    input_config['mosaic']['connect'] = False
+    inner_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **inner_config}
+    inner_config['mosaic']['connect'] = False
 
     # alignment
     templates = paths.templates['HDU'].find('alignment').flatten()
@@ -569,14 +555,14 @@ def _registry_plot_tasks(run, paths, overwrite):
     indices = np.hstack([idx for idx in indices.values()])
     desired_files = products.get_desired_products(run[indices], templates, 'file')
 
-    section = outer.alignment.tab
-    ovr = outer.alignment.get('overwrite', overwrite)
-    align_config = input_config['alignment']
+    section = outer_config.alignment.tab
+    ovr = outer_config.alignment.get('overwrite', overwrite)
+    align_config = inner_config['alignment']
 
     # firsts = run.attrs()
     for stem, (file, ) in desired_files.items():
         key = (*section, *get_tab_key(run[stem]))
-        yield 'alignment', key, file, ovr, align_config
+        yield ('alignment', key, file, ovr, align_config)
 
     # mosaic / clusters
     templates = paths.templates['TEL'].flatten()
@@ -587,13 +573,12 @@ def _registry_plot_tasks(run, paths, overwrite):
         sorted(telescopes)[::-1], templates, 'TEL')
 
     for tel, files in tel_products.items():
-        for key, file in zip(templates.keys(), files):
-            which = key[-1]
-            if outer[which].show:
-                key = (*CONFIG[key].tab, tel)
+        for group, file in files['registration'].items():
+            if (cfg := outer_config[group]).show:
+                key = (*cfg.tab, tel)
 
-            ovr = outer[which].get('overwrite', overwrite)
-            yield which, key, file, ovr, input_config[which]
+            ovr = outer_config[group].get('overwrite', overwrite)
+            yield (group, key, file, ovr, inner_config[group])
 
 
 def echo_fig(fig, *args, **kws):
