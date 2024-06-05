@@ -18,13 +18,13 @@ from recipes.functionals.partial import PartialTask, PlaceHolder as o
 
 # relative
 from ..core import Campaign
-from ..config import GROUPING
+from .. import config as cfg
 from .logging import logger
 
 
 # ---------------------------------------------------------------------------- #
 # Config
-CONFIG = ConfigNode.load_module(__file__)
+CONFIG = cfg.lightcurves
 
 # alias
 LightCurve = lcs.LightCurve
@@ -217,7 +217,7 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
                  plot=True):
 
         infile = '$HDU'
-        config, groupings = config.split(GROUPING)
+        config, groupings = config.split(cfg.GROUPING)
         config = {**config, 'overwrite': overwrite, 'plot': plot}
         groupings = groupings.filter(('folder', 'filename'))
 
@@ -226,7 +226,7 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
         steps = dicts.DictNode()
 
         for grouping, todo in groupings.items():
-            template_key, attr = GROUPING[grouping]
+            template_key, attr = cfg.GROUPING[grouping]
             grouped[grouping] = campaign.group_by(attr).sorted()
 
             for step, cfg in todo.filter('formats').items():
@@ -436,7 +436,7 @@ class ReductionStep(PartialTask):
             # load task
             if ui := kws.pop('ui', None):
                 grouping, step = self.name
-                tab = (CONFIG.tab, grouping, *get_tab_key(hdu), step)
+                tab = (cfg.lightcurves.tab, grouping, *get_tab_key(hdu), step)
                 task = ui.task_factory(result.plot)(*result, **params)
                 ui.add_task(task, tab, **kws)
 

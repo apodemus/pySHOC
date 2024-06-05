@@ -19,7 +19,7 @@ from recipes.pprint.callers import Callable
 from recipes.functionals.partial import Partial, PartialTask
 
 # relative
-from ..config import CONFIG
+from .. import config as cfg
 from .logging import logger
 
 
@@ -87,9 +87,9 @@ class TaskRunner(_TaskBase):
 
     def __repr__(self):
         name = type(self).__name__
-        inner = callers.pformat(self.task, (), self.fig_kws, hang=False)
-        inner = indent(f'\n{inner}', 4)
-        return f'{name}({inner}\n)'
+        # inner = callers.pformat(self.task, (), self.fig_kws, hang=False)
+        inner = indent(repr(self.task), 4)
+        return f'{name}({inner})'
 
 
 class PlotTask(_TaskBase):
@@ -106,6 +106,7 @@ class PlotTask(_TaskBase):
 
         #
         self.ui = ui
+        
         # resolve placholders and static params
         super().__init__(func, *args, **kws)
 
@@ -126,7 +127,7 @@ class PlotTask(_TaskBase):
         func = self.__wrapped__
         self.logger.opt(lazy=True).info(
             'Invoking call for plot task:\n>>> {}.',
-            lambda: callers.pformat(func, args, kws, ppl=1).replace('\n', '\n    ')
+            lambda: indent(callers.pformat(func, args, kws, ppl=1))
         )
 
         # plot
@@ -155,7 +156,8 @@ class TabTask(slots.SlotHelper, LoggingMixin):
 
         if filenames:
             filenames = ensure.tuple(filenames, Path)
-            self.logger.debug('Figure for task {} will be saved at {}. {}.',
+            self.logger.debug('Figure for task {.task.__wrapped__.__name__!r} '
+                              'will be saved at {}. {}.',
                               task, filenames, f'{overwrite = }')
         # init namespace
         super().__init__(**slots.sanitize(locals()), result=())
@@ -171,7 +173,7 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         figure, self.result = self.task(figure, tab, *args, **kws)
 
         # save
-        save_figure(figure, self.filenames, self.overwrite, **self.save_kws)
+        self.save(figure)
 
         # art
         return self.result
@@ -194,18 +196,21 @@ class TabTask(slots.SlotHelper, LoggingMixin):
                 figure.set_size_inches(figsize)
 
         return figure
+    
+    def save(self, figure):
+        save_figure(figure, self.filenames, self.overwrite, **self.save_kws)
 
 
 class GUI(MplMultiTab):
 
     def __init__(self, title, pos,
-                 active=CONFIG.plotting.gui.active,
-                 delay=CONFIG.plotting.gui.delay):
+                 active=cfg.plotting.gui.active,
+                 delay=cfg.plotting.gui.delay):
         #
         super().__init__((), title, pos)
 
-        self.setWindowIcon(QtGui.QIcon('/home/hannes/Pictures/mCV.jpg'))
-        
+        # self.setWindowIcon(QtGui.QIcon('/home/hannes/Pictures/mCV.jpg'))
+
         self.active = bool(active)
         self.delay = active and delay
 

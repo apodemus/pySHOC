@@ -3,20 +3,20 @@ Photometry pipeline for the Sutherland High-Speed Optical Cameras.
 """
 
 
-from .. import CONFIG
+from .. import config as cfg
 from .logging import logger
 from .banner import make_banner
 
 
 # ---------------------------------------------------------------------------- #
 WELCOME_BANNER = ''
-if CONFIG.console.banner.pop('show', True):
-    WELCOME_BANNER = make_banner(**CONFIG.console.banner)
+if cfg.console.banner.pop('show', True):
+    WELCOME_BANNER = make_banner(**cfg.console.banner)
 
 
 # # overwrite tracking default config
-# tracking.CONFIG = CONFIG.tracking
-# tracking.CONFIG['filenames'] = CONFIG.tracking.filenames
+# tracking.cfg = cfg.tracking
+# tracking.cfg['filenames'] = cfg.tracking.filenames
 
 # TODO: Enum
 SUPPORTED_APERTURES = [

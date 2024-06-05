@@ -17,11 +17,7 @@ from recipes.logging import (ParagraphWrapper, RepeatMessageHandler,
                              TimeDeltaFormatter)
 
 # relative
-from .. import CONFIG
-
-
-# ---------------------------------------------------------------------------- #
-cfg = CONFIG.logging
+from .. import config as cfg
 
 
 # ---------------------------------------------------------------------------- #
@@ -52,18 +48,18 @@ def section(message):
 logger.level('SECTION', no=20)
 logger.__class__.section = staticmethod(section)
 
-for level, icon in cfg.console.icons.items():
+console = cfg.logging.console
+for level, icon in console.icons.items():
     logger.level(level.upper(), icon=icon)
-
 
 LEVEL_FORMATS = {
     # generic level format
-    **{level.name: motley.stylize(cfg.console.format,
+    **{level.name: motley.stylize(console.format,
                                   level=level,
                                   style=markup_to_list(level.color))
        for level in logger._core.levels.values()},
     # custom level for sectioning
-    'SECTION':      motley.stylize(cfg.console.section, '',
+    'SECTION':      motley.stylize(console.section, '',
                                    width=terminal.get_size()[0])
 }
 
@@ -108,21 +104,22 @@ def cleanup(logfile):
 
 def config():
     # logger config
+    config = cfg.logging
     return logger.configure(
         # disable logging for motley.formatter, since it is being used here to
         # format the log messages and will thus recurse infinitely.
-        activation=list(cfg.activation.items()),
+        activation=list(config.activation.items()),
 
         # File sink is added by pipeline.cli.setup once output path is known
         handlers=[{
             # console handler
             'sink':
                 RepeatMessageHandler(
-                    ParagraphWrapper(indent=f'{"| ": >67}'),
-                    template=cfg.console.repeats
+                    ParagraphWrapper(indent=f'{"⎢ ": >66}'),
+                    template=config.console.repeats
                 ),
-            'level':    cfg.console.level,
-            'catch':    cfg.console.catch,
+            'level':    config.console.level,
+            'catch':    config.console.catch,
             'colorize': False,
             'format':   formatter,
             # 'filter':   filter_console

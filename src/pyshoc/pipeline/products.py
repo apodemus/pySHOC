@@ -20,8 +20,7 @@ from recipes.containers.dicts.node import balance_depth
 from recipes.functionals.partial import Partial, PlaceHolder as o
 
 # relative
-from .. import CONFIG
-from ..config import GROUPING, Template
+from .. import config as cfg
 from .utils import get_file_age
 
 
@@ -151,7 +150,7 @@ def _get_titles(section, lookup_at, fallbacks):
     i = len(section)
     while i:
         key = section[:i]
-        if not (title := CONFIG.get((*key, lookup_at))):
+        if not (title := cfg.get((*key, lookup_at))):
             fallback = fallbacks.get(i - 1, echo)
             title = fallback(key[-1])
 
@@ -210,8 +209,8 @@ def _get_relative_paths(section, paths, depth=-1, order=1, slash=None,
     ancestors = []
     for i, slash in itr:
         if ((i <= depth) and (section[0] != 'input')
-                    and (folder := paths.get_folder(section[:i])) and (folder != parent)
-                    and isinstance(folder, Path)
+                and (folder := paths.get_folder(section[:i])) and (folder != parent)
+                and isinstance(folder, Path)
                 ):
             #
             if folder.is_relative_to(parent):
@@ -232,7 +231,7 @@ def _get_relative_paths(section, paths, depth=-1, order=1, slash=None,
 
 def replace_section_title(key, at='tab', level=0, fallback=str.title):
     section = key[level]
-    new = CONFIG.get((section, at), fallback(section))
+    new = cfg.get((section, at), fallback(section))
     return (*key[:level], *ensure.list(new),  *key[(level + 1):])
 
 
@@ -251,13 +250,13 @@ def _get_templates(paths, key):
     lcs = lcs.map(op.AttrGetter('template'))
 
     return DictNode({**tmp.flatten(),
-                     **lcs.map(Template).flatten()}).flatten()
+                     **lcs.map(cfg.Template).flatten()}).flatten()
 
 
 def get_desired_products(run, templates, by):
 
     by = by.lower()
-    key, attr = GROUPING[f'by_{by}']
+    key, attr = cfg.GROUPING[f'by_{by}']
 
     run = run.sort_by('t.t0')
     if by == 'file':
@@ -311,7 +310,7 @@ def get_previous(run, paths):
     # nightly data products
     if 'DATE' in paths.templates:
         pprint.append(lambda: ('nightly', _nightly_products_table(run, paths)))
-        
+
     for f in pprint:
         info('Found previous {0[0]} data products: \n{0[1]}', f)
 
@@ -365,7 +364,7 @@ def _overview_products_hstack(overview, paths):
             for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **CONFIG.console.products
+        **cfg.console.products
     )
 
 
@@ -402,7 +401,7 @@ def _get_hdu_products(run, paths, **kws):
 
     # input for table
     products = DictNode()
-    base, files = 'base', 'fits'
+    base, files = 'HDU', 'fits'
     products['input', base] = list(desired_files.keys())
     products['input', files] = run.files.paths
 
@@ -439,11 +438,11 @@ def _hdu_products_table(run, paths):
     # get headers
     headers = _prepare_headers(products, path_info, to_remove, fixups, fmt,
                                path_stop=-1)
-    row_headers = products.pop(('input', 'base'))
+    row_headers = products.pop(('input', 'HDU'))
 
     tbl = Table.from_dict(
         products.reshape(headers.get),
-        title='HDU Data Products',
+        title='HDU Data Products (Age)',
         converters={Path: Partial(get_file_age)(o, human=True)},
         row_headers=row_headers,
         align='<',
@@ -453,16 +452,16 @@ def _hdu_products_table(run, paths):
                            for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **CONFIG.console.products
+        **cfg.console.products
     )
 
-    tbl.headers_header_block[:, 0] = ('Input', '', '', 'base')
+    tbl.headers_header_block[:, 0] = ('Input', '', '', 'HDU')
     return tbl
 
 
 def _write_hdu_products_xlsx(run, paths, filename=None, sheet=None, overwrite=True):
 
-    base, files = 'base', 'fits'
+    base, files = 'HDU', 'fits'
     out, templates = _get_hdu_products(run, paths)
 
     # remove verbose keys
@@ -556,7 +555,7 @@ def _nightly_products_table(run, paths):
                            for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **CONFIG.console.products
+        **cfg.console.products
     )
 
 
@@ -566,6 +565,10 @@ def _write_nightly_products_xlsx(run, paths, filename, sheet=None,
     #
     products, templates = _get_nightly_products(run, paths)
     # sections = list(products.flatten().keys())
+
+    if not products['input']['date']:
+        logger.info('No nightly data products yet.')
+        return
 
     # remove verbose keys
     to_remove = ('filename', 'concat', 'by_file', 'by_date')

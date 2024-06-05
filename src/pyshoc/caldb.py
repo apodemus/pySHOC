@@ -18,6 +18,7 @@ from recipes.string import numbered, pluralize
 from recipes.containers.dicts import AttrDict, AutoVivify
 
 # relative
+from . import config as cfg
 from .core import MATCH, Campaign
 
 
@@ -188,13 +189,12 @@ class CalDB(DB, logging.LoggingMixin):
 
         Returns
         -------
-        GroupedObs
+        GroupedRuns
             The matched and grouped `Campaign`s.
         """
-        from .config import CONFIG
 
         which = 'master' if master else 'raw'
-        name = motley.apply(f'{which} {kind}', CONFIG.console.colors[kind])
+        name = motley.apply(f'{which} {kind}', cfg.console.colors[kind])
         self.logger.bind(indent=2).info(
             "Searching for {:s} files in database:\n'{!s}'", name, self[which][kind]
             )

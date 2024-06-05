@@ -41,7 +41,7 @@ from recipes.string import named_items, strings, sub
 
 # relative
 from . import headers
-from .config import CONFIG
+from . import config as cfg
 from .pprint import BraceContract
 from .readnoise import readNoiseTables
 from .timing import Timing, Trigger, hms, to_sec
@@ -161,7 +161,7 @@ class Binning:
 class Filters:
     """Simple class to represent positions of the filter wheels"""
 
-    _empty = CONFIG.preferences.empty_filter_string
+    _empty = cfg.preferences.empty_filter_string
 
     def __init__(self, a, b=None):
         A = self.get(a)
@@ -345,6 +345,11 @@ class FilenameHelper(_FilenameHelper):
             eg. '0010' in 'SHA_20200729.0010.fits'
         """
         return self.path.suffixes[0].lstrip('.')
+    
+    @property
+    def roll(self):
+        nr, *suf, ext = self.path.suffixes
+        return suf[0].lstrip('.') if suf else ''
 
 
 class Messenger:
@@ -541,7 +546,7 @@ class HDU(ImageHDU, Messenger):
         # diffraction limit 1.9m
         return DIFF_LIMS.get(self.telescope)
 
-    def get_server_path(self, server=CONFIG.remote.server):
+    def get_server_path(self, server=cfg.remote.server):
         if None in (self.file.path, self.telescope):
             return
 
@@ -991,11 +996,11 @@ class Master(CalibrationHDU):
     pass
 
 
-class DarkMaster(Master, DarkHDU):
+class MasterDark(Master, DarkHDU):
     pass
 
 
-class FlatMaster(Master, FlatHDU):
+class MasterFlat(Master, FlatHDU):
     pass
 
 
@@ -1108,13 +1113,13 @@ class Campaign(PhotCampaign, OfType(HDU), Messenger):
          #  'readout.mode.outAmp':    ...,
          #   'filters.B':          ...,
          },
-        **CONFIG.tabulate.campaign,
+        **cfg.tabulate.campaign,
         footnotes=Trigger.get_flags()
     )
 
     @classmethod
     def new_groups(cls, *keys, **kws):
-        return GroupedObs(cls, *keys, **kws)
+        return GroupedRuns(cls, *keys, **kws)
 
     # def map(self, func, *args, **kws):
     #     """Map and arbitrary function onto the data of each observation"""
@@ -1264,9 +1269,9 @@ class Campaign(PhotCampaign, OfType(HDU), Messenger):
         return groups
 
     def match(self, other, exact, closest=(), cutoffs=(), keep_nulls=False):
-        from .match import MatchedObservations
+        from .match import MatchedRuns
 
-        return MatchedObservations(self, other)(exact, closest, cutoffs, keep_nulls)
+        return MatchedRuns(self, other)(exact, closest, cutoffs, keep_nulls)
 
     def combine(self, func=None, args=(), **kws):
         """
@@ -1513,7 +1518,7 @@ class Campaign(PhotCampaign, OfType(HDU), Messenger):
         # TODO: header keyword
 
 
-class GroupedObs(Grouped):
+class GroupedRuns(Grouped):
     """
     Emulates dict to hold multiple Campaign instances keyed by their shared
     common attributes. The attribute names given in groupId are the ones by
@@ -1550,7 +1555,7 @@ class GroupedObs(Grouped):
     #     """
     #     return Campaign.tabulate.get_tables(
     #         self, attrs, titled=titled, filler_text='NO MATCH',
-    #         **{**CONFIG.tabulate.obs_groups, **kws}
+    #         **{**cfg.tabulate.obs_groups, **kws}
     #     )
 
     def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):
@@ -1579,7 +1584,7 @@ class GroupedObs(Grouped):
                     if len(obs)})
         return out
 
-    # TODO: move methods below to MatchedObservations ???
+    # TODO: move methods below to MatchedRuns ???
     def comap(self, func, other, *args, **kws):
         out = self.__class__()
         for key, run in self.items():
@@ -1621,7 +1626,7 @@ class GroupedObs(Grouped):
 
         Returns
         ------
-        Bias subtracted GroupedObs
+        Bias subtracted GroupedRuns
         """
 
         return self._comap_method(other, 'subtract', handle_missing)

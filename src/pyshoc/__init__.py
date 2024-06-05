@@ -9,13 +9,13 @@ from importlib.metadata import PackageNotFoundError, version
 from astropy.io.fits.hdu.base import register_hdu
 
 # relative
+from . import config
 from .caldb import CalDB
-from .config import CONFIG
 from .core import (
-    HDU, MATCH, Binning, CalibrationHDU, Campaign, DarkHDU, DarkMaster,
-    FilenameHelper, Filters, FlatHDU, FlatMaster, GroupedObs, Master,
-    Messenger, OldDarkHDU, OldFlatHDU, OldHDU, OutAmpMode, ReadoutMode,
-    RollOverState, TableHelper
+    HDU, MATCH, Binning, CalibrationHDU, Campaign, DarkHDU, FilenameHelper,
+    Filters, FlatHDU, GroupedRuns, Master, MasterDark, MasterFlat, Messenger,
+    OldDarkHDU, OldFlatHDU, OldHDU, OutAmpMode, ReadoutMode, RollOverState,
+    TableHelper
 )
 
 
@@ -31,4 +31,4 @@ except PackageNotFoundError:
 register_hdu(HDU)
 
 # Load calibration database
-calDB = CalDB(CONFIG.calibration.folder)
+calDB = CalDB(config.calibration.folder)

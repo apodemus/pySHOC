@@ -4,93 +4,135 @@ import os
 import pwd
 import itertools as itt
 from pathlib import Path
+from importlib.metadata import version
 
 # third-party
 from loguru import logger
-from platformdirs import user_config_path, user_data_path
+from matplotlib import rcParams
+from platformdirs import user_data_path
 
 # local
 import motley
 from recipes import op
 from recipes.shell import bash
-from recipes.config import ConfigNode
 from recipes.functionals import always
 from recipes.string import Template, sub
 from recipes.containers.dicts import DictNode
 from recipes.containers import ensure, replace
+from recipes.config import ConfigNode, create_user_config
 from recipes.functionals.partial import Partial, placeholder as o
 
 
 # ---------------------------------------------------------------------------- #
-# Load package config
-CONFIG = ConfigNode.load_module(__file__)
-# coerce list to tuple so we can cache safely
-CONFIG.detection['roundness'] = tuple(CONFIG.detection.roundness)
+# user_config_path = user_config_path('pyshoc')
 
-# 
+# Create user config file if needed
+user_config_path = create_user_config('config.yaml', __file__,
+                                      version_stamp=version('pyshoc'))
+
+# ---------------------------------------------------------------------------- #
+
+
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
+
+
+def load(file=None):
+
+    if file is None:
+        file = Path(__file__).with_suffix('.yaml')
+
+    # Load config file
+    config = ConfigNode.load(file)
+
+    # load cmasher if needed
+    # ---------------------------------------------------------------------------- #
+    for _ in config.select('cmap').filtered(values=None).flatten().values():
+        if _.startswith('cmr.'):
+            # load the cmasher colormaps into the matplotlib registry
+            import cmasher
+            break
+
+    # coerce list to tuple so we can cache safely
+    if r := config.detection.roundness:
+        config.detection['roundness'] = tuple(r)
+
+    # user details
+    # ---------------------------------------------------------------------------- #
+    # calibration database default
+    if not config.calibration.get('folder'):
+        config.calibration['folder'] = user_data_path('pyshoc') / 'caldb'
+
+    # set remote username default
+    if not config.remote.get('username'):
+        config.remote['username'] = get_username()
+
+    # logging
+    # ---------------------------------------------------------------------------- #
+    # uppercase logging level
+    for sink, cfg in config.logging.select(('file', 'console')).items():
+        config.logging[sink, 'level'] = cfg.level.upper()
+
+    # stylize log repeat handler
+    config.logging.console['repeats'] = motley.stylize(config.logging.console.repeats)
+    config.console.cutouts['title'] = motley.stylize(config.console.cutouts.pop('title'))
+
+    # stylize progressbar
+    prg = config.console.progress
+    prg['bar_format'] = motley.stylize(prg.bar_format)
+
+    # GUI
+    # ---------------------------------------------------------------------------- #
+    # Convert tab specifiers to tuple
+    config.update(config.select('tab').map(ensure.tuple))
+
+    # make config read-only
+    config.freeze()
+
+    # plot config
+    rcParams.update({
+        'font.size':        config.plotting.font.size,
+        'axes.labelweight': config.plotting.axes.labelweight,
+        'image.cmap':       config.plotting.cmap
+    })
+    #  rc('text', usetex=False)
+
+    # set in module namespace
+    global CONFIG
+    CONFIG = config
+
+    return config
+
+
+# Configure
+# ---------------------------------------------------------------------------- #
+#  Load
+CONFIG = load()
+
+_Null = object()
+
+
+# Module attribute lookup goes through CONFIG
+def __getattr__(section):
+    if section in CONFIG:
+        return CONFIG[section]
+
+    raise AttributeError(section)
+
+
+def get(section, *default):
+    return CONFIG.get(section, *default)
+
+
+#
 GROUPING = {
     'by_file':  ('HDU',  'file.stem'),
     'by_date':  ('DATE', 't.date_for_filename'),
     'by_orbit': ('E',    't.orbits_partial')
 }
 
+SAVE_KWS = ('show', 'tab', 'filename', 'overwrite')
 
-# load cmasher if needed
-# ---------------------------------------------------------------------------- #
-plt = CONFIG.plotting
-
-for _ in CONFIG.select('cmap').filtered(values=None).flatten().values():
-    if _.startswith('cmr.'):
-        # load the cmasher colormaps into the matplotlib registry
-        import cmasher
-        break
-
-
-# user details
-# ---------------------------------------------------------------------------- #
-
-def get_username():
-    return pwd.getpwuid(os.getuid())[0]
-
-
-user_config_path = user_config_path('pyshoc')
-
-# calibration database default
-if not CONFIG.calibration.get('folder'):
-    CONFIG.calibration['folder'] = user_data_path('pyshoc') / 'caldb'
-
-# set remote username default
-if not CONFIG.remote.get('username'):
-    CONFIG.remote['username'] = get_username()
-
-
-# logging
-# ---------------------------------------------------------------------------- #
-# uppercase logging level
-for sink, cfg in CONFIG.logging.select(('file', 'console')).items():
-    CONFIG.logging[sink, 'level'] = cfg.level.upper()
-del sink, cfg
-
-
-# stylize log repeat handler
-CONFIG.logging.console['repeats'] = motley.stylize(CONFIG.logging.console.repeats)
-CONFIG.console.cutouts['title'] = motley.stylize(CONFIG.console.cutouts.pop('title'))
-
-
-# stylize progressbar
-prg = CONFIG.console.progress
-prg['bar_format'] = motley.stylize(prg.bar_format)
-del prg
-
-
-# GUI
-# ---------------------------------------------------------------------------- #
-# Convert tab specifiers to tuple
-CONFIG.update(CONFIG.select('tab').map(ensure.tuple))
-
-
-# make config read-only
-CONFIG.freeze()
 
 # ---------------------------------------------------------------------------- #
 # Get file / folder tree for config

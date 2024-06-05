@@ -1,7 +1,9 @@
 
 
 # std
+import sys
 import atexit
+import shutil
 from pathlib import Path
 
 # third-party
@@ -16,9 +18,8 @@ from recipes.string import most_similar
 from recipes.containers.dicts import groupby
 
 # relative
-from .. import CONFIG, HDU
+from .. import HDU, config as cfg
 from .._version import version as VERSION
-from ..config import PathConfig, _prefix_paths
 from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
 
@@ -86,7 +87,7 @@ def get_root(files_or_folder, _level=0):
 
 
 def resolve_output(output, root):
-    out = _prefix_paths(output, root)
+    out = cfg._prefix_paths(output, root)
     logger.info('Output root: {}.', out)
     return out
 
@@ -110,19 +111,30 @@ def resolve_tel(_ctx, param, value):
     if value is not None:
         return telescopes.get_name(value)
 
-
 def resolve_target(_ctx, _param, value):
     if value == 'arget':
         raise click.BadParameter('Did you mean `--target`? (with 2x "-")')
     return value
 
 
-def setup(root, output, overwrite, use_cache):
+def setup(root, output, overwrite, use_cache, config):
     """Setup results folder tree."""
 
     root = Path(root).resolve()
     if not (root.exists() and root.is_dir()):
         raise NotADirectoryError(str(root))
+
+    # search for local config
+    filename = 'config.yaml'
+    if config := config or next((file for folder in (root, output)
+                                 if (file := folder / filename).exists()), None):
+        logger.info('Using local config: {!s}.', config)
+        config = cfg.load(config)
+    else:
+        # use global config
+        config = cfg.CONFIG
+        # make a local copy
+        shutil.copy(cfg.user_config_path, output / filename)
 
     # ------------------------------------------------------------------------ #
     # check for previous version stamp
@@ -144,28 +156,28 @@ def setup(root, output, overwrite, use_cache):
     else:
         logger.info('Previous results will be {}.',
                     'overwritten' if overwrite else 'used if available')
-    
+
     if overwrite:
         vcf.write_text(VERSION)
-    
+
     #
     use_cache = bool(not overwrite if use_cache is None else use_cache)
 
     # ------------------------------------------------------------------------ #
     # path helper
-    paths = PathConfig.from_config(root, output, CONFIG)
+    paths = cfg.PathConfig.from_config(root, output, config)
     paths.create(ignore='calibration')
 
     # add log file sink
     logfile = paths.files.logging
-    logger.add(logfile, colorize=False, **CONFIG.logging.file)
+    logger.add(logfile, colorize=False, **config.logging.file)
     atexit.register(logging.cleanup, logfile)
 
     # matplotlib interactive gui save directory
     rcParams['savefig.directory'] = output
 
     # set detection algorithm
-    if algorithm := CONFIG.detection.get('algorithm', None):
+    if algorithm := config.detection.get('algorithm', None):
         HDU.detection.algorithm = algorithm
 
     # update cache locations
@@ -198,6 +210,10 @@ def enable_local_caching(mapping):
               help='Output folder for data products. Default creates the '
                    '"pyshoc" folder under the root input folder.')
 #
+@click.option('-cfg', '--config',
+              type=click.Path(),
+              help='Path to pyshoc configuration yaml file. If not given, search '
+                   'through input, output, user config folders in that order.')
 @click.option('-t', '--target',
               callback=resolve_target,
               help='Name of the target. Will be used to retrieve object '
@@ -213,19 +229,18 @@ def enable_local_caching(mapping):
                    'fits header information is missing or incorrect. If input '
                    'files are from multiple telescopes, update the headers '
                    'before running the pipeline.')
-#
-@click.option('-top', type=int, default=5,
-              help='Number of brightest sources to do photometry on.')
-#
-@click.option('-aps', '--apertures',
-              type=click.Choice(SUPPORTED_APERTURES, case_sensitive=False),
-              #   metavar=f'[{"|".join(SUPPORTED_APERTURES)}]',
-              default='ragged', show_default=True,
-              callback=resolve_aperture,
-              help='The type(s) of apertures to use. If multiple '
-              'types are specified, photometry will be done for each type '
-              'concurrently. Abbreviated names are understood.')
-#
+# @click.option('-top', type=int, default=5,
+#               help='Number of brightest sources to do photometry on.')
+# #
+# @click.option('-aps', '--apertures',
+#               type=click.Choice(SUPPORTED_APERTURES, case_sensitive=False),
+#               #   metavar=f'[{"|".join(SUPPORTED_APERTURES)}]',
+#               default='ragged', show_default=True,
+#               callback=resolve_aperture,
+#               help='The type(s) of apertures to use. If multiple '
+#               'types are specified, photometry will be done for each type '
+#               'concurrently. Abbreviated names are understood.')
+# #
 @click.option('--sub', type=click.IntRange(),
               help='For single file mode, the slice of data cube to consider. '
                    'Useful for debugging. Ignored if processing multiple fits '
@@ -257,9 +272,9 @@ def enable_local_caching(mapping):
 @click.option('--cutouts/--no-cutouts', default=True,
               help='Display source cutouts in terminal.')
 @click.version_option()
-def main(files_or_folder, output='./.pyshoc',
+def main(files_or_folder, output='./pyshoc', config=None,
          target=None, telescope=None,
-         top=5, apertures='ragged',
+         #  top=5, apertures='ragged',
          sub=..., njobs=-1,
          overwrite=False, cache=None,
          plot=True, gui=True, cutouts=True):
@@ -274,7 +289,7 @@ def main(files_or_folder, output='./.pyshoc',
     output = resolve_output(output, root)
 
     # setup
-    paths, overwrite = setup(root, output, overwrite, cache)
+    paths, overwrite = setup(root, output, overwrite, cache, config)
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and

@@ -127,16 +127,18 @@ logging:
 
     # library activation
     activation:
-        pyshoc:                     1
-        pyshoc.headers.convert:     0
-        obstools:                   1
-        mpl_multitab:               1
-        recipes:                    1
-        recipes.io.utils:           0
-        recipes.decorators.base:    0
-        motley.formatter:           0
-        motley.table.xlsx:          1
-        scrawl.moves.machinery:     0
+        pyshoc:                         1
+        pyshoc.headers.convert:         0
+        obstools:                       1
+        mpl_multitab:                   1
+        recipes:                        1
+        recipes.io.utils:               0
+        recipes.decorators.base:        0
+        recipes.oo.temp:                0
+        motley.formatter:               0
+        motley.table.xlsx:              1
+        scrawl.moves.machinery:         0
+        
 
 
 # ---------------------------------------------------------------------------- #
@@ -284,6 +286,7 @@ plotting:
 # Sample Image Statistics
 
 samples:
+    show:               True
     tab:                [Sample Images] # Detection
     header:             Sample Images
     folder:             $REGISTRY/samples/
@@ -321,7 +324,6 @@ samples:
                     size:           xx-small
                     fontweight:     bold
 
-
             calibrated:
                 tab:            [Overview, Thumbnails, Calibrated]
                 filename:       thumbnails/thumbnails-cal.png
@@ -336,10 +338,10 @@ detection: &source_detection
     snr:            3
 
     npixels:        5
-    edge_cutoff:    3
+    edge_cutoff:    5
     edge_fraction:  0.5
     monolithic:     False
-    roundness:      Null    # !!python/tuple [0.5, 1.75]
+    roundness:      [0.5, 1.75]
     dilate:         2
     deblend:        True
 
@@ -349,7 +351,6 @@ detection: &source_detection
 # aliases
 # detect:          *source_detection #
 # source_detection:   *source_detection #
-
 
 # ---------------------------------------------------------------------------- #
 # Image Registration (wcs)
@@ -361,47 +362,57 @@ registration:
         registry:   registry.pkl
         params:     params.npy
 
-    params:
-        survey:         dss
-        fov_stretch:    1.65
-        fit_angle:      True
-
-    drizzle:
-        show:           True
-        tab:            [Overview, Drizzle]
-        filename:       drizzle.fits
-        pixfrac:        0.5
-
-        plot:
-            cmap:           cmr.chroma
-            filename:       drizzle.png
-
-    mosaic:
-        show:       False
-        tab:        [Overview, Mosaic]
-        filename:   $REGISTRY/mosaic/mosaic.$TEL.png
-
-        cmap:       cmr.chroma
-        alpha:      0.5
-
     alignment:
+        # self:
+        survey:
+            survey:         dss
+            fov_stretch:    1.5
+            fit_angle:      True
+
+
         show:       True
         tab:        [Registration, Alignment Fit]
         filename:   $REGISTRY/alignment/$HDU.aligned.png
 
     clusters:
-        show:               True
-        tab:                [Registration, Source IDs]
-        filename:           $REGISTRY/source-ids.$TEL.png
+        bandwidth_distance_scale:   0.3
 
-        centres:            True
-        frames:             True
-        nrs:                True
-        show_bandwidth:     True
-        trim_labels:        False
+        show:       True
+        tab:        [Registration, Source IDs]
+        filename:   $REGISTRY/source-ids.$TEL.png
+
+        plot:
+            centres:                True
+            frames:                 True
+            labels:                 True
+            bandwidth:              True
+            trim_survey_labels:     False
+
+    mosaic:
+        show:       True
+        tab:        [Overview, Mosaic]
+        filename:   $REGISTRY/mosaic/mosaic.$TEL.png
+
+        plot:
+            cmap:   cmr.chroma
+            alpha:  0.5
+
+    drizzle:
+        filename:   drizzle.fits
+        pixfrac:    0.5
+        # kernel:   square, gaussian, point, tophat, turbo, lanczos2, lanczos3
+
+        show:       True
+        tab:        [Overview, Drizzle]
+        plot:
+            filename:   drizzle.png
+            cmap:       cmr.chroma
+
+    # lucky: todo
+
+
 # alias
 # reg: *image_registration
-
 
 # ---------------------------------------------------------------------------- #
 # Camera Tracking
@@ -474,7 +485,6 @@ tracking:
         align:          r
         row_nrs:        True
         max_rows:       25
-
 
     # ------------------------------------------------------------------------ #
     plot:   True

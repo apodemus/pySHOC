@@ -19,11 +19,10 @@ from recipes.string import pluralize
 from scrawl.image import ImageDisplay
 
 # relative
-from .. import CONFIG, MATCH, Campaign, calDB
+from .. import config as cfg
+from .. import MATCH, Campaign, calDB
 
 
-# ---------------------------------------------------------------------------- #
-COLOURS = CONFIG.console.colors
 
 
 # ---------------------------------------------------------------------------- #
@@ -159,6 +158,7 @@ def find(run, kind, path=None, ignore_masters=False):
     # stacks that are passed in, and suplement from the db. The passed stacks
     # will thus always be computed / used.
     if need:
+        colours = cfg.console.colors[kind]
         selection = np.any([run.selection(**dict(zip(attx, _)))
                             for _ in need], 0)
         gcal = calDB.get(run[selection], kind, master=False)
@@ -175,7 +175,7 @@ def find(run, kind, path=None, ignore_masters=False):
             {:s}
             in database {!r:}.\
             '''),
-            motley.apply(pluralize(kind), COLOURS[kind]),
+            motley.apply(pluralize(kind), colours),
             pluralize('setup', need),
             Table(need, col_headers=attx),
             str(calDB[kind])
@@ -186,7 +186,7 @@ def find(run, kind, path=None, ignore_masters=False):
     logger.bind(indent=2).info(
         'The following files were matched:\n{:s}\n',
         matched.pformat(title=f'Matched {kind.title()}',
-                        g1_style=COLOURS[kind])
+                        g1_style=colours)
     )
 
     return gcal, masters
