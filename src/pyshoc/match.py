@@ -11,10 +11,11 @@ import numpy as np
 # local
 import motley
 from motley.utils import Filler, GroupTitle
-from recipes import op
 from recipes.logging import LoggingMixin
 from recipes.containers import ensure, sets
 
+
+# ---------------------------------------------------------------------------- #
 
 def proximity_groups(self, other, keys, null=None):
     """
@@ -81,6 +82,7 @@ def proximity_split(v0, v1):
         yield tuple(v0[l0][0, 0]), l0, l1, delta_mtx[l0][:, l1]
 
 
+# ---------------------------------------------------------------------------- #
 class Any:
     """
     Sentinel for proximity matching. If no exact match is found, use this object
@@ -97,7 +99,7 @@ class Any:
 ANY = Any()
 
 
-class MatchedObservations(LoggingMixin):
+class MatchedRuns(LoggingMixin):
     """
     Match observational data sets with each other according to their attributes. 
     """
@@ -114,12 +116,12 @@ class MatchedObservations(LoggingMixin):
         """
         data = dict(a=a, b=b)
         for k, v in data.items():
-            if isinstance(v, dict):  # GroupedObs
+            if isinstance(v, dict):  # GroupedRuns
                 data[k] = v.to_list()
             elif not isinstance(v, abc.Container):  # (Campaign, MockRun)
                 raise ValueError(
                     f'Cannot match objects of type {type(a)} and {type(b)}. '
-                    f'Please ensure you pass `Campaign` or `GroupedObs`'
+                    f'Please ensure you pass `Campaign` or `GroupedRuns`'
                     f' instances to this class.'
                 )
 
@@ -160,7 +162,7 @@ class MatchedObservations(LoggingMixin):
 
         Returns
         -------
-        out0, out1: GroupedObs
+        out0, out1: GroupedRuns
             a dict-like object keyed on the attribute values of `keys` and
             mapping to unique `Campaign` instances
         """
@@ -210,20 +212,20 @@ class MatchedObservations(LoggingMixin):
     def __iter__(self):
         yield from (self.left, self.right)
 
-    def _make(self, i):
-        run0 = (self.a, self.b)[i]
-        split = list(zip(*self.matches.values()))[i]
-        groups = run0.new_groups(zip(self.matches.keys(), split))
-        groups.group_id = self.attrs, {}
-        return groups
-
     @property
     def left(self):
-        return self._make(0)
+        return self._get(0)
 
     @property
     def right(self):
-        return self._make(1)
+        return self._get(1)
+
+    def _get(self, i):
+        run = (self.a, self.b)[i]
+        segments = list(zip(*self.matches.values()))[i]
+        groups = run.new_groups(zip(self.matches.keys(), segments))
+        groups.group_id = self.attrs, {}
+        return groups
 
     def delta_matrix(self, keys):
         """get delta matrix.  keys are attributes of the HDUs"""
@@ -276,7 +278,7 @@ class MatchedObservations(LoggingMixin):
         tmp = g0.default_factory()
 
         # set missing formatter
-        tmp.tabulate.formatters['timing.t0'] = op.AttrGetter('iso')
+        # tmp.tabulate.formatters['timing.t0'] = op.AttrGetter('iso')
 
         # remove group-by keys that are same for all
         varies = [(g0.varies_by(key) | g1.varies_by(key)) for key in self.attrs]
