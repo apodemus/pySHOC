@@ -266,7 +266,7 @@ plotting:
     gui:
         active:     True
         delay:      False
-        title:      pySHOC Photometry Pipeline GUI
+        title:      pyshoc Photometry Pipeline GUI
         pos :       N
 
     # matplotlib rc params
@@ -369,6 +369,8 @@ registration:
             fov_stretch:    1.5
             fit_angle:      True
 
+            # snr:            10
+
 
         show:       True
         tab:        [Registration, Alignment Fit]
@@ -379,7 +381,7 @@ registration:
 
         show:       True
         tab:        [Registration, Source IDs]
-        filename:   $REGISTRY/source-ids.$TEL.png
+        filename:   $REGISTRY/source-ids.$TEL.{png,pdf}
 
         plot:
             centres:                True
@@ -391,11 +393,11 @@ registration:
     mosaic:
         show:       True
         tab:        [Overview, Mosaic]
-        filename:   $REGISTRY/mosaic/mosaic.$TEL.png
+        filename:   $REGISTRY/mosaic/mosaic.$TEL.{png,pdf}
 
         plot:
             cmap:   cmr.chroma
-            alpha:  0.5
+            alpha:  0.35
 
     drizzle:
         filename:   drizzle.fits
@@ -405,7 +407,7 @@ registration:
         show:       True
         tab:        [Overview, Drizzle]
         plot:
-            filename:   drizzle.png
+            filename:   drizzle.{png,pdf}
             cmap:       cmr.chroma
 
     # lucky: todo
@@ -433,7 +435,7 @@ tracking:
 
     # ------------------------------------------------------------------------ #
     params:
-        dilate:             2
+        dilate:             0
         circularize:        True
         njobs:              1
 
