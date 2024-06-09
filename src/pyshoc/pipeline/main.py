@@ -476,14 +476,14 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
         # Plot calibrated sample images
         # -------------------------------------------------------------------- #
-        plot_sample_images(run, samples_cal,
-                           paths.templates.HDU.samples.filename, overwrite,
-                           thumbs, ui)
+        tasks = plot_sample_images(run, samples_cal,
+                                   paths.templates.HDU.samples.filename, overwrite,
+                                   thumbs, ui)
 
-    # align
+    # Align
     # ------------------------------------------------------------------------ #
     if not use_previous:
-        logger.section('Image Registration') # (World Coordinate System)
+        logger.section('Image Registration')  # (World Coordinate System)
         reg = register(run, samples_cal, paths, ui, plot, overwrite)
 
     # Drizzle image
@@ -504,7 +504,7 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
             _, template = paths.templates.find('mosaic').flatten().popitem()
 
             ui.add_task(task, (*outer.tab, survey.upper()),
-                        template.substitute(TEL=survey),
+                        template.resolve_paths(TEL=survey),
                         outer.get('overwrite', overwrite))
 
             # TODO mark target
@@ -544,10 +544,12 @@ def _registry_plot_tasks(run, paths, overwrite):
     alignment_config = plot_config['alignment']
 
     # firsts = run.attrs()
-    for (stem, *_), file in desired_files.flatten().items():
+    for stem, files in desired_files.items():
         key = (*tab, *get_tab_key(run[stem]))
-        yield ('alignment', key, file, ovr, alignment_config)
+        files = list(files['registration']['alignment'].values())
+        yield ('alignment', key, files, ovr, alignment_config)
 
+    # ------------------------------------------------------------------------ #
     # mosaic / clusters
     templates = paths.templates['TEL'].flatten()
     telescopes = set(run.attrs.telescope)
@@ -557,12 +559,12 @@ def _registry_plot_tasks(run, paths, overwrite):
                                                   templates, 'TEL')
 
     for tel, files in tel_products.items():
-        for (group, ext), file in files['registration'].flatten().items():
-            if (config := outer_config[group]).show:
+        for section, files in files['registration'].items():
+            if (config := outer_config[section]).show:
                 key = (*config.tab, tel)
-
-                ovr = outer_config[group].get('overwrite', overwrite)
-                yield (group, key, file, ovr, plot_config[group])
+                ovr = outer_config[section].get('overwrite', overwrite)
+                files = list(files.values())
+                yield (section, key, files, ovr, plot_config[section])
 
 
 def echo_fig(fig, *args, **kws):
@@ -587,7 +589,7 @@ def register(run, samples, paths, ui, plot, overwrite):
             tasks[key] = ui.add_task(task, key, file, ovr)
 
             kws = {**kws, 'fig': ui[key].figure}
-            if (al := name == 'alignment'):
+            if name == 'alignment':
                 plot_config[name].append(kws)
             else:
                 plot_config[name][key[-1]] = kws
@@ -603,11 +605,14 @@ def register(run, samples, paths, ui, plot, overwrite):
                                 **config.alignment.survey},
                              plots=plot_config,
                              clustering=config.clusters.filter((*SAVE_KWS, 'plot')))
-    
+
     if ui:
-        # save mosaic
-        (t := tasks[(*config.mosaic.tab, '1.9m')]).save(t.result)
-        
+
+        for tel in set(run.attrs.telescope):
+            # save mosaic /  source ids:
+            for x in ('mosaic', 'clusters'):
+                (t := tasks[(*config[x].tab, tel)]).save(t.result)
+
         # save alignment figs
         for tab in list(ui.tabs[config.alignment.tab]._leaves()):
             task = tasks[tab._root().tab_text(tab._index())]
@@ -621,6 +626,8 @@ def register(run, samples, paths, ui, plot, overwrite):
                 idx = next(i for i, kws in enumerate(conf) if kws['fig'] == tab.figure)
                 im = reg._reg.model.gmm.plot(**conf[idx])
                 im.ax.set_title('Model Likelihood')
+
+                task.save(im.figure)
 
     # save registry
     # ------------------------------------------------------------------------ #
