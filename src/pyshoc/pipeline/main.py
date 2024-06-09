@@ -727,7 +727,7 @@ def plot_drizzle(fig, *indices, filename):
 # ---------------------------------------------------------------------------- #
 # Tracking
 
-def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
+def track(run, reg, top, paths, ui, plot=True, overwrite=False, njobs=-1):
 
     logger.section('Source Tracking')
 
@@ -737,15 +737,19 @@ def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
     logger.info('Sources: {} span all observations.', spanning)
 
     templates = paths.templates.HDU.tracking
-    images_labels = list(itt.islice(zip(reg, reg.labels_per_image), 1, None))
+
+    reg = reg._reg
+
     overwrite = overwrite or cfg.tracking.get(overwrite, False)
-    for i, (hdu, (img, labels)) in enumerate(zip(run, images_labels), 1):
+    for i, (hdu, img, labels) in enumerate(zip(run, reg, reg.labels_per_image)):
         # check if we need to run
         if overwrite or _tracker_missing_files(templates, hdu, spanning):
             # back transform to image coords
-            coords = reg._trans_to_image(i).transform(reg.xy[sorted(labels)])
+            coords = reg._trans_to_image(i).transform(reg.xy[labels])
+            labels = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+
             # path = products.resolve_path(paths.folders.tracking, hdu)
-            tracker = _track(reg, hdu, img.seg, spanning, coords,
+            tracker = _track(reg, hdu, img.seg, coords, labels,
                              paths, ui, plot, overwrite, njobs=njobs)
 
     logger.info('Source tracking complete.')
@@ -753,8 +757,8 @@ def track(run, reg, paths, ui, plot=True, overwrite=False, njobs=-1):
 
 
 @update_defaults(cfg.tracking.params)
-def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
-           dilate=0, njobs=-1):
+def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
+           dilate=0, njobs=-1, **kws):
 
     logger.bind(indent=True).opt(lazy=True).info(
         'Launching tracker for {0[0]}.\ncoords = {0[1]}',
@@ -762,31 +766,40 @@ def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
                  pp.nrs.matrix(coords, 2).replace('\n', f'\n{"": >9}'))
     )
 
+    # keep only `labels`
+    # seg = seg.clone(labels)
+
     # Make circular regions for measuring centroids
-    if (cfg := cfg.tracking).params.circularize:
+    if (config := cfg.tracking).params.circularize:
         seg = seg.circularize()
 
     if njobs == -1:
-        njobs = cfg.tracking.params.njobs
+        njobs = config.params.njobs
 
-    base = Template(paths.folders.tracking.folder).resolve_path(hdu)
-    tracker = SourceTracker(coords, seg.dilate(dilate), labels=labels)
+    seg = seg.dilate(dilate)
+    # if len(coords) != seg.nlabels:
+    #     from IPython import embed
+    #     embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':751")
+
+    tracker = SourceTracker(coords, seg, labels, **kws)
     tracker.reg = reg
+
     # tracker.detection.algorithm = cfg.detection
+    base = Template(paths.folders.tracking.folder).resolve_path(hdu)
     tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
     tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
 
     # plot
     SAVE_KWS = ('filename', 'overwrite')
-    if plot and cfg.plot:
+    if plot and config.plot:
         tmp = paths.templates.HDU.tracking.plots
 
-        kws, save = cfg.plots.positions.split(SAVE_KWS)
+        kws, save = config.plots.positions.split(SAVE_KWS)
         save.setdefault('overwrite', overwrite)
         save.pop('filename', '')
 
         #                  year, day, nr
-        tab = (*cfg.tab, *get_tab_key(hdu))
+        tab = (*config.tab, *get_tab_key(hdu))
         logger.success('Tracker plots: {}', tab)
         for i, j in enumerate(tracker.use_labels):
             # plot source location features
@@ -795,7 +808,7 @@ def _track(reg, hdu, seg, labels, coords, paths, ui, plot=True, overwrite=False,
             ui.add_task(task, (*tab, f'Source {j}'), **save)
 
         # plot positions displacement time series
-        kws, save = cfg.plots.time_series.split(SAVE_KWS)
+        kws, save = config.plots.time_series.split(SAVE_KWS)
         save.setdefault('overwrite', overwrite)
         save.pop('filename', '')
         save['filenames'] = tmp.time_series.resolve_paths(hdu)
@@ -903,7 +916,7 @@ def plot_lcs(lcs, step, ui=None, path_template=None, overwrite=False, **kws):
 # Main
 # ---------------------------------------------------------------------------- #
 
-def main(paths, target, telescope, njobs, plot, gui, show_cutouts, overwrite):
+def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrite):
     #
     # from obstools.phot import PhotInterface
 
@@ -945,12 +958,12 @@ def main(paths, target, telescope, njobs, plot, gui, show_cutouts, overwrite):
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    # track(run, reg, paths, ui, plot, overwrite, njobs)
+    track(run, reg, top, paths, ui, plot, overwrite, njobs)
 
     # # ------------------------------------------------------------------------ #
     # # Photometry
     # logger.section('Photometry')
-    # lcs = lightcurves(run, paths, ui, plot, overwrite)
+    lcs = lightcurves(run, paths, ui, plot, overwrite)
 
     # phot = PhotInterface(run, reg, paths.phot)
     # ts = mv phot.ragged() phot.regions()

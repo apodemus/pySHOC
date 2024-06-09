@@ -229,9 +229,9 @@ def enable_local_caching(mapping):
                    'fits header information is missing or incorrect. If input '
                    'files are from multiple telescopes, update the headers '
                    'before running the pipeline.')
-# @click.option('-top', type=int, default=5,
-#               help='Number of brightest sources to do photometry on.')
-# #
+@click.option('-top', type=int, default=5,
+              help='Number of brightest sources to do photometry on.')
+#
 # @click.option('-aps', '--apertures',
 #               type=click.Choice(SUPPORTED_APERTURES, case_sensitive=False),
 #               #   metavar=f'[{"|".join(SUPPORTED_APERTURES)}]',
@@ -274,7 +274,7 @@ def enable_local_caching(mapping):
 @click.version_option()
 def main(files_or_folder, output='./pyshoc', config=None,
          target=None, telescope=None,
-         #  top=5, apertures='ragged',
+         top=5, # apertures='ragged',
          sub=..., njobs=-1,
          overwrite=False, cache=None,
          plot=True, gui=True, cutouts=True):
@@ -303,7 +303,7 @@ def main(files_or_folder, output='./pyshoc', config=None,
     # try:
 
     # pipeline main routine
-    pipeline.main(paths, target, telescope, njobs, plot, gui, cutouts, overwrite)
+    pipeline.main(paths, target, telescope, top, njobs, plot, gui, cutouts, overwrite)
 
     # except Exception as err:
     #     # catch errors so we can safely shut down any remaining processes
