@@ -111,13 +111,14 @@ def resolve_tel(_ctx, param, value):
     if value is not None:
         return telescopes.get_name(value)
 
+
 def resolve_target(_ctx, _param, value):
     if value == 'arget':
         raise click.BadParameter('Did you mean `--target`? (with 2x "-")')
     return value
 
 
-def setup(root, output, overwrite, use_cache, config):
+def setup(root, output, overwrite, use_cache, config, verbose):
     """Setup results folder tree."""
 
     root = Path(root).resolve()
@@ -130,6 +131,12 @@ def setup(root, output, overwrite, use_cache, config):
                                  if (file := folder / filename).exists()), None):
         logger.info('Using local config: {!s}.', config)
         config = cfg.load(config)
+
+        level = ['info', 'debug'][min(verbose, 1)].upper()
+        config.logging.console['level'] = level
+        logger.remove(logging._sink_ids[0])
+        logging._sink_ids = logging.config()
+
     else:
         # use global config
         config = cfg.CONFIG
@@ -271,13 +278,14 @@ def enable_local_caching(mapping):
               help='Use mpl-multitab gui to embed interactive plots.')
 @click.option('--cutouts/--no-cutouts', default=True,
               help='Display source cutouts in terminal.')
+@click.option('-v', '--verbose', count=True)
 @click.version_option()
 def main(files_or_folder, output='./pyshoc', config=None,
          target=None, telescope=None,
-         top=5, # apertures='ragged',
+         top=5,  # apertures='ragged',
          sub=..., njobs=-1,
          overwrite=False, cache=None,
-         plot=True, gui=True, cutouts=True):
+         plot=True, gui=True, cutouts=True, verbose=0):
     """
     Main entry point for pyshoc pipeline command line interface.
     """
@@ -289,7 +297,7 @@ def main(files_or_folder, output='./pyshoc', config=None,
     output = resolve_output(output, root)
 
     # setup
-    paths, overwrite = setup(root, output, overwrite, cache, config)
+    paths, overwrite = setup(root, output, overwrite, cache, config, verbose)
 
     # check if multiple input
     single_file_mode = (len(files_or_folder) == 1 and

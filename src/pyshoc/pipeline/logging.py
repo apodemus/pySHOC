@@ -115,7 +115,7 @@ def config():
             # console handler
             'sink':
                 RepeatMessageHandler(
-                    ParagraphWrapper(indent=f'{"⎢ ": >66}'),
+                    ParagraphWrapper(indent=f'{"⎢": >68}'),
                     template=config.console.repeats
                 ),
             'level':    config.console.level,
@@ -138,6 +138,9 @@ def config():
         patcher=patch,
     )
 
+# ---------------------------------------------------------------------------- #
+# logging config
+_sink_ids = config()
 
 # ---------------------------------------------------------------------------- #
 

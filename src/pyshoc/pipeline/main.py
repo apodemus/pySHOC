@@ -42,12 +42,12 @@ from .plotting import GUI
 from .calibrate import calibrate
 from .logging import logger, config as config_logging
 
+
 #
 CONSOLE_CUTOUTS_TITLE = cfg.console.cutouts.pop('title')
 
 # ---------------------------------------------------------------------------- #
-# logging config
-config_logging()
+
 
 
 # ---------------------------------------------------------------------------- #
