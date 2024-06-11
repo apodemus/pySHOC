@@ -24,14 +24,27 @@ from recipes.functionals.partial import Partial, placeholder as o
 
 
 # ---------------------------------------------------------------------------- #
-# user_config_path = user_config_path('pyshoc')
-
 # Create user config file if needed
 user_config_path = create_user_config('config.yaml', __file__,
                                       version_stamp=version('pyshoc'))
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
+# Module attribute lookup goes through CONFIG
+
+def __getattr__(section):
+    if section in CONFIG:
+        return CONFIG[section]
+
+    raise AttributeError(section)
+
+
+def get(section, *default):
+    return CONFIG.get(section, *default)
+
+
+# Configure
+# ---------------------------------------------------------------------------- #
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
@@ -104,25 +117,9 @@ def load(file=None):
     return config
 
 
-# Configure
 # ---------------------------------------------------------------------------- #
 #  Load
 CONFIG = load()
-
-_Null = object()
-
-
-# Module attribute lookup goes through CONFIG
-def __getattr__(section):
-    if section in CONFIG:
-        return CONFIG[section]
-
-    raise AttributeError(section)
-
-
-def get(section, *default):
-    return CONFIG.get(section, *default)
-
 
 #
 GROUPING = {

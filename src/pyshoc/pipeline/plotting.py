@@ -106,7 +106,7 @@ class PlotTask(_TaskBase):
 
         #
         self.ui = ui
-        
+
         # resolve placholders and static params
         super().__init__(func, *args, **kws)
 
@@ -125,6 +125,7 @@ class PlotTask(_TaskBase):
 
         # Now run the task
         func = self.__wrapped__
+
         self.logger.opt(lazy=True).info(
             'Invoking call for plot task:\n>>> {}.',
             lambda: indent(callers.pformat(func, args, kws, ppl=1))
@@ -156,9 +157,12 @@ class TabTask(slots.SlotHelper, LoggingMixin):
 
         if filenames:
             filenames = ensure.tuple(filenames, Path)
-            self.logger.debug('Figure for task {.task.__wrapped__.__name__!r} '
-                              'will be saved at {}. {}.',
-                              task, filenames, f'{overwrite = }')
+
+            self.logger.debug(
+                'Figure for task {!r} will be saved at {}. overwrite = {}.',
+                callers.get_name(task.task.__wrapped__, 1), filenames, overwrite
+            )
+
         # init namespace
         super().__init__(**slots.sanitize(locals()), result=())
 
@@ -166,7 +170,8 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         # Execute task
         self.logger.opt(lazy=True).info(
             'Plotting tab {0[0]} with {0[1]} at figure: {0[2]}.',
-            lambda: (self.ui.tabs.tab_text(tab), callers.describe(self.task), figure)
+            lambda: (self.ui.tabs.tab_text(tab), callers.describe(self.task),
+                     figure)
         )
 
         # run
@@ -196,7 +201,7 @@ class TabTask(slots.SlotHelper, LoggingMixin):
                 figure.set_size_inches(figsize)
 
         return figure
-    
+
     def save(self, figure):
         save_figure(figure, self.filenames, self.overwrite, **self.save_kws)
 

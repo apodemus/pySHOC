@@ -63,7 +63,7 @@ class TreeRepr(PrettyPrinter, LoggingMixin):
         except ValueError as err:
             self.logger.debug(
                 'Failed to get filename tree with YYYYMMDD.nnn pattern. '
-                'Building tree letter by letter'
+                'Building tree letter by letter.'
             )
 
         # fully general partitioning of filenames
