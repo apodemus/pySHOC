@@ -103,7 +103,7 @@ class GlobPatternList:
             if fnmatch.fnmatchcase(filename, pattern):
                 return True
 
-        return filename.endswith(self.names)
+        return filename.endswith(tuple(self.names))
 
     def iterdir(self, folder=None, depth=any, _level=0):
         depth = math.inf if depth is any else depth
