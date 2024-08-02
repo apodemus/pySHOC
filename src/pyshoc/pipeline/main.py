@@ -740,20 +740,22 @@ def track(run, reg, top, paths, ui, plot=True, overwrite=False, njobs=-1):
 
     reg = reg._reg
 
+    labels = {}
     overwrite = overwrite or cfg.tracking.get(overwrite, False)
-    for i, (hdu, img, labels) in enumerate(zip(run, reg, reg.labels_per_image)):
+    for i, (hdu, img, labels_) in enumerate(zip(run, reg, reg.labels_per_image)):
         # check if we need to run
         if overwrite or _tracker_missing_files(templates, hdu, spanning):
             # back transform to image coords
-            coords = reg._trans_to_image(i).transform(reg.xy[labels])
-            labels = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+            coords = reg._trans_to_image(i).transform(reg.xy[labels_])
+            labels_ = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+            labels[hdu.file.stem] = labels_
 
             # path = products.resolve_path(paths.folders.tracking, hdu)
-            tracker = _track(reg, hdu, img.seg, coords, labels,
+            tracker = _track(reg, hdu, img.seg, coords, labels_,
                              paths, ui, plot, overwrite, njobs=njobs)
 
     logger.info('Source tracking complete.')
-    return spanning
+    return labels, spanning
 
 
 @update_defaults(cfg.tracking.params)
@@ -864,15 +866,16 @@ def _tracker_missing_files(templates, hdu, sources):
 # ---------------------------------------------------------------------------- #
 # Light curves
 
-def lightcurves(run, paths, ui, plot=True, overwrite=False):
+def lightcurves(run, labels, paths, ui, plot=True, overwrite=False):
 
     output_templates = paths.templates.find('lightcurves', collapse=True).freeze()
-    plot = {'ui': ui} if plot else plot
-    pipeline = lc.Pipeline(run, cfg.lightcurves, output_templates,
-                           overwrite, plot)
+    cfg.lightcurves.by_file.raw['input'] = paths.templates.HDU.tracking.source_info
 
-    # lcs = lc.extract(run, paths, overwrite)
-    lcs = pipeline.run()
+    plot = {'ui': ui} if plot else plot
+
+    #
+    pipeline = lc.Pipeline(run, cfg.lightcurves, output_templates, overwrite, plot)
+    lcs = pipeline.run(labels)
 
     # if not plot:
     #     return
@@ -958,12 +961,12 @@ def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrit
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    track(run, reg, top, paths, ui, plot, overwrite, njobs)
+    labels, _ = track(run, reg, top, paths, ui, plot, overwrite, njobs)
 
     # # ------------------------------------------------------------------------ #
     # # Photometry
     # logger.section('Photometry')
-    lcs = lightcurves(run, paths, ui, plot, overwrite)
+    lcs = lightcurves(run, labels, paths, ui, plot, overwrite)
 
     # phot = PhotInterface(run, reg, paths.phot)
     # ts = mv phot.ragged() phot.regions()
