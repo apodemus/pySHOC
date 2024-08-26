@@ -150,7 +150,18 @@ folders:
 #     registry       registry/                       $REGISTRY
 #     phot           phot/                           $PHOT
 #     tracking       phot/tracking/$HDU              $TRACKING/$HDU
-#     lightcurves    $phot/lightcurves/by_file/$HDU  $LIGHTCURVES/by_file/$HDU
+#     lightcurves    phot/lightcurves/by_file/$HDU   $LIGHTCURVES/by_file/$HDU
+
+
+# ---------------------------------------------------------------------------- #
+# Remote file sync
+
+remote:
+    username:           Null
+    server:             astro.cape.saao.ac.za
+    filenames:
+        rsync_script:           $INFO/rsync-remote.sh
+        rsync_files:            $INFO/remote-files.txt
 
 
 # ---------------------------------------------------------------------------- #
@@ -223,17 +234,6 @@ info:
 
 
 # ---------------------------------------------------------------------------- #
-# Remote file sync
-
-remote:
-    username:           Null
-    server:             astro.cape.saao.ac.za
-    filenames:
-        rsync_script:           $INFO/rsync-remote.sh
-        rsync_files:            $INFO/remote-files.txt
-
-
-# ---------------------------------------------------------------------------- #
 # Calibration Database
 
 calibration:
@@ -276,7 +276,7 @@ plotting:
 
 
 # ---------------------------------------------------------------------------- #
-# Sample Image Statistics
+# Sample Image Prieview
 
 samples:
     show:               True
@@ -320,7 +320,7 @@ samples:
             calibrated:
                 tab:            [Overview, Thumbnails, Calibrated]
                 filename:       thumbnails/thumbnails-cal.{pdf,png}
-                overwrite:      Null
+                overwrite:      null
 
 
 # ---------------------------------------------------------------------------- #

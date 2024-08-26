@@ -5,18 +5,21 @@ from pathlib import Path
 
 # third-party
 from matplotlib.figure import Figure
-from mpl_multitab import MplMultiTab, QtGui
+from mpl_multitab import MplMultiTab
 
 # local
 from scrawl.utils import save_figure
-from recipes import dicts
 from recipes.oo import slots
+from recipes.flow import Catch
+from recipes.iter import cofilter
 from recipes.string import indent
 from recipes.pprint import callers
+from recipes import dicts, op, pprint
 from recipes.containers import ensure
+from recipes.functionals import negate
 from recipes.logging import LoggingMixin
 from recipes.pprint.callers import Callable
-from recipes.functionals.partial import Partial, PartialTask
+from recipes.functionals.partial import Partial, PartialTask, PlaceHolder
 
 # relative
 from .. import config as cfg
@@ -139,6 +142,38 @@ class GUI(MplMultiTab):
         super().add_task()   # needed to check for tab switch callbacks to run
         return super().show()
 
+    def launch(self):
+
+        logger.section('Launching GUI')
+
+        # activate tab switching callback (for all tabs)
+        config = cfg.registration
+        if config.mosaic.show:
+            survey = config.alignment.survey.survey.upper()
+            self['Overview'].move_tab('Mosaic', 0)
+            self['Overview', 'Mosaic'].move_tab(survey, 0)
+            self.set_focus(*config.mosaic.tab, survey)
+
+        self.show()
+
+    def shutdown(self):
+
+        logger.section('GUI shutdown')
+
+        # Run incomplete plotting tasks
+        trap = Catch(action=logger.warning,
+                     message=('Could not complete plotting task '
+                              'due the following {err.__class__.__name__}: {err}'))
+        getter = op.AttrVector('plot.func.filename', default=None)
+        tabs = list(self.tabs._leaves())
+        filenames, tabs = cofilter(getter.map(tabs), tabs)
+        unsaved, tabs = map(list, cofilter(negate(Path.exists), filenames, tabs))
+        if n := len(unsaved):
+            logger.info('Now running {} incomplete tasks:', n)
+            with trap:
+                for tab in tabs:
+                    tab.run_task()
+
 
 class TaskFactory(Partial, LoggingMixin):
 
@@ -148,8 +183,7 @@ class TaskFactory(Partial, LoggingMixin):
     def __wrapper__(self, func, *args, **kws):
 
         # resolve placholders and static params
-        task = PlotTaskWrapper(func, *args, **kws)
-        task.gui = self.manager.gui
+        task = PlotTaskWrapper(self.manager.gui, func, *args, **kws)
 
         # create TaskRunner, which will run PlotTask when called
         return TaskRunner(task, **task.fig_kws)
@@ -189,8 +223,9 @@ class PlotTaskWrapper(_TaskBase):
     own figures.
     """
 
-    def __init__(self, func, *args, **kws):
-
+    def __init__(self, gui, func, *args, **kws):
+        #
+        self.gui = gui
         # split keywords for figure init
         kws, self.fig_kws = dicts.split(kws, FIG_KWS)
         kws, self.save_kws = dicts.split(kws, SAVE_KWS)
@@ -232,8 +267,9 @@ class PlotTaskWrapper(_TaskBase):
             # to replace it after the task executes with the actual figure we
             # want in our tab.
             figure = art.fig
-            mgr = self.ui[tuple(tab)]._parent()
-            mgr.replace_tab(tab[-1], figure, focus=False)
+            if gui := self.gui:
+                mgr = gui[tuple(tab)]._parent()
+                mgr.replace_tab(tab[-1], figure, focus=False)
 
         return figure, art
 
