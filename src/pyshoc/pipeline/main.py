@@ -34,25 +34,22 @@ from recipes.string import remove_prefix, shared_prefix
 from recipes.functionals.partial import Partial, PlaceHolder as o
 
 # relative
-from .. import config as cfg, Campaign
+from .. import Campaign, config as cfg
 from ..timing import TimeDelta
 from ..config import SAVE_KWS, Template, _is_special
 from . import products, lightcurves as lc
-from .plotting import GUI
+from .logging import logger
 from .calibrate import calibrate
-from .logging import logger, config as config_logging
+from .plotting import PlotManager
 
 
-#
-CONSOLE_CUTOUTS_TITLE = cfg.console.cutouts.pop('title')
+# ---------------------------------------------------------------------------- #
+# SHOW_SOURCE_THUMBNAILS_CONSOLE =
 
 # ---------------------------------------------------------------------------- #
 
 
-
 # ---------------------------------------------------------------------------- #
-# TODO group by source
-
 # track
 # photomerty
 # decorrelate
@@ -60,12 +57,10 @@ CONSOLE_CUTOUTS_TITLE = cfg.console.cutouts.pop('title')
 
 # ---------------------------------------------------------------------------- #
 
-
 # def identify(run):
 #     # identify
 #     # is_flat = np.array(run.calls('pointing_zenith'))
 #     # run[is_flat].attrs.set(repeat(obstype='flat'))
-
 #     g = run.guess_obstype()
 
 
@@ -151,19 +146,22 @@ def _get_hdu_samples(hdu, detection, show_cutouts):
     stat, min_depth, n_intervals, subset = \
         op.attrgetter('stat', 'min_depth', 'n_intervals', 'subset')(params)
 
+    # cfg.console.cutouts.filter('show')
     for i, (j, k) in enumerate(get_intervals(hdu, subset, n_intervals)):
         # Source detection. Reporting happens below.
         # NOTE: caching enabled for line below in `setup`
-        image = SkyImage.from_hdu(hdu,
-                                  stat, min_depth, (j, k),
+        image = SkyImage.from_hdu(hdu, stat, min_depth, (j, k),
                                   detection, report=False)
 
         if show_cutouts and i == 0 and image.seg:
+            title_format = cfg.detection.report.cutouts['title']
             logger.opt(lazy=True).info(
                 'Source images:\n{}',
                 lambda: image.seg.show.console.format_cutouts(
-                    image.data, title=CONSOLE_CUTOUTS_TITLE.format(hdu=hdu),
-                    **cfg.console.cutouts)
+                    image.data,
+                    **{**cfg.detection.report.cutouts,
+                        'title': title_format.format(hdu=hdu)}
+                )
             )
 
         yield (j, k), image
@@ -182,20 +180,21 @@ def get_intervals(hdu, subset, n_intervals):
 # plotting
 
 def plot_sample_images(run, samples, path_template=None, overwrite=True,
-                       thumbnails=None, ui=None):
+                       thumbnails=None, plotter=None, replace=False):
 
     return tuple(_iplot_sample_images(run, samples, path_template, overwrite,
-                                      thumbnails, ui))
+                                      thumbnails, plotter, replace))
 
 
 def _iplot_sample_images(run, samples, path_template, overwrite,
-                         thumbnails, ui):
+                         thumbnails, plotter, replace):
 
-    if ui:
-        logger.info('Adding sample images to ui: {}', ui)
+    if ui := plotter.gui:
+        logger.info('Adding sample images to plot GUI: {}', ui)
 
     yield list(
-        _plot_sample_images(run, samples, path_template, overwrite, ui)
+        _plot_sample_images(run, samples, path_template, overwrite, plotter,
+                            replace)
     )
 
     # plot thumbnails for sample image from first portion of each data cube
@@ -203,21 +202,21 @@ def _iplot_sample_images(run, samples, path_template, overwrite,
         if thumbnails is True:
             thumbnails = {}
 
-        yield plot_thumbnails(samples, ui, **{'overwrite': overwrite,
-                                              **thumbnails})
+        yield plot_thumbnails(samples, plotter, **{'overwrite': overwrite,
+                                                   **thumbnails})
 
 
 def _plot_image(image, *args, **kws):
-    return image.plot(image, *args, **kws)
+    return image.plot(*args, **kws)
 
 
-def _plot_sample_images(run, samples, path_template, overwrite, ui):
+def _plot_sample_images(run, samples, path_template, overwrite, plotter, replace):
 
-    task = ui.task_factory(_plot_image)(fig=o,
-                                        regions=cfg.samples.plots.contours,
-                                        labels=cfg.samples.plots.labels,
-                                        coords='pixel',
-                                        use_blit=False)
+    task = plotter.task_factory(_plot_image)(fig=o,
+                                             regions=cfg.samples.plots.contours,
+                                             labels=cfg.samples.plots.labels,
+                                             coords='pixel',
+                                             use_blit=False)
 
     section = cfg.samples.tab
     for hdu in run.sort_by('t.t0'):
@@ -234,10 +233,12 @@ def _plot_sample_images(run, samples, path_template, overwrite, ui):
                 key = (*key, frames)
 
             # plot
-            yield ui.add_task(task, key, filename, overwrite, image=image)
+            if plotter.should_plot([filename], overwrite):
+                yield plotter.add_task(task, key, filename, overwrite, image=image,
+                                       replace=replace)
 
-    if ui:
-        ui[section].link_focus()
+    if plotter.gui:
+        plotter.gui[section].link_focus()
 
 
 def get_tab_key(hdu):
@@ -249,18 +250,18 @@ def get_tab_key(hdu):
 # @caching.cached(typed={'hdu': _hdu_hasher}, ignore='save_as')
 
 
-def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
+def plot_thumbnails(samples, plotter, tab, filenames=(), overwrite=False, **kws):
 
     # portion = mit.chunked(sample_images, len(run))
     images, = zip(*map(dict.values, samples.values()))
 
     # filenames, images = zip(*(map(dict.items, samples.values())))
-    task = ui.task_factory(plot_image_grid)(images,
-                                            fig=o,
-                                            titles=list(samples.keys()),
-                                            use_blit=False,
-                                            **kws)
-    ui.add_task(task, tab, filename, overwrite)
+    task = plotter.task_factory(plot_image_grid)(images,
+                                                 fig=o,
+                                                 titles=list(samples.keys()),
+                                                 use_blit=False,
+                                                 **kws)
+    plotter.add_task(task, tab, filenames, overwrite)
 
 
 # def plot_image(fig, *indices, image):
@@ -275,6 +276,8 @@ def plot_thumbnails(samples, ui, tab, filename=None, overwrite=False, **kws):
 #                               use_blit=False)
 
 #     return art
+
+# class ReductionStep:
 
 
 # ---------------------------------------------------------------------------- #
@@ -333,7 +336,7 @@ def write_rsync_script(run, paths, username=cfg.remote.username,
 # ---------------------------------------------------------------------------- #
 # Preview
 
-def preview(run, paths, info, ui, plot, overwrite):
+def preview(run, paths, info, plotter, overwrite):
     logger.section('Overview')
     logger.info('The following data were loaded:\n{}', run.pformat())
 
@@ -378,10 +381,10 @@ def preview(run, paths, info, ui, plot, overwrite):
                 '    {!s:}', path)
 
     # Sample images prior to calibration and header info
-    return compute_preview(run, paths, ui, plot, overwrite)
+    return compute_preview(run, paths, plotter, overwrite)
 
 
-def compute_preview(run, paths, ui, plot, overwrite, show_cutouts=False):
+def compute_preview(run, paths, plotter, overwrite, show_cutouts=False):
 
     # get results from previous run
     overview, data_products = products.get_previous(run, paths)
@@ -394,12 +397,14 @@ def compute_preview(run, paths, ui, plot, overwrite, show_cutouts=False):
     samples = get_sample_images(run, detection=False, show_cutouts=show_cutouts)
 
     thumbnails = None
-    if plot:
-        filename = paths.files.samples.plots.thumbnails.raw
-        thumbnails = plot_thumbnails(samples, ui,
-                                     **{'overwrite': overwrite,
-                                        **cfg.samples.plots.thumbnails.raw,
-                                        'filename': filename})
+    if plotter.active:
+        tmp = Template(paths.files.samples.plots.thumbnails.raw)
+        filenames = tmp.resolve_paths()
+        if plotter.should_plot(filenames, overwrite):
+            thumbnails = plot_thumbnails(samples, plotter,
+                                         **{'overwrite': overwrite,
+                                            **cfg.samples.plots.thumbnails.raw,
+                                            'filenames': filenames})
     # source regions
     # if not any(products['Images']['Source Regions']):
     #     sample_images = products['Images']['Samples']
@@ -434,7 +439,7 @@ def calibration(run, overwrite):
 # ---------------------------------------------------------------------------- #
 # Image Registration
 
-def registration(run, paths, ui, plot, show_cutouts, overwrite):
+def registration(run, paths, plotter, show_cutouts, overwrite):
 
     files = paths.files.registration
     if (use_previous := (files.registry.exists() and not overwrite)):
@@ -463,28 +468,28 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         samples_cal = get_sample_images(run, show_cutouts=show_cutouts)
 
     #
-    if plot:
+    if plotter.active:
         # -------------------------------------------------------------------- #
-        # Plot calibrated thumbnails if calibratuib data available available
+        # Plot calibrated thumbnails if calibration data available available
         if any(map(any, run.attrs('calibrated.dark', 'calibrated.flat'))):
             config = cfg.samples.plots.thumbnails
-            thumbs = {**config.raw, **config.calibrated}
+            thumb_grid_config = {**config.raw, **config.calibrated}
         else:
-            thumbs = {}
+            thumb_grid_config = {}
             logger.info("No calibration data available, won't plot calibrated "
-                        "thumbnails.")
+                        "thumbnail grid.")
 
         # Plot calibrated sample images
         # -------------------------------------------------------------------- #
         tasks = plot_sample_images(run, samples_cal,
-                                   paths.templates.HDU.samples.filename, overwrite,
-                                   thumbs, ui)
+                                   paths.templates.HDU.samples.filename,
+                                   overwrite, thumb_grid_config, plotter)
 
     # Align
     # ------------------------------------------------------------------------ #
     if not use_previous:
         logger.section('Image Registration')  # (World Coordinate System)
-        reg = register(run, samples_cal, paths, ui, plot, overwrite)
+        reg = register(run, samples_cal, paths, plotter, overwrite)
 
     # Drizzle image
     # ------------------------------------------------------------------------ #
@@ -494,18 +499,19 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
 
     # plotting
     # ------------------------------------------------------------------------ #
-    if plot:
+    if plotter.active:
         # DSS mosaic
         # -------------------------------------------------------------------- #
         inner, outer = config.mosaic.split(SAVE_KWS)
         if outer.show:
             survey = config.alignment.survey.survey
-            task = ui.task_factory(reg.mosaic)(names=run.files.stems, **inner.plot)
+            task = plotter.task_factory(reg.mosaic)(names=run.files.stems,
+                                                    **inner.plot)
             _, template = paths.templates.find('mosaic').flatten().popitem()
-
-            ui.add_task(task, (*outer.tab, survey.upper()),
-                        template.resolve_paths(TEL=survey),
-                        outer.get('overwrite', overwrite))
+            files = template.resolve_paths(TEL=survey)
+            ovr = outer.get('overwrite', overwrite)
+            if plotter.should_plot(files, ovr):
+                plotter.add_task(task, (*outer.tab, survey.upper()), paths, ovr)
 
             # TODO mark target
 
@@ -513,10 +519,12 @@ def registration(run, paths, ui, plot, show_cutouts, overwrite):
         # -------------------------------------------------------------------- #
         if config.drizzle.show:
             filename = paths.files.registration.drizzle.filename
-
-            task = ui.task_factory(plot_drizzle)(fig=o, filename=filename)
-            ui.add_task(task, config.drizzle.tab,
-                        paths.files.registration.drizzle.plot, overwrite)
+            tmp = Template(paths.files.registration.drizzle.plot)
+            files = tmp.resolve_paths()
+            ovr = config.drizzle.get('overwrite', overwrite)
+            if plotter.should_plot(files, ovr):
+                task = plotter.task_factory(plot_drizzle)(fig=o, filename=filename)
+                plotter.add_task(task, config.drizzle.tab, files, ovr)
 
     logger.success('Image Registration complete!')
 
@@ -571,14 +579,14 @@ def echo_fig(fig, *args, **kws):
     return fig
 
 
-def register(run, samples, paths, ui, plot, overwrite):
+def register(run, samples, paths, plotter, overwrite):
 
     config = cfg.registration
 
     plot_config = False
-    if plot:
+    if plotter.active:
         #
-        task = ui.task_factory(echo_fig)(fig=o)
+        task = plotter.task_factory(echo_fig)(fig=o)
         tasks = {}
         # pre generate figures and pass to `coalign` via `plots` parameter
         plot_config = defaultdict(dict)
@@ -586,34 +594,38 @@ def register(run, samples, paths, ui, plot, overwrite):
         for name, key, file, ovr, kws in _registry_plot_tasks(run, paths, overwrite):
             # print(name, key, kws)
             key = tuple(key)
-            tasks[key] = ui.add_task(task, key, file, ovr)
+            tasks[key] = plotter.add_task(task, key, file, ovr)
 
-            kws = {**kws, 'fig': ui[key].figure}
+            kws = {**kws, 'fig': plotter.figures[key]}
             if name == 'alignment':
                 plot_config[name].append(kws)
             else:
                 plot_config[name][key[-1]] = kws
 
-        if ui:
+        if ui := plotter.gui:
             ui[config.alignment.tab].link_focus()
             ui[config.clusters.tab].link_focus()
 
     # Align with survey image
     # ------------------------------------------------------------------------ #
     # NOTE: source detections were reported above in `get_sample_images`
-    reg = run.coalign_survey(**{**cfg.detection, 'report': False,
-                                **config.alignment.survey},
-                             plots=plot_config,
-                             clustering=config.clusters.filter((*SAVE_KWS, 'plot')))
+    reg = run.coalign_survey(
+        **{**cfg.detection, 'report': False,
+           **config.alignment.self},
+        plots=plot_config,
+        clustering=config.clusters.filter((*SAVE_KWS, 'plot')),
+        source_detection_survey=config.alignment.survey.detection
+    )
 
-    if ui:
-
+    if plotter.active:
         for tel in set(run.attrs.telescope):
             # save mosaic /  source ids:
             for x in ('mosaic', 'clusters'):
                 (t := tasks[(*config[x].tab, tel)]).save(t.result)
 
         # save alignment figs
+        from IPython import embed
+        embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':626")
         for tab in list(ui.tabs[config.alignment.tab]._leaves()):
             task = tasks[tab._root().tab_text(tab._index())]
             if tab.figure.axes:
@@ -633,9 +645,8 @@ def register(run, samples, paths, ui, plot, overwrite):
     # ------------------------------------------------------------------------ #
     files = paths.files.registration
     logger.info('Saving image registry at: {}.', files.registry)
-
-    io.serialize(files.registry, reg)
     # reg.params = np.load(files.params)
+    io.serialize(files.registry, reg)
     np.save(paths.files.registration.params, reg.params)
     # TODO region files
 
@@ -647,6 +658,19 @@ def register(run, samples, paths, ui, plot, overwrite):
     save_samples_fits(run, samples, wcss,
                       paths.files.samples.filename.with_suffix('.fits'),
                       overwrite)
+
+    # update the source regions in the sample plots
+    if plotter.active:
+        index = itt.count()
+        samples2 = defaultdict(dict)
+        for filename, subs in samples.items():
+            for interval in subs:
+                samples2[filename][interval] = reg._reg[next(index)]
+
+        tasks = plot_sample_images(run, samples2,
+                                   paths.templates.HDU.samples.filename,
+                                   overwrite=True, thumbnails=False,
+                                   plotter=plotter, replace=True)
 
     return reg
 
@@ -727,7 +751,7 @@ def plot_drizzle(fig, *indices, filename):
 # ---------------------------------------------------------------------------- #
 # Tracking
 
-def track(run, reg, top, paths, ui, plot=True, overwrite=False, njobs=-1):
+def track(run, reg, top, paths, plotter, overwrite=False, njobs=-1):
 
     logger.section('Source Tracking')
 
@@ -741,29 +765,40 @@ def track(run, reg, top, paths, ui, plot=True, overwrite=False, njobs=-1):
     reg = reg._reg
 
     labels = {}
-    overwrite = overwrite or cfg.tracking.get(overwrite, False)
-    for i, (hdu, img, labels_) in enumerate(zip(run, reg, reg.labels_per_image)):
+    overwrite = overwrite or cfg.tracking.get('overwrite', False)
+    for i, (hdu, img) in enumerate(zip(run, reg)):
         # check if we need to run
-        if overwrite or _tracker_missing_files(templates, hdu, spanning):
-            # back transform to image coords
-            coords = reg._trans_to_image(i).transform(reg.xy[labels_])
-            labels_ = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
-            labels[hdu.file.stem] = labels_
+        if not (overwrite or _tracker_missing_files(templates, hdu, spanning)):
+            continue
 
-            # path = products.resolve_path(paths.folders.tracking, hdu)
-            tracker = _track(reg, hdu, img.seg, coords, labels_,
-                             paths, ui, plot, overwrite, njobs=njobs)
+        # select brightest sources
+        segment_labels = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+        # back transform to image coords
+        coords = reg._trans_to_image(i).transform(reg.xy[segment_labels - 1])
+
+        # coords = reg._trans_to_image(i).transform(reg.xy[cluster_labels - 1])
+        # These are the coordinates for all the sources cross-id in this image
+        # These combine info from all images and is more accurate than the
+        # centroids from a sampled image from a single cube, but there may be
+        # sources with coordinates that do not have corresponding segments in
+        # the image due to lower image quality etc. For tracking, we have to
+        # remove those coordinate points.
+
+        labels[hdu.file.stem] = segment_labels
+        # path = products.resolve_path(paths.folders.tracking, hdu)
+        tracker = _track(reg, hdu, img.seg, coords, segment_labels,
+                         paths, plotter, overwrite, njobs=njobs)
 
     logger.info('Source tracking complete.')
     return labels, spanning
 
 
 @update_defaults(cfg.tracking.params)
-def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
+def _track(reg, hdu, seg, coords, labels, paths, plotter, overwrite=False,
            dilate=0, njobs=-1, **kws):
 
     logger.bind(indent=True).opt(lazy=True).info(
-        'Launching tracker for {0[0]}.\ncoords = {0[1]}',
+        'Launching source tracker for {0[0]}.\ncoords = {0[1]}',
         lambda: (motley.darkgreen(hdu.file.name),
                  pp.nrs.matrix(coords, 2).replace('\n', f'\n{"": >9}'))
     )
@@ -779,9 +814,20 @@ def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
         njobs = config.params.njobs
 
     seg = seg.dilate(dilate)
-    # if len(coords) != seg.nlabels:
+
+    # # check coords
+    # region_centres = seg.com(seg.data)
+    # delta = cdist(coords, region_centres).min(1)
+    # delta -= np.median(delta)
+    # no_region = delta > config.params.coord_region_distance_cutoff
+    # if no_region.any():
+    #     logger.info('Trimming source coordinates that have no corresponding '
+    #                 'segment for tracking {}:\n{}', hdu.file.name, coords[no_region])
+
     #     from IPython import embed
-    #     embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':751")
+    #     embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':795")
+
+    #     coords = coords[~no_region]
 
     tracker = SourceTracker(coords, seg, labels, **kws)
     tracker.reg = reg
@@ -793,7 +839,7 @@ def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
 
     # plot
     SAVE_KWS = ('filename', 'overwrite')
-    if plot and config.plot:
+    if plotter and config.plot:
         tmp = paths.templates.HDU.tracking.plots
 
         kws, save = config.plots.positions.split(SAVE_KWS)
@@ -805,9 +851,9 @@ def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
         logger.success('Tracker plots: {}', tab)
         for i, j in enumerate(tracker.use_labels):
             # plot source location features
-            task = ui.task_factory(tracker.plot.positions_source)(o, i, **kws)
+            task = plotter.task_factory(tracker.plot.positions_source)(o, i, **kws)
             save['filenames'] = tmp.positions.resolve_paths(hdu, source=j)
-            ui.add_task(task, (*tab, f'Source {j}'), **save)
+            plotter.add_task(task, (*tab, f'Source {j}'), **save)
 
         # plot positions displacement time series
         kws, save = config.plots.time_series.split(SAVE_KWS)
@@ -816,8 +862,8 @@ def _track(reg, hdu, seg, coords, labels, paths, ui, plot=True, overwrite=False,
         save['filenames'] = tmp.time_series.resolve_paths(hdu)
 
         tab = (*tab, *kws.pop('tab'))
-        task = ui.task_factory(tracker.plot.displacement_time_series)(o.axes[0], **kws)
-        ui.add_task(task, tab, **save, add_axes=True)
+        task = plotter.task_factory(tracker.plot.displacement_time_series)(o.axes[0], **kws)
+        plotter.add_task(task, tab, **save, add_axes=True)
 
     return tracker
 
@@ -855,18 +901,35 @@ def _tracker_missing_files(templates, hdu, sources):
     if first_time_run:
         logger.info('First time run for {}.', hdu.file.name)
     elif missing:
+        parent = last_common_ancestor(missing)
+        missing = (m.relative_to(parent) for m in missing)
         logger.bind(indent=4).opt(lazy=True).info(
-            'Source Tracker for {0[0]} missing some target files:\n{0[1]}.',
-            lambda: (hdu.file.name, pp.pformat(missing, fmt=str))
+            'Source Tracker for {0[0]} missing some target files in the '
+            'folder {0[1]}/:\n{0[2]}.',
+            lambda: (hdu.file.name, parent,
+                     pp.pformat(list(missing), fmt=str, brackets=None,
+                                sep='\n'))
         )
 
     return missing
 
 
+def last_common_ancestor(paths):
+    common = Path()
+
+    for parts in zip(*map(Path.parts.fget, paths)):
+        if len(set(parts)) > 1:
+            break
+
+        common /= parts[0]
+
+    return common
+
+
 # ---------------------------------------------------------------------------- #
 # Light curves
 
-def lightcurves(run, labels, paths, ui, plot=True, overwrite=False):
+def lightcurves(run, labels, paths, plotter=True, overwrite=False):
 
     output_templates = paths.templates.find('lightcurves', collapse=True).freeze()
     cfg.lightcurves.by_file.raw['input'] = paths.templates.HDU.tracking.source_info
@@ -923,17 +986,12 @@ def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrit
     #
     # from obstools.phot import PhotInterface
 
-    # GUI
-    if plot:
-        if not is_interactive():
-            app = QtWidgets.QApplication(sys.argv)
+    #
+    plotter = PlotManager(plot, gui, **cfg.plotting.gui)
 
-        # GUI
-        ui = GUI(title=cfg.plotting.gui.title,
-                 pos=cfg.plotting.gui.pos,
-                 active=plot)
-    else:
-        ui = None
+    app = None
+    if plot and not is_interactive():
+        app = QtWidgets.QApplication(sys.argv)
 
     # ------------------------------------------------------------------------ #
     # Setup / Load data
@@ -943,7 +1001,7 @@ def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrit
     # ------------------------------------------------------------------------ #
     # Preview
     overview, data_products, samples, thumbnails = preview(
-        run, paths, info, ui, plot, overwrite
+        run, paths, info, plotter, overwrite
     )
     logger.success('Preview completed.')
 
@@ -957,16 +1015,17 @@ def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrit
     # have to ensure we have single target here
     target = check_single_target(run)
 
-    reg = registration(run, paths, ui, plot, show_cutouts, overwrite)
+    # Do alignment and identify target
+    reg = registration(run, paths, plotter, show_cutouts, overwrite)
 
     # ------------------------------------------------------------------------ #
     # Source Tracking
-    labels, _ = track(run, reg, top, paths, ui, plot, overwrite, njobs)
+    labels, _ = track(run, reg, top, paths, plotter, overwrite, njobs)
 
-    # # ------------------------------------------------------------------------ #
-    # # Photometry
-    # logger.section('Photometry')
-    lcs = lightcurves(run, labels, paths, ui, plot, overwrite)
+    # ------------------------------------------------------------------------ #
+    # Photometry
+    logger.section('Photometry')
+    lcs = lightcurves(run, labels, paths, plotter, overwrite)
 
     # phot = PhotInterface(run, reg, paths.phot)
     # ts = mv phot.ragged() phot.regions()
@@ -985,8 +1044,7 @@ def main(paths, target, telescope, top, njobs, plot, gui, show_cutouts, overwrit
 
         ui.show()
 
-        if not is_interactive():
-            # sys.exit(app.exec_())
+        if app:
             app.exec_()
 
         logger.section('UI shutdown')

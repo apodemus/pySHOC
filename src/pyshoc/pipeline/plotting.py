@@ -24,60 +24,146 @@ from .logging import logger
 
 
 # ---------------------------------------------------------------------------- #
+cfg = cfg.plotting
 FIG_KWS = Figure.__init__.__code__.co_varnames[1:-2]
 SAVE_KWS = ('filename', 'overwrite', 'dpi')
 
 # ---------------------------------------------------------------------------- #
 
 
-def get_figure(ui, tab, fig, **kws):
+class PlotManager(LoggingMixin):
 
-    # Create figure if needed, add to ui tab if active
-    if ui:
-        if tab:
-            logger.debug('UI active, adding tab {}.', tab)
-            tab = ui.add_tab(*tab, fig=fig, **kws)
-            return tab.figure
+    def __init__(self, plot=True, gui=cfg.gui.active, **kws):
 
-        logger.debug('UI active, but no tab. Figure will not be embedded.')
+        self.figures = {}
+        self.active = bool(plot)
 
-    if fig:
-        assert isinstance(fig, Figure)
-        return fig
+        # GUI
+        self.gui = GUI(**kws, active=gui) if gui else None
 
-    if plt := sys.modules.get('matplotlib.pyplot'):
-        logger.debug('pyplot active, launching figure {}.', tab)
-        return plt.figure(**kws)
+        #
+        self.task_factory = TaskFactory(self)
 
-    logger.debug('No UI, creating figure. {}.', tab)
-    return Figure(**kws)
+    def should_plot(self, paths, overwrite):
+        if not self.active:
+            return False
+
+        return overwrite or any(not p.exists() for p in paths) or self.gui
+
+    def get_figure(self, tab, fig, replace=False, **kws):
+
+        # Create figure if needed, add to ui tab if active
+        if self.gui:
+            if tab:
+                do = ('add', 'replace')[replace]
+                caller = getattr(self.gui, f'{do}_tab')
+                tab = caller(tab, fig=fig, **kws)
+                return tab.figure
+
+            logger.debug('GUI active, but no tab. Figure will not be embedded.')
+
+        if fig:
+            assert isinstance(fig, Figure)
+            return fig
+
+        if plt := sys.modules.get('matplotlib.pyplot'):
+            logger.debug('pyplot active, launching figure {}.', tab)
+            return plt.figure(**kws)
+
+        logger.debug('No GUI, creating figure. {}.', tab)
+        return Figure(**kws)
+
+    def add_task(self, task, tab,
+                 filenames=(), overwrite=False,
+                 figure=None, add_axes=False, replace=False,
+                 *args, **kws):
+
+        # check if plotting is active
+        if not self.active:
+            self.logger.debug('Plotting deactivated, ignoring task: {}', tab)
+            return
+
+        # resolve filenames
+        filenames = ensure.tuple(filenames, Path)
+        if filename := kws.pop('filename', ()):
+            filenames = (Path(filename), *filenames)
+
+        # check if plot needed
+        if not self.should_plot(filenames, overwrite):
+            self.logger.debug('Not plotting {} since GUI inactive, files exist,'
+                              ' and not overwriting.', tab)
+            return
+
+        #
+        self.logger.info('Adding plotting task for {} {}:\n{}',
+                         ('section', 'tab')[bool(self.gui)], tab, task)
+
+        # create the task
+        fig_kws = task.fig_kws
+        task = PlotTask(self, task, tab, filenames, overwrite)
+
+        # next line will generate figure to fill the tab, we have to replace it
+        # after the task executes with the actual figure we want in our tab
+        figure = task.get_figure(figure, add_axes=add_axes, replace=replace,
+                                 **fig_kws)
+        self.figures[tab] = figure
+
+        if self.gui and self.gui.delay:
+            # Future task
+            self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
+                             tab, task)
+
+            self.gui[tab].add_task(task, *args, **kws)
+            return task
+
+        # execute task
+        self.logger.debug('Plotting immediate: {}.', tab)
+        task(figure, tab, *args, **kws)
+        return task
 
 
-# ---------------------------------------------------------------------------- #
+class GUI(MplMultiTab):
 
-class _TaskBase(PartialTask, LoggingMixin):
-    """Base class for Tasks."""
+    def __init__(self, title, pos, active=cfg.gui.active, delay=cfg.gui.delay):
+        #
+        super().__init__((), title, pos)
+
+        # self.setWindowIcon(QtGui.QIcon('/home/hannes/Pictures/mCV.jpg'))
+        self.active = bool(active)
+        self.delay = active and delay
+
+    def __bool__(self):
+        return self.active
+
+    def show(self):
+        super().add_task()   # needed to check for tab switch callbacks to run
+        return super().show()
 
 
 class TaskFactory(Partial, LoggingMixin):
 
-    def __init__(self, ui):
-        self.ui = ui
+    def __init__(self, mgr):
+        self.manager = mgr
 
     def __wrapper__(self, func, *args, **kws):
 
         # resolve placholders and static params
-        task = PlotTask(func, self.ui, *args, **kws)
+        task = PlotTaskWrapper(func, *args, **kws)
+        task.gui = self.manager.gui
 
         # create TaskRunner, which will run PlotTask when called
         return TaskRunner(task, **task.fig_kws)
+
+
+class _TaskBase(PartialTask, LoggingMixin):
+    """Base class for Tasks."""
 
 
 class TaskRunner(_TaskBase):
     # Run task when called
 
     def __init__(self, task, **fig_kws):
-        self.ui = None  # set in `GUI.add_task`
+        # self.ui = None  # set in `GUI.add_task`
         self.task = task  # PlotTask
         self.fig_kws = fig_kws
 
@@ -92,10 +178,18 @@ class TaskRunner(_TaskBase):
         return f'{name}({inner})'
 
 
-class PlotTask(_TaskBase):
-    """Plot Task"""
+# ---------------------------------------------------------------------------- #
 
-    def __init__(self, func, ui, *args, **kws):
+
+class PlotTaskWrapper(_TaskBase):
+    """
+    This class wraps the plotting task. It handles the figure initialization and
+    will ensure the correct keywords get passed to the figure creation and
+    plotting methods. Also handles the case for plot methods that create their 
+    own figures.
+    """
+
+    def __init__(self, func, *args, **kws):
 
         # split keywords for figure init
         kws, self.fig_kws = dicts.split(kws, FIG_KWS)
@@ -103,9 +197,6 @@ class PlotTask(_TaskBase):
 
         if 'filename' in Callable(func).sig.parameters:
             kws['filename'] = self.save_kws['filename']
-
-        #
-        self.ui = ui
 
         # resolve placholders and static params
         super().__init__(func, *args, **kws)
@@ -134,6 +225,8 @@ class PlotTask(_TaskBase):
         # plot
         art = func(*args, **kws)
 
+        # This part is needed for GUI embedded tasks that generate their own
+        # figures
         if not (self.nreq or self._keywords):
             # We will have generated a figure to fill the tab in the ui, we have
             # to replace it after the task executes with the actual figure we
@@ -145,14 +238,14 @@ class PlotTask(_TaskBase):
         return figure, art
 
 
-class TabTask(slots.SlotHelper, LoggingMixin):
+class PlotTask(slots.SlotHelper, LoggingMixin):
 
     __slots__ = (
-        'ui', 'task', 'tab', 'filenames', 'result', 'overwrite', 'save_kws'
+        'manager', 'task', 'tab', 'filenames', 'result', 'overwrite', 'save_kws'
     )
 
-    def __init__(self, ui, task, tab, filenames=(), overwrite=False, **save_kws):
-        # `task` is TaskRunner instance
+    def __init__(self, manager, task, tab, filenames=(), overwrite=False, **save_kws):
+        #
         self.logger.debug('Creating {0.__name__} for {1}.', type(self), task)
 
         if filenames:
@@ -169,9 +262,8 @@ class TabTask(slots.SlotHelper, LoggingMixin):
     def __call__(self, figure, tab, *args, **kws):
         # Execute task
         self.logger.opt(lazy=True).info(
-            'Plotting tab {0[0]} with {0[1]} at figure: {0[2]}.',
-            lambda: (self.ui.tabs.tab_text(tab), callers.describe(self.task),
-                     figure)
+            'Plotting tab {0[0]} with callable {0[1]} at figure: {0[2]}.',
+            lambda: (tab, callers.describe(self.task), figure)
         )
 
         # run
@@ -183,10 +275,11 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         # art
         return self.result
 
-    def get_figure(self, figure=None, figsize=None, add_axes=False, **kws):
+    def get_figure(self, figure=None, figsize=None, add_axes=False,
+                   replace=False, **kws):
 
         #
-        figure = get_figure(self.ui, self.tab, figure, figsize=figsize, **kws)
+        figure = self.manager.get_figure(self.tab, figure, replace, figsize=figsize, **kws)
 
         if add_axes:
             if figure.axes:
@@ -195,10 +288,9 @@ class TabTask(slots.SlotHelper, LoggingMixin):
                 figure.add_subplot()
 
         # resize if requested (normally handled by ui)
-        if not self.ui:
-            if figsize:
-                self.logger.info('Resizing figure: {}', figsize)
-                figure.set_size_inches(figsize)
+        if not self.manager.gui and figsize:
+            self.logger.info('Resizing figure: {}', figsize)
+            figure.set_size_inches(figsize)
 
         return figure
 
@@ -206,58 +298,23 @@ class TabTask(slots.SlotHelper, LoggingMixin):
         save_figure(figure, self.filenames, self.overwrite, **self.save_kws)
 
 
-class GUI(MplMultiTab):
+# class TabTask(PlotTask):
+#     pass
 
-    def __init__(self, title, pos,
-                 active=cfg.plotting.gui.active,
-                 delay=cfg.plotting.gui.delay):
-        #
-        super().__init__((), title, pos)
+    # def __call__(self, figure, tab, *args, **kws):
+    #     # Execute task
+    #     self.logger.opt(lazy=True).info(
+    #         'Plotting tab {0[0]} with callable {0[1]} at figure: {0[2]}.',
+    #         lambda: (self.ui.tabs.tab_text(tab),
+    #                  callers.describe(self.task),
+    #                  figure)
+    #     )
 
-        # self.setWindowIcon(QtGui.QIcon('/home/hannes/Pictures/mCV.jpg'))
+    #     # run
+    #     figure, self.result = self.task(figure, tab, *args, **kws)
 
-        self.active = bool(active)
-        self.delay = active and delay
+    #     # save
+    #     self.save(figure)
 
-        #
-        self.task_factory = TaskFactory(self)
-        # creates TaskRunner when called
-
-    def __bool__(self):
-        return self.active
-
-    def add_task(self, task, tab,
-                 filenames=(), overwrite=False,
-                 figure=None, add_axes=False,
-                 *args, **kws):
-
-        self.logger.info('Adding task for tab {}:\n{}', tab, task)
-
-        # set ui
-        task.ui = self
-
-        # Task requires Figure
-        # next line will generate figure to fill the tab, we have to replace it
-        # after the task executes with the actual figure we want in our tab
-        if filename := kws.pop('filename', ()):
-            filenames = (filename, *ensure.tuple(filenames, Path))
-
-        tab_task = TabTask(self, task, tab, filenames, overwrite)
-        figure = tab_task.get_figure(figure, add_axes=add_axes, **task.fig_kws)
-
-        if self.delay:
-            # Future task
-            self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
-                             tab, tab_task)
-
-            self[tab].add_task(tab_task, *args, **kws)
-            return tab_task
-
-        # execute task
-        self.logger.debug('Plotting immediate: {}.', tab)
-        tab_task(figure, tab, *args, **kws)
-        return tab_task
-
-    def show(self):
-        super().add_task()   # needed to check for tab switch callbacks to run
-        return super().show()
+    #     # art
+    #     return self.result
