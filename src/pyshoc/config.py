@@ -87,12 +87,11 @@ def load(file=None):
         config.logging[sink, 'level'] = cfg.level.upper()
 
     # stylize log repeat handler
-    config.logging.console['repeats'] = motley.stylize(config.logging.console.repeats)
-    config.console.cutouts['title'] = motley.stylize(config.console.cutouts.pop('title'))
+    c['repeats'] = motley.stylize((c := config.logging.console).repeats)
+    c['title'] = motley.stylize((c := config.detection.report.cutouts)['title'])
 
     # stylize progressbar
-    prg = config.console.progress
-    prg['bar_format'] = motley.stylize(prg.bar_format)
+    p['bar_format'] = motley.stylize((p := config.console.progress).bar_format)
 
     # GUI
     # ---------------------------------------------------------------------------- #

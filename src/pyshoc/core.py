@@ -161,7 +161,7 @@ class Binning:
 class Filters:
     """Simple class to represent positions of the filter wheels"""
 
-    _empty = cfg.preferences.empty_filter_string
+    _empty = cfg.console.preferences.empty_filter_string
 
     def __init__(self, a, b=None):
         A = self.get(a)
@@ -1113,7 +1113,7 @@ class Campaign(PhotCampaign, OfType(HDU), Messenger):
          #  'readout.mode.outAmp':    ...,
          #   'filters.B':          ...,
          },
-        **cfg.tabulate.campaign,
+        **cfg.console.tables.campaign,
         footnotes=Trigger.get_flags()
     )
 
@@ -1555,7 +1555,7 @@ class GroupedRuns(Grouped):
     #     """
     #     return Campaign.tabulate.get_tables(
     #         self, attrs, titled=titled, filler_text='NO MATCH',
-    #         **{**cfg.tabulate.obs_groups, **kws}
+    #         **{**cfg.console.tables.obs_groups, **kws}
     #     )
 
     def pformat(self, titled=True, headers=False, braces=False, vspace=1, **kws):

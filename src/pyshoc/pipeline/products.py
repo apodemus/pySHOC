@@ -364,7 +364,7 @@ def _overview_products_hstack(overview, paths):
             for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **cfg.console.products
+        **cfg.console.tables.products
     )
 
 
@@ -452,7 +452,7 @@ def _hdu_products_table(run, paths):
                            for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **cfg.console.products
+        **cfg.console.tables.products
     )
 
     tbl.headers_header_block[:, 0] = ('Input', '', '', 'HDU')
@@ -555,7 +555,7 @@ def _nightly_products_table(run, paths):
                            for io in ('in', 'out')),
         subtitle_align='<',
         subtitle_style='_',
-        **cfg.console.products
+        **cfg.console.tables.products
     )
 
 

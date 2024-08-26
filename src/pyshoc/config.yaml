@@ -4,40 +4,16 @@
 # ---------------------------------------------------------------------------- #
 
 # ---------------------------------------------------------------------------- #
-# prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
-
-preferences:
-    metric_names:           True
-    empty_filter_string:    ∅
-
-# ---------------------------------------------------------------------------- #
-# Folder structure for pipeline results.
-
-# Folder locations can be templated by using $ references in paths eg: $SECTION/
-# substitutes the value of "folder" keyword under "section" header.
-# Additionally, $HDU can be used for substitution the base name of the fits file
-# eg: "20210410.0030", and $DATE for nightly results folder eg. "2021-04-10"
-
-folders:
-    output:     .pyshoc # root folder name default (if not provided by user at cli)
-    cache:      .cache  # cache location (relative to output)
-
-# Remaining folder structures is defined per section below.
-# These are the default locations relative to the output folder above:
-#     info:           info/
-#     logs:           $INFO/logs
-#     plots:          plots/
-#     sample_images:  $PLOTS/sample_images
-#     registry:       reg/
-#     phot:           phot/
-#     tracking:       $PHOT/tracking/$HDU
-#     lightcurves:    $PHOT/lightcurves
-
-
-# ---------------------------------------------------------------------------- #
 # Console output styling
 
 console:
+    # style preferences
+    preferences:
+        # prefer SI based naming convention for telescopes eg: "1.9m" over "74in"
+        metric_names:           True
+        empty_filter_string:    ∅
+
+    # welcome banner
     banner:
         show:       True
         format: |
@@ -53,6 +29,7 @@ console:
         linecolor:  teal
         width:      Null
 
+    # progress bar styling
     progress:
         bar_format: >-
             {{desc}: {percentage:3.0f}%{bar}{n_fmt}/{total_fmt}:|green}
@@ -61,24 +38,36 @@ console:
         ascii: " ╸━"
         # unit:  " frames"
 
+    # Obstype colors
     colors:
         flat: cornflowerblue
         dark: tan
 
-    cutouts:
-        title:          "Source image cutouts: {hdu.file.name:|c}"
-        title_align:    <
-        title_style:    [B, _]
-        extend:         3
-        statistics:     [com, flux, areas, roundness]
+    # Table styling
+    tables:
+        campaign:
+            row_nrs: 1
+            summary: True
+            title_style:
+                fg: [bold, underline]
+                bg: 'darkslategrey'
+            too_wide: False
 
-    products:
-        title_style:
-            bg:     darkgreen
-            fg:     [lightgrey, B, _]
-        header_style:
-            bg:     lightgreen
-            fg:     [darkslategrey, B]
+        # Grouped observations
+        obs_groups:
+            title_style:
+                fg: [teal, underline, bold]
+                # bg: 'darkslategrey'
+            title_align: '<'
+
+        # data product tables
+        products:
+            title_style:
+                bg:     darkgreen
+                fg:     [lightgrey, B, _]
+            header_style:
+                bg:     lightgreen
+                fg:     [darkslategrey, B]
 
 
 # ---------------------------------------------------------------------------- #
@@ -98,7 +87,7 @@ logging:
 
     # Console logging sink
     console:
-        level:  debug
+        level:  info
         catch:  False
         # log message format
         format: >- # -  chomping indicator strips end newlines
@@ -138,26 +127,31 @@ logging:
         motley.formatter:               0
         motley.table.xlsx:              1
         scrawl.moves.machinery:         0
-        
 
 
 # ---------------------------------------------------------------------------- #
-# Tables
+# Folder structure for pipeline results.
 
-tabulate:
-    campaign:
-        row_nrs: 1
-        summary: True
-        title_style:
-            fg: [bold, underline]
-            bg: 'darkslategrey'
-        too_wide: False
+# Folder locations can be templated by using $ references in paths eg: $SECTION/
+# substitutes the value of "folder" keyword under "section" header.
+# Additionally, $HDU can be used for substitution the base name of the fits file
+# eg: "20210410.0030", and $DATE for nightly results folder eg. "2021-04-10"
 
-    obs_groups:
-        title_style:
-            fg: [teal, underline, bold]
-            # bg: 'darkslategrey'
-        title_align: '<'
+folders:
+    output:     .pyshoc # root folder name default (if not provided by user at cli)
+    cache:      .cache  # cache location (relative to output)
+
+# The remaining folder structures is defined per section below.
+# These are the default locations relative to the output folder above:
+#     section        name                            reference
+#     ------------------------------------------------------------------------
+#     info           info/                           $INFO
+#     logs           info/logs
+#     registry       registry/                       $REGISTRY
+#     phot           phot/                           $PHOT
+#     tracking       phot/tracking/$HDU              $TRACKING/$HDU
+#     lightcurves    $phot/lightcurves/by_file/$HDU  $LIGHTCURVES/by_file/$HDU
+
 
 # ---------------------------------------------------------------------------- #
 # Information / Overview Data Products
@@ -215,7 +209,7 @@ info:
                 alignment:
                     horizontal:     center
                     vertical:       top
-                border: 
+                border:
                     bottom:         double
 
             totals:
@@ -245,7 +239,6 @@ remote:
 calibration:
     # Location of calibration database
     # ~/.config/pyshoc/caldb
-    # /media/Oceanus/work/Observing/data/SHOC/calibration/
     folder:     null
 
     # darks:
@@ -287,7 +280,7 @@ plotting:
 
 samples:
     show:               True
-    tab:                [Sample Images] # Detection
+    tab:                Sample Images    # Detection
     header:             Sample Images
     folder:             $REGISTRY/samples/
     filename:           $HDU$FRAMES.png
@@ -314,7 +307,7 @@ samples:
         thumbnails:
             raw:
                 tab:            [Overview, Thumbnails, Raw]
-                filename:       thumbnails/thumbnails.png
+                filename:       thumbnails/thumbnails.{pdf,png}
                 overwrite:      False
                 figsize:        [9, 7.5]
 
@@ -326,7 +319,7 @@ samples:
 
             calibrated:
                 tab:            [Overview, Thumbnails, Calibrated]
-                filename:       thumbnails/thumbnails-cal.png
+                filename:       thumbnails/thumbnails-cal.{pdf,png}
                 overwrite:      Null
 
 
@@ -345,8 +338,17 @@ detection: &source_detection
     dilate:         2
     deblend:        True
 
+    # How to report source detections:
+    # Displaying image cutouts of the detections in terminal is done by
+    # passing the ``--cutouts`` flag to pyshoc command. This is experimental.
     report:
-        cutouts: True
+        cutouts:
+            # Control what info on the detected sources is shown with th
+            title:          "Source image cutouts: {hdu.file.name:|c}"
+            title_align:    <
+            title_style:    [B, _]
+            extend:         3
+            statistics:     [com, flux, areas, roundness, q]
 
 # aliases
 # detect:          *source_detection #
@@ -363,13 +365,16 @@ registration:
         params:     params.npy
 
     alignment:
-        # self:
+        self:
+            snr:            3
+
         survey:
             survey:         dss
             fov_stretch:    1.5
             fit_angle:      True
 
-            # snr:            10
+            detection:
+                snr:        5
 
 
         show:       True
@@ -420,11 +425,12 @@ registration:
 # Camera Tracking
 
 tracking:
-    # gui tab
+    # gui tab name
     tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    folder:     $PHOT/tracking/$HDU/
+    folder:                 $PHOT/tracking/$HDU/
+    overwrite:              False
     filenames:
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
@@ -435,9 +441,15 @@ tracking:
 
     # ------------------------------------------------------------------------ #
     params:
+        # initialization parameters
         dilate:             0
         circularize:        True
         njobs:              1
+
+        # when initializing the tracker, we trim the input coordinates from the
+        # registry that do not have corresponding segments in the segmented
+        # image
+        coord_region_distance_cutoff:  1
 
         centroids:
             # features used for tracking
@@ -447,30 +459,34 @@ tracking:
                 # filter: lanczos
                 # note, upsampling will siginificantly affect compute times
 
-        pre_subtract:       True
         # subtract background from image prior to computing features
-        bg:                 median
+        pre_subtract:       True
         # statistic used for background
-
-        precision:          0.5
+        bg:                 median
         # Required positional accuracy in pixels
-        weights:            snr
+        precision:          0.5
         # Per-source weights for frame offset calculation. Use "snr" for
         # signal-to-noise weighting.
+        weights:            snr
 
         cutoffs:
+            # Pixel distance to image edge
             edge:           0
-            snr:            3.
             # Sources with signal-to-noise ratio less than this will not be
             # considered when solving for image dither
+            snr:            3.
+
+            # For outlier detection: maximum distance allowed for point
+            # measurements from centre of distribution.
             distance:       10
-            # For outlier detection: maximum distance allowed for point measurements
-            # from centre of distribution.
+            # If we know the saturation value of the CCD chip, we discard pixels
+            # above this percentage of the saturation value
             saturation:     95
-            # If we know the saturation value of the CCD chip, we discard pixels above
-            # this percentage of the saturation value
 
         compute:
+            # compute interval for source centres. After `stop` only frame
+            # offsets will continue being computed
+            #        [start, stop, step]
             centres: [0 , 1000, 100 ]
 
     # ------------------------------------------------------------------------ #
@@ -494,9 +510,9 @@ tracking:
         folder:     plots/
 
         centroids:
-            com:              [r, +, Centre of Mass]
-            peak:             [m, ^, Peak]
-            avg:              [k, x, Weighted Centroid]
+            com:              [r, ., Centre of Mass]
+            peak:             [b, ., Peak]
+            avg:              [k, ., Weighted Centroid]
             # NOTE: avg sould be last
 
         labels:
@@ -572,6 +588,8 @@ tracking:
             figsize:        [12, 5]
 
 
+
+
 # ---------------------------------------------------------------------------- #
 # Photometry
 
@@ -590,7 +608,7 @@ lightcurves:
     tab:            Light Curves
     header:         Light Curves
     folder:         $PHOT/lightcurves/
-    formats:        [txt, npy, png, pdf]
+    formats:        [txt, npz, png, pdf]
 
     # time series plot parameters
     plots:
@@ -625,13 +643,14 @@ lightcurves:
 
         # Raw light curve
         raw:
-            filename:   $HDU.raw.$EXT
-            title:      Raw contour aperture light curve for {}.
+            filename:       $HDU.raw.$EXT
+            description:    Raw contour aperture light curve for {}.
 
         # Flag outliers
         flagged:
-            filename:   $HDU.oflag.$EXT
-            title:      Outlier-flagged contour aperture light curve for {}.
+            filename:       $HDU.oflag.$EXT
+            description:    Outlier-flagged contour aperture light curve for {}.
+            overwrite:      True
 
             # parameters for outlier detection
             params:
@@ -641,11 +660,11 @@ lightcurves:
                 kmax:       0.1%
 
             acf:
-                filename: $HDU.oflag.acf.{npy,pdf,png}
+                filename:   $HDU.oflag.acf.{npy,pdf,png}
 
         # Scaled by median flux of reference source
         # diff0:
-        #     title:      Median scaled contour aperture light curve for {}.
+        #     description:      Median scaled contour aperture light curve for {}.
         #     filename:   $HDU.diff0.$EXT
 
         #     plot:
@@ -653,7 +672,7 @@ lightcurves:
 
         # Differential with Total Variational (TV) smoothing
         diff:
-            title:      Differential light curve (via total variational smoothing) for {}.
+            description:      Differential light curve (via total variational smoothing) for {}.
             filename:   $HDU.tvr.$EXT
             plot:
                 hist:   True
@@ -669,86 +688,86 @@ lightcurves:
 
         # decorrelate  via Maximum entropy spectrum.
         # Do by file since more likely heteroscedastic
-        decor:
-            title:      Decorrelated light curve (via Maximum Entropy whitening) for {}.
-            filename:   $HDU.decor.$EXT
+        # decor:
+        #     description:      Decorrelated light curve (via Maximum Entropy whitening) for {}.
+        #     filename:   $HDU.decor.$EXT
 
-            params:
-                # method for choosing p in AR(p)
-                method:     FPE # Akaike Final prediction Error
+        #     params:
+        #         # method for choosing p in AR(p)
+        #         method:     FPE # Akaike Final prediction Error
 
-            acf:
-                filename: $HDU.decor.acf.{npy,pdf,png}
+        #     acf:
+        #         filename: $HDU.decor.acf.{npy,pdf,png}
 
-            # Concatenate to produce nightly light curves
-            concat:
-                title:      Nightly decorrelated contour aperture light curve for {}.
-                filename:   $LIGHTCURVES/by_date/$DATE/$DATE.decor.$EXT
-                overwrite:  True
+        #     # Concatenate to produce nightly light curves
+        #     concat:
+        #         description:      Nightly decorrelated contour aperture light curve for {}.
+        #         filename:   $LIGHTCURVES/by_date/$DATE/$DATE.decor.$EXT
+        #         overwrite:  True
 
     # Data Products by date
     # ------------------------------------------------------------------------ #
-    by_date:
-        folder:         by_date/$DATE
-        formats:        [npy, pdf, png]
+    # by_date:
+    #     folder:         by_date/$DATE
+    #     formats:        [npy, pdf, png]
 
-        # sde:
-        # Spectral Analysis
-        periodogram:
-            title:      Periodogram
-            filename:   $DATE.pg.$EXT
+    #     # sde:
+    #     # Spectral Analysis
+    #     periodogram:
+    #         title:      Periodogram
+    #         filename:   $DATE.pg.$EXT
 
-        lombscargle:
-            title:      Lomb-Scargle Periodogram
-            filename:   $DATE.ls.$EXT
+    #     lombscargle:
+    #         title:      Lomb-Scargle Periodogram
+    #         filename:   $DATE.ls.$EXT
 
-        welch:
-            title:      Welch Periodogram
-            filename:   $DATE.welch.$EXT
+    #     welch:
+    #         title:      Welch Periodogram
+    #         filename:   $DATE.welch.$EXT
 
-        tfr:
-            title:      Time Frequency Representation
-            filename:   $DATE.tfr.$EXT
+    #     tfr:
+    #         title:      Time Frequency Representation
+    #         filename:   $DATE.tfr.$EXT
 
     # Data Products by orbital cycle (ephemeris required)
     # ------------------------------------------------------------------------ #
     # Phase folded light curves (If ephemeris available)
-    by_cycle:
-        # ephemeris:    Eg:
-        folder:         by_cycle/
-        filename:       E$CYCLE.lc.$EXT
+    # by_orbit:
+    #     # ephemeris:    Eg:
+    #     folder:         by_orbit/
+    #     filename:       E$ORBIT.lc.$EXT
 
-        stacked:
-            title:      Orbit phased light curves for {}
-            filename:   lcs-stacked.png
+    #     stacked:
+    #         title:      Orbit phased light curves for {}
+    #         filename:   lcs-stacked.png
 
-        phased:
-            title:      Orbit phased light curve for {}
-            filename:   lcs-phased.png
+    #     phased:
+    #         title:      Orbit phased light curve for {}
+    #         filename:   lcs-phased.png
 
-            params:
-                bins:           360
-                statistics:
-                    median:     'o'
-                    # mad:        '|'
-                    p5, p95:    '-.'
-                    min, max:   ':'
+    #         params:
+    #             bins:           360
+    #             statistics:
+    #                 median:     'o'
+    #                 # mad:        '|'
+    #                 p5, p95:    '-.'
+    #                 min, max:   ':'
 
-        # # Spectral Analysis
-        # periodogram:
-        #     title:      'Periodogram'
-        #     filename:   E$ORBIT.pg.txt
-        #     plot:       True
+    # # Spectral Analysis
+    # periodogram:
+    #     title:      'Periodogram'
+    #     filename:   E$ORBIT.pg.txt
+    #     plot:       True
 
-        # lombscargle:
-        #     title:      'Lomb-Scargle Periodogram'
-        #     filename:   E$ORBIT.ls.txt
-        #     plot:       True
+    # lombscargle:
+    #     title:      'Lomb-Scargle Periodogram'
+    #     filename:   E$ORBIT.ls.txt
+    #     plot:       True
 
-        # welch:
-        #     title:      'Welch Periodogram'
-        #     filename:   E$ORBIT.welch.txt
-        #     plot:       True
+    # welch:
+    #     title:      'Welch Periodogram'
+    #     filename:   E$ORBIT.welch.txt
+    #     plot:       True
 
 
 # ---------------------------------------------------------------------------- #
