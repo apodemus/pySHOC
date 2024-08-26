@@ -24,6 +24,9 @@ from . import APPERTURE_SYNONYMS, SUPPORTED_APERTURES, logging, main as pipeline
 
 
 # ---------------------------------------------------------------------------- #
+PYENV = sys.version.split(' ', 1)[0]
+
+# ---------------------------------------------------------------------------- #
 
 def check_files_exist(files_or_folder):
     for path in files_or_folder:
@@ -191,10 +194,11 @@ def setup(root, output, overwrite, use_cache, config, verbose):
     # HDU.get_sample_image.__cache__.disable()
     # HDU.detection.__call__.__cache__.disable()
     if use_cache:
+        cache_path =  paths.folders.cache / PYENV
         enable_local_caching({
             # get_hdu_image_products: paths.folders.cache / 'image-samples.pkl'
-            HDU.get_sample_image:              paths.folders.cache / 'sample-images.pkl',
-            HDU.detection._algorithm.__call__: paths.folders.cache / 'source-regions.pkl'
+            HDU.get_sample_image:              cache_path / 'sample-images.pkl',
+            HDU.detection._algorithm.__call__: cache_path / 'source-regions.pkl'
         })
 
     return paths, overwrite
