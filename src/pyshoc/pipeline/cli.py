@@ -234,11 +234,11 @@ def enable_local_caching(mapping):
 @click.option('-tel', '--telescope',
               metavar='[74|40|lesedi]',  # TODO salt
               callback=resolve_tel,
-              help='Name of the telescope that the observations where done with'
+              help='Name of the telescope that the observations were done with'
                    ' eg: "40in", "1.9m", "lesedi" etc. It is necessary to '
                    'specify this if multiple files are being reduced and the '
-                   'fits header information is missing or incorrect. If input '
-                   'files are from multiple telescopes, update the headers '
+                   'fits header information is incomplete or incorrect. If input '
+                   'files are from multiple telescopes, you should update the headers '
                    'before running the pipeline.')
 @click.option('-top', type=int, default=5,
               help='Number of brightest sources to do photometry on.')
@@ -280,7 +280,7 @@ def enable_local_caching(mapping):
               help='Switch plotting on or off.')
 @click.option('--gui/--no-gui', default=True,
               help='Use mpl-multitab gui to embed interactive plots.')
-@click.option('--cutouts/--no-cutouts', default=True,
+@click.option('--cutouts/--no-cutouts', default=False,
               help='Display source cutouts in terminal.')
 @click.option('-v', '--verbose', count=True)
 @click.version_option()
