@@ -24,6 +24,7 @@ from scrawl.image import plot_image_grid
 from obstools.image import SkyImage
 from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
+import obstools.lightcurves as lcs
 from recipes.oo.slots import SlotHelper
 from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
@@ -115,6 +116,9 @@ def check_required_info(run, telescope, target):
 
 
 def last_common_ancestor(paths):
+    if len(paths) == 1:
+        return paths[0].parent
+
     common = Path()
     for parts in zip(*map(Path.parts.fget, paths)):
         if len(set(parts)) > 1:
@@ -736,14 +740,16 @@ class Pipeline(SlotHelper):
         reg = reg._reg
 
         labels = {}
-        overwrite = overwrite or cfg.tracking.get('overwrite', False)
         for i, (hdu, img) in enumerate(zip(run, reg)):
-            # check if we need to run
-            if not (overwrite or _tracker_missing_files(templates, hdu, spanning)):
-                continue
-
             # select brightest sources
             segment_labels = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+
+            # check if we need to run
+            missing = _tracker_missing_files(
+                templates, hdu, segment_labels[:cfg.tracking.plots.top])
+            if not (overwrite or missing):
+                continue
+
             # back transform to image coords
             coords = reg._trans_to_image(i).transform(reg.xy[segment_labels - 1])
 
@@ -765,7 +771,7 @@ class Pipeline(SlotHelper):
         return labels, spanning
 
     @update_defaults(cfg.tracking.params)
-    def _track(self, hdu, seg, coords, labels, overwrite=False, dilate=0,
+    def _track(self, hdu, seg, coords, labels, overwrite=None, dilate=0,
                njobs=-1, **kws):
 
         paths = self.paths
@@ -799,13 +805,26 @@ class Pipeline(SlotHelper):
         #                 'segment for tracking {}:\n{}', hdu.file.name, coords[no_region])
         #     coords = coords[~no_region]
 
+        # Init tracker
         tracker = SourceTracker(coords, seg, labels, **kws)
         tracker.reg = reg
-
         # tracker.detection.algorithm = cfg.detection
+
+        # Init memory
         base = Template(paths.folders.tracking.folder).resolve_path(hdu)
         tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
+        # run on observation
         tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
+        # save tracker data
+        tracker.save(paths.templates.HDU.tracking.init_arrays.resolve_path(hdu))
+
+        # extract lightcurve
+        raw = self.lightcurves[('by_file', 'raw', )] = \
+            tracker.to_lightcurve(hdu.t.bjd, **lc.get_metadata(hdu))
+        # save
+        out = self.paths.templates.HDU.lightcurves.by_file.raw.filename.sub(
+            HDU=hdu.file.stem, EXT='npz')
+        raw.save(out)
 
         # plot
         SAVE_KWS = ('filename', 'overwrite')
@@ -818,8 +837,9 @@ class Pipeline(SlotHelper):
 
             #                  year, day, nr
             tab = (*config.tab, *get_tab_key(hdu))
-            logger.success('Tracker plots: {}', tab)
-            for i, j in enumerate(tracker.use_labels):
+            top = config.plots.top
+            logger.success('Tracker plots for top {} sources: {}', top, tab)
+            for i, j in enumerate(tracker.use_labels[:top]):
                 # plot source location features
                 task = plotter.task_factory(tracker.plot.positions_source)(o, i, **kws)
                 save['filenames'] = tmp.positions.resolve_paths(hdu, source=j)
@@ -838,38 +858,25 @@ class Pipeline(SlotHelper):
         return tracker
 
     # ---------------------------------------------------------------------------- #
-    # Light curves
+    # Time Series Analysis
 
-    def photometry(self, labels, overwrite=None):
+    def time_series_analysis(self, labels, overwrite=None):
 
-        output_templates = self.paths.templates.find('lightcurves', collapse=True).freeze()
-        cfg.lightcurves.by_file.raw['input'] = self.paths.templates.HDU.tracking.source_info
+        overwrite = self.overwrite if overwrite is None else overwrite
+        output_templates = self.paths.templates.find('lightcurves', collapse=True)
 
-        # plot = {'ui': plotter} if plotter.active else plot
 
-        #
-        pipeline = lc.Pipeline(self.campaign, cfg.lightcurves, output_templates, overwrite,
-                               self.plotter)
-        lcs = pipeline.run(labels)
+        # Init time series pipeline
+        # infiles = self.paths.templates.HDU.lightcurves.by_file.raw.filename
+        pipeline = lc.Pipeline(self.campaign, cfg.lightcurves,
+                               [], output_templates.freeze(),
+                               overwrite, self.plotter)
 
-        # if not plot:
-        #     return
+        # Run
+        logger.info('Running time series pipeline:\n{}', pipeline)
+        lightcurves = pipeline.run()
 
-        # for step, db in lcs.items():
-        #     # get path template
-        #     tmp = paths.templates['DATE'].lightcurves[step]
-        #     tmp = getattr(tmp, 'concat', tmp)
-        #     #
-        #     pipeline.plot(('by_date', step), ui, tmp, overwrite=False)
-
-        return lcs
-        # for hdu in run:
-        #     lc.io.load_raw(hdu, products.resolve_path(paths.lightcurves.raw, hdu),
-        #                 overwrite)
-
-        # for step in ['flagged', 'diff0', 'decor']:
-        #     file = paths.lightcurves[step]
-        #     load_or_compute(file, overwrite, LOADERS[step], (hdu, file))
+        return lightcurves
 
     # Main
     # ---------------------------------------------------------------------------- #
@@ -902,8 +909,11 @@ class Pipeline(SlotHelper):
 
         # ------------------------------------------------------------------------ #
         # Photometry
+
+        # ------------------------------------------------------------------------ #
+        # Time Series Analysis
         logger.section('Photometry')
-        lcs = self.photometry(labels, cfg.registration.get('overwrite'))
+        self.time_series_analysis(labels, cfg.lightcurves.get('overwrite'))
 
         # phot = PhotInterface(run, reg, paths.phot)
         # ts = mv phot.ragged() phot.regions()

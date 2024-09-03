@@ -429,22 +429,22 @@ tracking:
     tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    folder:                 $PHOT/tracking/$HDU/
+    folder:                 $PHOT/by_file/$HDU/tracking
     overwrite:              False
     filenames:
+        init_arrays:        init-arrays.npz     # coords, seg, labels, mask, source_weights
         measurements:       centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
         frame_info:         frame-info.dat      # (n, 2)        structured
         source_info:        source-info.dat     # (n, nsources) structured
         feature_weights:    feature-weights.dat # (nstats, 1, 1)
-        source_weights:     source-weights.dat  # nsources
 
     # ------------------------------------------------------------------------ #
     params:
         # initialization parameters
         dilate:             0
         circularize:        True
-        njobs:              1
+        njobs:              1 # FIXME
 
         # when initializing the tracker, we trim the input coordinates from the
         # registry that do not have corresponding segments in the segmented
@@ -491,7 +491,7 @@ tracking:
 
     # ------------------------------------------------------------------------ #
     table:
-        title:          Measured source coordinates
+        title:          Measured source info
         title_style:
             fg:         [B,  _,  w]
             bg:         darkslategrey
@@ -508,6 +508,8 @@ tracking:
     plot:   True
     plots:
         folder:     plots/
+        # Make density plots for brightest  `top` stars only
+        top:        3  
 
         centroids:
             com:              [r, ., Centre of Mass]
@@ -588,8 +590,6 @@ tracking:
             figsize:        [12, 5]
 
 
-
-
 # ---------------------------------------------------------------------------- #
 # Photometry
 
@@ -602,13 +602,14 @@ phot:
 
 
 # ---------------------------------------------------------------------------- #
-# Time Series Analysis
+# Time Series Analysis & Spectral Estimation
 
 lightcurves:
     tab:            Light Curves
     header:         Light Curves
-    folder:         $PHOT/lightcurves/
+    folder:         $PHOT/
     formats:        [txt, npz, png, pdf]
+    overwrite:      False
 
     # time series plot parameters
     plots:
@@ -639,57 +640,80 @@ lightcurves:
     # Data Products by file
     # ------------------------------------------------------------------------ #
     by_file:
-        folder:     by_file/$HDU
+        folder:     by_file/$HDU/lightcurves
 
         # Raw light curve
         raw:
             filename:       $HDU.raw.$EXT
-            description:    Raw contour aperture light curve for {}.
+            description: |
+                Light curve computed as the sum of pixel values within the
+                shifted regions from source detection, median background
+                subtracted. Standard deviation uncertainties computed via the
+                revised CCD equation from Merlin & Howell '95.
+            plot:
+                # plot time series
+                ts:
+                    # show marginal histogram next to the time series plot
+                    hist:   True
+                
+            # corner plot to show possible correlations between time series
+            corner: 
+                filename: $HDU.corner.png
 
-        # Flag outliers
-        flagged:
-            filename:       $HDU.oflag.$EXT
-            description:    Outlier-flagged contour aperture light curve for {}.
-            overwrite:      True
-
-            # parameters for outlier detection
-            params:
-                # method:   gESD
-                nwindow:    1000
-                noverlap:   50%
-                kmax:       0.1%
-
+            # Correlogram
             acf:
-                filename:   $HDU.oflag.acf.{npy,pdf,png}
+                filename: $HDU.raw.acf.{npz,pdf,png}
 
-        # Scaled by median flux of reference source
-        # diff0:
-        #     description:      Median scaled contour aperture light curve for {}.
-        #     filename:   $HDU.diff0.$EXT
-
-        #     plot:
-        #         hist:   True
-
-        # Differential with Total Variational (TV) smoothing
+        # Scaled by median flux of reference source for cross-calibration
         diff:
-            description:      Differential light curve (via total variational smoothing) for {}.
-            filename:   $HDU.tvr.$EXT
+            filename:       $HDU.diff.$EXT
+            description:    Rescaled by median of reference source.
+
+            # Flag outliers
+            oflag:
+                # filename:     $HDU.oflag.$EXT
+                description:    Outlier-flagged.
+                overwrite:      True
+
+                # parameters for outlier detection
+                params:
+                    # method:   gESD
+                    nwindow:    1000
+                    noverlap:   50%
+                    kmax:       0.1%
+
+            # Concatenate to produce nightly light curves
+            concat:
+                filename:       $LIGHTCURVES/by_date/$DATE/$DATE.diff.$EXT
+                description: |
+                   Nightly light curve, created by concatenating data from the
+                   sequence of observations of the same target on the same date.
+                overwrite:      True
+
             plot:
                 hist:   True
 
-            # Parameters for variational smoother
-            params:
-                nwindow:        1000
-                noverlap:       10%
-                smoothing:      0.1
+        # Differential with Total Variational (TV) smoothing
+        # tvr:
+        #     filename:       $HDU.tvr.$EXT
+        #     description:    Detrended with total variational smoother.
+            
+        #     plot:
+        #         hist:   True
 
-            acf:
-                filename: $HDU.tvr.acf.{npy,pdf,png}
+        #     # Parameters for variational smoother
+        #     params:
+        #         nwindow:        1000
+        #         noverlap:       10%
+        #         smoothing:      0.1
 
-        # decorrelate  via Maximum entropy spectrum.
+        #     acf:
+        #         filename: $HDU.tvr.acf.{npy,pdf,png}
+
+        # decorrelate via Maximum entropy spectrum.
         # Do by file since more likely heteroscedastic
         # decor:
-        #     description:      Decorrelated light curve (via Maximum Entropy whitening) for {}.
+        #     description:      Decorrelated light curve (via Maximum Entropy whitening).
         #     filename:   $HDU.decor.$EXT
 
         #     params:
@@ -699,35 +723,31 @@ lightcurves:
         #     acf:
         #         filename: $HDU.decor.acf.{npy,pdf,png}
 
-        #     # Concatenate to produce nightly light curves
-        #     concat:
-        #         description:      Nightly decorrelated contour aperture light curve for {}.
-        #         filename:   $LIGHTCURVES/by_date/$DATE/$DATE.decor.$EXT
-        #         overwrite:  True
 
     # Data Products by date
     # ------------------------------------------------------------------------ #
-    # by_date:
-    #     folder:         by_date/$DATE
-    #     formats:        [npy, pdf, png]
+    by_date:
+        # input:          diff
+        folder:         by_date/$DATE
+        formats:        [npz, pdf, png]
 
-    #     # sde:
-    #     # Spectral Analysis
-    #     periodogram:
-    #         title:      Periodogram
-    #         filename:   $DATE.pg.$EXT
+        # sde:
+        # Spectral Analysis
+        periodogram:
+            title:      Periodogram
+            filename:   $DATE.pg.$EXT
 
-    #     lombscargle:
-    #         title:      Lomb-Scargle Periodogram
-    #         filename:   $DATE.ls.$EXT
+        lombscargle:
+            title:      Lomb-Scargle Periodogram
+            filename:   $DATE.ls.$EXT
 
-    #     welch:
-    #         title:      Welch Periodogram
-    #         filename:   $DATE.welch.$EXT
+        welch:
+            title:      Welch Periodogram
+            filename:   $DATE.welch.$EXT
 
-    #     tfr:
-    #         title:      Time Frequency Representation
-    #         filename:   $DATE.tfr.$EXT
+        tfr:
+            title:      Time Frequency Representation
+            filename:   $DATE.tfr.$EXT
 
     # Data Products by orbital cycle (ephemeris required)
     # ------------------------------------------------------------------------ #
@@ -738,11 +758,11 @@ lightcurves:
     #     filename:       E$ORBIT.lc.$EXT
 
     #     stacked:
-    #         title:      Orbit phased light curves for {}
+    #         title:      Orbit phased light curves
     #         filename:   lcs-stacked.png
 
     #     phased:
-    #         title:      Orbit phased light curve for {}
+    #         title:      Orbit phased light curve
     #         filename:   lcs-phased.png
 
     #         params:
