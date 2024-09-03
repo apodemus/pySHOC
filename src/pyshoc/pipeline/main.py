@@ -480,7 +480,6 @@ class Pipeline(SlotHelper):
                     for fn, im in zip(run.files.names, list(reg)[1:])
                 }
         #
-        self.registry = reg
 
         if not use_previous:
             # Sample images (after calibration)
@@ -500,15 +499,18 @@ class Pipeline(SlotHelper):
 
             # Plot calibrated sample images
             # -------------------------------------------------------------------- #
-            tasks = plot_sample_images(run, samples_cal,
-                                       paths.templates.HDU.samples.filename,
-                                       overwrite, thumb_grid_config, plotter)
+            plot_sample_images(run, samples_cal,
+                               paths.templates.HDU.samples.filename,
+                               overwrite, thumb_grid_config, plotter)
 
         # Align
         # ------------------------------------------------------------------------ #
         if not use_previous:
             logger.section('Image Registration')  # (World Coordinate System)
             reg = self.register(samples_cal,  overwrite)
+
+        # set
+        self.registry = reg
 
         # Drizzle image
         # ------------------------------------------------------------------------ #
@@ -548,53 +550,6 @@ class Pipeline(SlotHelper):
         logger.success('Image Registration complete!')
 
         return reg
-
-    def _registry_plot_tasks(self, overwrite=None):
-
-        run = self.campaign
-        paths = self.paths
-        overwrite = self.overwrite if overwrite is None else overwrite
-
-        # config
-        inner_config, outer_config = cfg.registration.split(SAVE_KWS)
-        plot_config = inner_config.find('plot', True)
-        plot_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **plot_config}
-        plot_config['mosaic']['connect'] = False
-
-        # alignment
-        templates = paths.templates['HDU'].find('alignment').flatten()
-
-        # get alignment reference hdus. These don't have plots for themselves
-        _, indices = run.group_by('telescope', return_index=True)
-        indices = np.hstack([idx for idx in indices.values()])
-        desired_files = products.get_desired_products(run[indices], templates, 'file')
-
-        tab = outer_config.alignment.tab
-        ovr = outer_config.alignment.get('overwrite', overwrite)
-        alignment_config = plot_config['alignment']
-
-        # firsts = run.attrs()
-        for stem, files in desired_files.items():
-            key = (*tab, *get_tab_key(run[stem]))
-            files = list(files['registration']['alignment'].values())
-            yield ('alignment', key, files, ovr, alignment_config)
-
-        # ------------------------------------------------------------------------ #
-        # mosaic / clusters
-        templates = paths.templates['TEL'].flatten()
-        telescopes = set(run.attrs.telescope)
-        if len(telescopes) > 1:
-            telescopes.add('all')
-        tel_products = products._get_desired_products(sorted(telescopes)[::-1],
-                                                      templates, 'TEL')
-
-        for tel, files in tel_products.items():
-            for section, files in files['registration'].items():
-                if (config := outer_config[section]).show:
-                    key = (*config.tab, tel)
-                    ovr = outer_config[section].get('overwrite', overwrite)
-                    files = list(files.values())
-                    yield (section, key, files, ovr, plot_config[section])
 
     def register(self, samples, overwrite=None):
 
@@ -646,22 +601,21 @@ class Pipeline(SlotHelper):
                     (t := tasks[(*config[x].tab, tel)]).save(t.result)
 
             # save alignment figs
-            from IPython import embed
-            embed(header="Embedded interpreter at 'src/pyshoc/pipeline/main.py':626")
-            for tab in list(ui.tabs[config.alignment.tab]._leaves()):
-                task = tasks[tab._root().tab_text(tab._index())]
-                if tab.figure.axes:
+            for key, task in self.plotter.tasks[config.alignment.tab].flatten().items():
+                fig = self.plotter.figures[(*config.alignment.tab, *key)]
+                if fig.axes:
                     # save
-                    tab.figure.canvas.draw()
-                    task.save(tab.figure)
+                    fig.canvas.draw()
                 else:
                     # plot model reference in empty figures
                     conf = plot_config['alignment']
-                    idx = next(i for i, kws in enumerate(conf) if kws['fig'] == tab.figure)
+                    idx = next(i for i, kws in enumerate(conf) if kws['fig'] == fig)
                     im = reg._reg.model.gmm.plot(**conf[idx])
                     im.ax.set_title('Model Likelihood')
+                    # fig = im.figure
 
-                    task.save(im.figure)
+                # save figure
+                task.save(fig)
 
         # save registry
         # ------------------------------------------------------------------------ #
@@ -670,14 +624,13 @@ class Pipeline(SlotHelper):
         # reg.params = np.load(files.params)
         io.serialize(files.registry, reg)
         np.save(paths.files.registration.params, reg.params)
-        # TODO region files
 
         # Build image WCS
         # ------------------------------------------------------------------------ #
         wcss = reg.build_wcs(run)
 
         # save samples fits
-        self.save_samples_fits(run, samples, wcss,
+        self.save_samples_fits(run, wcss,
                                paths.files.samples.filename.with_suffix('.fits'),
                                overwrite)
 
@@ -693,8 +646,57 @@ class Pipeline(SlotHelper):
                                        paths.templates.HDU.samples.filename,
                                        overwrite=True, thumbnails=False,
                                        plotter=plotter, replace=True)
+            samples = samples2
+
 
         return reg
+
+    def _registry_plot_tasks(self, overwrite=None):
+
+        run = self.campaign
+        paths = self.paths
+        overwrite = self.overwrite if overwrite is None else overwrite
+
+        # config
+        inner_config, outer_config = cfg.registration.split(SAVE_KWS)
+        plot_config = inner_config.find('plot', True)
+        plot_config = {'alignment': {}, 'clusters': {}, 'mosaic': {}, **plot_config}
+        plot_config['mosaic']['connect'] = False
+
+        # alignment
+        templates = paths.templates['HDU'].find('alignment').flatten()
+
+        # get alignment reference hdus. These don't have plots for themselves
+        _, indices = run.group_by('telescope', return_index=True)
+        indices = np.hstack([idx for idx in indices.values()])
+        desired_files = products.get_desired_products(run[indices], templates, 'file')
+
+        tab = outer_config.alignment.tab
+        ovr = outer_config.alignment.get('overwrite', overwrite)
+        alignment_config = plot_config['alignment']
+
+        # firsts = run.attrs()
+        for stem, files in desired_files.items():
+            key = (*tab, *get_tab_key(run[stem]))
+            files = list(files['registration']['alignment'].values())
+            yield ('alignment', key, files, ovr, alignment_config)
+
+        # ------------------------------------------------------------------------ #
+        # mosaic / clusters
+        templates = paths.templates['TEL'].flatten()
+        telescopes = set(run.attrs.telescope)
+        if len(telescopes) > 1:
+            telescopes.add('all')
+        tel_products = products._get_desired_products(sorted(telescopes)[::-1],
+                                                      templates, 'TEL')
+
+        for tel, files in tel_products.items():
+            for section, files in files['registration'].items():
+                if (config := outer_config[section]).show:
+                    key = (*config.tab, tel)
+                    ovr = outer_config[section].get('overwrite', overwrite)
+                    files = list(files.values())
+                    yield (section, key, files, ovr, plot_config[section])
 
     def save_samples_fits(self, wcss, path_template, overwrite):
         # save samples as fits with wcs

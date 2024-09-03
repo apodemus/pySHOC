@@ -10,16 +10,16 @@ from mpl_multitab import MplMultiTab
 # local
 from scrawl.utils import save_figure
 from recipes.oo import slots
+from recipes import dicts, op
 from recipes.flow import Catch
 from recipes.iter import cofilter
 from recipes.string import indent
 from recipes.pprint import callers
-from recipes import dicts, op, pprint
 from recipes.containers import ensure
 from recipes.functionals import negate
 from recipes.logging import LoggingMixin
 from recipes.pprint.callers import Callable
-from recipes.functionals.partial import Partial, PartialTask, PlaceHolder
+from recipes.functionals.partial import Partial, PartialTask
 
 # relative
 from .. import config as cfg
@@ -38,8 +38,9 @@ class PlotManager(LoggingMixin):
 
     def __init__(self, plot=True, gui=cfg.gui.active, **kws):
 
-        self.figures = {}
         self.active = bool(plot)
+        self.tasks = dicts.DictNode()
+        self.figures = dicts.DictNode()
 
         # GUI
         self.gui = GUI(**kws, active=gui) if gui else None
@@ -104,6 +105,7 @@ class PlotManager(LoggingMixin):
         # create the task
         fig_kws = task.fig_kws
         task = PlotTask(self, task, tab, filenames, overwrite)
+        self.tasks[tab] = task
 
         # next line will generate figure to fill the tab, we have to replace it
         # after the task executes with the actual figure we want in our tab
@@ -123,6 +125,9 @@ class PlotManager(LoggingMixin):
         self.logger.debug('Plotting immediate: {}.', tab)
         task(figure, tab, *args, **kws)
         return task
+
+    def save(self, key, filename, overwrite=False, **kws):
+        save_figure(self.figures[key], filename, overwrite, **kws)
 
 
 class GUI(MplMultiTab):
