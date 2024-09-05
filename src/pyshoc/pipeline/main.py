@@ -30,6 +30,7 @@ from recipes.shell import is_interactive
 from recipes.decorators import update_defaults
 from recipes import io, not_null, op, pprint as pp
 from recipes.containers.sets import csv, single_valued
+from recipes.containers import delete
 from recipes.string import remove_prefix, shared_prefix
 from recipes.functionals.partial import Partial, PlaceHolder as o
 
@@ -40,7 +41,7 @@ from ..config import SAVE_KWS, Template, _is_special
 from . import products, lightcurves as lc
 from .logging import logger
 from .calibrate import calibrate
-from .plotting import PlotManager
+from .plotting import PlotManager, save_figure
 
 
 # ---------------------------------------------------------------------------- #
@@ -239,7 +240,7 @@ def _plot_sample_images(run, samples, path_template, overwrite, plotter, replace
 
         for frames, image in samples[hdu.file.name].items():
             # get filename
-            filename = path_template.resolve_path(hdu, frames=frames)
+            filename = path_template.resolve(hdu, frames=frames)
 
             # add tab to ui
             key = (*section, *tab)
@@ -325,7 +326,7 @@ class Pipeline(SlotHelper):
         logger.info('Creating folders for templated paths.')
         templated = set(paths.folders.select(values=_is_special).flatten().values())
         for tmp, hdu in itt.product(templated, run):
-            path = Template(tmp).resolve_path(hdu)
+            path = Template(tmp).resolve(hdu)
             path.mkdir(parents=True, exist_ok=True)
 
         # write script for remote data retrieval
@@ -500,7 +501,7 @@ class Pipeline(SlotHelper):
             # Plot calibrated sample images
             # -------------------------------------------------------------------- #
             plot_sample_images(run, samples_cal,
-                               paths.templates.HDU.samples.filename,
+                               paths.templates.HDU.samples.plot,
                                overwrite, thumb_grid_config, plotter)
 
         # Align
@@ -539,12 +540,11 @@ class Pipeline(SlotHelper):
             # Drizzle
             # -------------------------------------------------------------------- #
             if config.drizzle.show:
-                filename = paths.files.registration.drizzle.filename
-                tmp = Template(paths.files.registration.drizzle.plot)
-                files = tmp.resolve_paths()
+                fitsfile = paths.files.registration.drizzle.filename
+                files = Template(paths.files.registration.drizzle.plot).resolve_paths()
                 ovr = config.drizzle.get('overwrite', overwrite)
                 if plotter.should_plot(files, ovr):
-                    task = plotter.task_factory(plot_drizzle)(fig=o, filename=filename)
+                    task = plotter.task_factory(plot_drizzle)(fig=o, filename=fitsfile)
                     plotter.add_task(task, config.drizzle.tab, files, ovr)
 
         logger.success('Image Registration complete!')
@@ -630,8 +630,8 @@ class Pipeline(SlotHelper):
         wcss = reg.build_wcs(run)
 
         # save samples fits
-        self.save_samples_fits(run, wcss,
-                               paths.files.samples.filename.with_suffix('.fits'),
+        self.save_samples_fits(wcss,
+                               paths.files.samples.plot.with_suffix('.fits'),
                                overwrite)
 
         # update the source regions in the sample plots
@@ -643,11 +643,15 @@ class Pipeline(SlotHelper):
                     samples2[filename][interval] = reg._reg[next(index)]
 
             tasks = plot_sample_images(run, samples2,
-                                       paths.templates.HDU.samples.filename,
+                                       paths.templates.HDU.samples.plot,
                                        overwrite=True, thumbnails=False,
                                        plotter=plotter, replace=True)
             samples = samples2
 
+        # save regions
+        segments = {f'{key}[{start}:{stop}]': val.seg.data
+                    for (key, start, stop), val in cfg.ConfigNode(samples2).flatten().items()}
+        np.savez_compressed(self.paths.folders.samples.segments, **segments)
 
         return reg
 
@@ -704,7 +708,7 @@ class Pipeline(SlotHelper):
         for (file, subs), wcs in zip(self.samples.items(), wcss):
             hdu = self.campaign[file]
             for frames, image in subs.items():
-                filename = Template(path_template).resolve_path(hdu, frames=frames)
+                filename = Template(path_template).resolve(hdu, frames=frames)
 
                 if overwrite or not filename.exists():
                     # remove header comment
@@ -729,27 +733,29 @@ class Pipeline(SlotHelper):
 
         paths = self.paths
         run = self.campaign
-        reg = self.registry
+        reg = self.registry._reg
+        wcss = self.registry.wcss or self.registry.build_wcs(run)
         overwrite = self.overwrite if overwrite is None else overwrite
 
         # setup detection (needed for recovery when tracking lost)
-        spanning = sorted(set.intersection(*map(set, reg.labels_per_image)))
-        spanning = np.add(spanning, 1)
-        logger.info('Sources: {} span all observations.', spanning)
-
-        templates = paths.templates.HDU.tracking
-
-        reg = reg._reg
+        spanning = set.intersection(*map(set, reg.labels_per_image))
+        logger.info('Sources: {} span all observations.', sorted(spanning))
 
         labels = {}
+        templates = paths.templates.HDU.tracking
         for i, (hdu, img) in enumerate(zip(run, reg)):
             # select brightest sources
             segment_labels = img.seg.labels[img.counts.argsort()[:-top-1:-1]]
+            top_labels = segment_labels[:cfg.tracking.plots.top]
+            # list(map(segment_labels.remove, spanning.intersection(set(segment_labels))))
+            # segment_labels = np.array([*spanning, *segment_labels])
 
             # check if we need to run
-            missing = _tracker_missing_files(
-                templates, hdu, segment_labels[:cfg.tracking.plots.top])
-            if not (overwrite or missing):
+            missing_files = _tracker_missing_files(templates, hdu, top_labels)
+            if not (overwrite or missing_files):
+                # tracker = SourceTracker.load(
+                #     self.paths.templates.HDU.tracking.init_arrays.resolve(hdu)
+                # )
                 continue
 
             # back transform to image coords
@@ -764,10 +770,27 @@ class Pipeline(SlotHelper):
             # remove those coordinate points.
 
             labels[hdu.file.stem] = segment_labels
-            # path = products.resolve_path(paths.folders.tracking, hdu)
-            self.trackers[hdu.file.name] = self._track(
+            # path = products.resolve(paths.folders.tracking, hdu)
+            self.trackers[hdu.file.name] = tracker = self._track(
                 hdu, img.seg, coords, segment_labels, overwrite, njobs=njobs
             )
+
+            # Lucky imaging
+            overwrite = True
+            fitsfile = paths.templates.HDU.tracking.lucky.filename.resolve(hdu)
+            tracker.lucky_image(hdu.calibrated, wcss[i], fitsfile,
+                                **cfg.tracking.lucky.params)
+
+            plotfiles = paths.templates.HDU.tracking.lucky.plot.resolve_paths(hdu)
+            if plotter.should_plot(plotfiles, overwrite):
+                tab = (*cfg.tracking.lucky.tab, *get_tab_key(hdu))
+                task = plotter.task_factory(plot_drizzle)(fig=o, filename=fitsfile)
+                plotter.add_task(task, tab, plotfiles, overwrite)
+
+            # Source detection on lucky image
+            lucky = fits.open(fitsfile)
+            lucky = SkyImage.from_image(lucky[1].data, hdu.fov, hdu.pixel_scale,
+                                        **{**cfg.tracking.lucky.detection})
 
         logger.info('Source tracking complete.')
         return labels, spanning
@@ -798,6 +821,11 @@ class Pipeline(SlotHelper):
         seg = seg.dilate(dilate)
 
         # # check coords
+        # when initializing the tracker, we trim the input coordinates from the
+        # registry that do not have corresponding segments in the segmented
+        # image
+        # coord_region_distance_cutoff:  1
+
         # region_centres = seg.com(seg.data)
         # delta = cdist(coords, region_centres).min(1)
         # delta -= np.median(delta)
@@ -813,20 +841,16 @@ class Pipeline(SlotHelper):
         # tracker.detection.algorithm = cfg.detection
 
         # Init memory
-        base = Template(paths.folders.tracking.folder).resolve_path(hdu)
+        base = Template(paths.folders.tracking.folder).resolve(hdu)
         tracker.init_memory(hdu.nframes, base, overwrite=overwrite)
         # run on observation
         tracker.run(hdu.calibrated, njobs=njobs, jobname=hdu.file.stem)
         # save tracker data
-        tracker.save(paths.templates.HDU.tracking.init_arrays.resolve_path(hdu))
+        tracker.save(paths.templates.HDU.tracking.init_arrays.resolve(hdu))
 
         # extract lightcurve
-        raw = self.lightcurves[('by_file', 'raw', )] = \
+        self.lightcurves[('by_file', hdu.file.stem, 'raw')] = \
             tracker.to_lightcurve(hdu.t.bjd, **lc.get_metadata(hdu))
-        # save
-        out = self.paths.templates.HDU.lightcurves.by_file.raw.filename.sub(
-            HDU=hdu.file.stem, EXT='npz')
-        raw.save(out)
 
         # plot
         SAVE_KWS = ('filename', 'overwrite')
@@ -867,16 +891,15 @@ class Pipeline(SlotHelper):
         overwrite = self.overwrite if overwrite is None else overwrite
         output_templates = self.paths.templates.find('lightcurves', collapse=True)
 
-
         # Init time series pipeline
         # infiles = self.paths.templates.HDU.lightcurves.by_file.raw.filename
         pipeline = lc.Pipeline(self.campaign, cfg.lightcurves,
                                [], output_templates.freeze(),
                                overwrite, self.plotter)
-
+        embed()
         # Run
         logger.info('Running time series pipeline:\n{}', pipeline)
-        lightcurves = pipeline.run()
+        lightcurves = pipeline.run(self.lightcurves)
 
         return lightcurves
 
@@ -907,7 +930,7 @@ class Pipeline(SlotHelper):
 
         # ------------------------------------------------------------------------ #
         # Source Tracking
-        labels, _ = self.track(top, cfg.tracking.get('overwrite'), njobs)
+        labels, spanning = self.track(top, cfg.tracking.get('overwrite'), njobs)
 
         # ------------------------------------------------------------------------ #
         # Photometry
@@ -964,7 +987,7 @@ def headers_to_txt(run, paths, overwrite):
         def showfile(h): return h.relative_to(paths.folders.output)
 
     for hdu in run:
-        headfile = paths.templates.HDU.info.headers.resolve_path(hdu)
+        headfile = paths.templates.HDU.info.headers.resolve(hdu)
         if not headfile.exists() or overwrite:
             logger.info('Writing fits header to text at {}.', showfile(headfile))
             hdu.header.totextfile(headfile, overwrite=overwrite)
@@ -982,11 +1005,9 @@ def echo_fig(fig, *args, **kws):
 
 
 def plot_drizzle(fig, *indices, filename):
-    # logger.info('POOP drizzle image: {} {}', fig, indices)
     logger.info('Plotting drizzle image: {} {}', fig, indices)
 
     ff = apl.FITSFigure(str(filename), figure=fig)
-
     ff.show_colorscale(cmap=cfg.plotting.cmap)
     fig.tight_layout()
 
@@ -1023,7 +1044,7 @@ def plot_drizzle(fig, *indices, filename):
 
 def _tracker_target_files(templates, hdu, sources):
 
-    target_files = templates.filter('plots').map(Template.resolve_path, hdu)
+    target_files = templates.filter('plots').map(Template.resolve, hdu)
 
     # plots
     for key, tmp in templates.plots.items():

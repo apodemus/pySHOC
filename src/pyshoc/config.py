@@ -21,7 +21,7 @@ from recipes.containers.dicts import DictNode
 from recipes.containers import ensure, replace
 from recipes.config import ConfigNode, create_user_config
 from recipes.functionals.partial import Partial, placeholder as o
-
+from recipes.oo.property import Alias
 
 # ---------------------------------------------------------------------------- #
 # Create user config file if needed
@@ -221,6 +221,9 @@ def _ignore_any(ignore):
 
 class Template(Template):
 
+    # def resolve(self, hdu ,**kws):
+    resolve = Alias('resolve_path')
+    
     def resolve_path(self, hdu=None, frames=(), partial=False, **kws):
         subs = self.get_subs(hdu, frames, partial, **kws)
         return self.sub(partial, **subs, **kws)

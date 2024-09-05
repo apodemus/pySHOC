@@ -363,6 +363,7 @@ registration:
     filenames:
         registry:   registry.pkl
         params:     params.npy
+    overwrite:      False
 
     alignment:
         self:
@@ -415,8 +416,6 @@ registration:
             filename:   drizzle.{png,pdf}
             cmap:       cmr.chroma
 
-    # lucky: todo
-
 
 # alias
 # reg: *image_registration
@@ -433,24 +432,21 @@ tracking:
     overwrite:              False
     filenames:
         init_arrays:        init-arrays.npz     # coords, seg, labels, mask, source_weights
-        measurements:       centroids.dat       # (n, nstats, nsources, 2)
+        centroids:          centroids.dat       # (n, nstats, nsources, 2)
         coords:             coords.dat          # (nsources, 2) structured ['xy', 'std']
         frame_info:         frame-info.dat      # (n, 2)        structured
         source_info:        source-info.dat     # (n, nsources) structured
         feature_weights:    feature-weights.dat # (nstats, 1, 1)
 
     # ------------------------------------------------------------------------ #
+    # Algorithm parameters
     params:
-        # initialization parameters
+        # initialization
         dilate:             0
-        circularize:        True
-        njobs:              1 # FIXME
+        circularize:        False
+        njobs:              -1
 
-        # when initializing the tracker, we trim the input coordinates from the
-        # registry that do not have corresponding segments in the segmented
-        # image
-        coord_region_distance_cutoff:  1
-
+        # Features to use
         centroids:
             # features used for tracking
             com:            1
@@ -458,6 +454,7 @@ tracking:
                 upsample:   1
                 # filter: lanczos
                 # note, upsampling will siginificantly affect compute times
+            # todo gaussian MAP
 
         # subtract background from image prior to computing features
         pre_subtract:       True
@@ -474,7 +471,7 @@ tracking:
             edge:           0
             # Sources with signal-to-noise ratio less than this will not be
             # considered when solving for image dither
-            snr:            3.
+            snr:            10.
 
             # For outlier detection: maximum distance allowed for point
             # measurements from centre of distribution.
@@ -488,8 +485,24 @@ tracking:
             # offsets will continue being computed
             #        [start, stop, step]
             centres: [0 , 1000, 100 ]
+    
+    # ------------------------------------------------------------------------ #
+    # Lucky Imaging
+    lucky:
+        filename:       lucky-image.fits
+        params:
+            p:          0.01
+            pixfrac:    0.5
+            kernel:     gaussian
+            # square, gaussian point, tophat, turbo, lanczos2, lanczos3
+
+        tab:            [Tracking, Lucky Images]
+        plot:
+            filename:   lucky-image.{png,pdf}
+            cmap:       cmr.chroma
 
     # ------------------------------------------------------------------------ #
+    # Report style
     table:
         title:          Measured source info
         title_style:
@@ -505,6 +518,7 @@ tracking:
         max_rows:       25
 
     # ------------------------------------------------------------------------ #
+    # Tracking diagnostic plots config
     plot:   True
     plots:
         folder:     plots/
@@ -523,8 +537,9 @@ tracking:
             size:   10
             # fontweight:bold
 
-        positions:
+        # Density maps of measured and shift-corrected positions
         # -------------------------------------------------------------------- #
+        positions:
             filename:           positions-$SOURCE.{png,pdf}
             overwrite:          False
             figsize:            [12, 6.5]
@@ -583,6 +598,7 @@ tracking:
                 zorder:     100
 
         # -------------------------------------------------------------------- #
+        # Measured displacements time series
         time_series:
             tab:            Time Series
             filename:       displacements.{png,pdf}
