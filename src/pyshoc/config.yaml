@@ -283,7 +283,9 @@ samples:
     tab:                Sample Images    # Detection
     header:             Sample Images
     folder:             $REGISTRY/samples/
-    filename:           $HDU$FRAMES.png
+    filenames:
+        plot:           $HDU$FRAMES.png
+        segments:       segments.npz
 
     params:
         stat:               median
@@ -387,7 +389,7 @@ registration:
 
         show:       True
         tab:        [Registration, Source IDs]
-        filename:   $REGISTRY/source-ids.$TEL.{png,pdf}
+        filename:   $REGISTRY/clustering/source-ids.$TEL.{png,pdf}
 
         plot:
             centres:                True
@@ -406,6 +408,7 @@ registration:
             alpha:  0.35
 
     drizzle:
+        folder:     drizzle
         filename:   drizzle.fits
         pixfrac:    0.5
         # kernel:   square, gaussian, point, tophat, turbo, lanczos2, lanczos3
@@ -428,7 +431,8 @@ tracking:
     tab:      Tracking
     # ------------------------------------------------------------------------ #
     # source tracking data files
-    folder:                 $PHOT/by_file/$HDU/tracking
+    # $PHOT/by_file/$HDU/tracking
+    folder:                 $REGISTRY/tracking/$HDU/
     overwrite:              False
     filenames:
         init_arrays:        init-arrays.npz     # coords, seg, labels, mask, source_weights
@@ -489,17 +493,31 @@ tracking:
     # ------------------------------------------------------------------------ #
     # Lucky Imaging
     lucky:
+        folder:         $REGISTRY/lucky/$HDU
         filename:       lucky-image.fits
         params:
             p:          0.01
-            pixfrac:    0.5
-            kernel:     gaussian
+            pixfrac:    0.05
+            kernel:     square
             # square, gaussian point, tophat, turbo, lanczos2, lanczos3
 
-        tab:            [Tracking, Lucky Images]
+        tab:            [Overview, Lucky Images]
         plot:
             filename:   lucky-image.{png,pdf}
             cmap:       cmr.chroma
+
+        detection:
+            algorithm:      multi_threshold
+            snr:            [50, 10, 3]
+
+            npixels:        5
+            edge_cutoff:    5
+            edge_fraction:  0.5
+            monolithic:     False
+            roundness:      [0.5, 1.75]
+            dilate:         2
+            deblend:        True
+            report:         False
 
     # ------------------------------------------------------------------------ #
     # Report style
@@ -656,7 +674,7 @@ lightcurves:
     # Data Products by file
     # ------------------------------------------------------------------------ #
     by_file:
-        folder:     by_file/$HDU/lightcurves
+        folder:     by_file/$HDU
 
         # Raw light curve
         raw:
@@ -684,6 +702,7 @@ lightcurves:
         diff:
             filename:       $HDU.diff.$EXT
             description:    Rescaled by median of reference source.
+            precision:      5
 
             # Flag outliers
             oflag:
@@ -691,12 +710,9 @@ lightcurves:
                 description:    Outlier-flagged.
                 overwrite:      True
 
-                # parameters for outlier detection
-                params:
-                    # method:   gESD
-                    nwindow:    1000
-                    noverlap:   50%
-                    kmax:       0.1%
+
+            plot:
+                hist:   True
 
             # Concatenate to produce nightly light curves
             concat:
@@ -706,8 +722,7 @@ lightcurves:
                    sequence of observations of the same target on the same date.
                 overwrite:      True
 
-            plot:
-                hist:   True
+
 
         # Differential with Total Variational (TV) smoothing
         # tvr:

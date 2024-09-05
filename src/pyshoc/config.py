@@ -103,7 +103,7 @@ def load(file=None):
 
     # plot config
     rcParams.update({
-        'font.size':        config.plotting.font.size,
+        'font.size':        config.plotting.font['size'],
         'axes.labelweight': config.plotting.axes.labelweight,
         'image.cmap':       config.plotting.cmap
     })
@@ -130,15 +130,11 @@ GROUPING = {
 SAVE_KWS = ('show', 'tab', 'filename', 'overwrite')
 
 
-# ---------------------------------------------------------------------------- #
-# Get file / folder tree for config
-# PATHS = get_paths(CONFIG)
-
-_section_aliases = dict(
-    plotting='plots',
-    lightcurves='lc',
-    calibration='cal',
-    registration='registry'
+SECTION_ALIASES = dict(
+    plotting=('plots', ),
+    lightcurves=('lcs', ),
+    calibration=('cal', ),
+    registration=('reg', 'registry')
 )
 
 
@@ -150,12 +146,13 @@ def resolve_internal_path_refs(folders, **aliases):
 
 
 def _resolve_internal_path_refs(subs):
-    return dict(zip(subs, (sub(v, subs) for v in subs.values())))
+    return ConfigNode(zip(subs, (sub(v, subs) for v in subs.values())))
 
 
 def get_internal_path_refs(folders, **aliases):
-    return {f'${name.upper()}': str(loc).rstrip('/')
+    subs = {f'${name.upper()}': str(loc).rstrip('/')
             for name, loc in _get_internal_path_refs(folders, **aliases)}
+    return subs
 
 
 def _get_internal_path_refs(folders, **aliases):
@@ -163,40 +160,11 @@ def _get_internal_path_refs(folders, **aliases):
         if isinstance(loc, DictNode):
             if (loc := loc.get('folder')):
                 yield name, loc
-            continue
-
-        yield name, loc
-
-        if name := aliases.get(name):
+        else:
             yield name, loc
 
-
-def _prefix_paths(node, prefix):
-
-    prefix = Path(prefix)
-
-    if isinstance(node, (str, Path)):
-        return prefix / node
-
-    done = set()
-    paths, parents = node.split('folder')
-    needs_prefix = paths.map(Path).filter(values=Path.is_absolute)
-    for key, parent in parents.flatten().items():
-        # set folder again on paths for completeness
-        paths[key] = current = prefix / parent
-
-        # last key is 'folder', ignore
-        section = key[:-1]
-        # only prefix relative paths
-        for key, path in needs_prefix[section].flatten().items():
-            done.add(key := (*section, *key))
-            paths[key] = current / path
-
-    # prefix paths without explicit folder
-    for key in (set(paths.flatten().keys()) - done):
-        paths[key] = prefix / paths[key]
-
-    return paths
+        for name in aliases.get(name, ()):
+            yield name, loc
 
 
 def _is_special(path):
@@ -223,7 +191,7 @@ class Template(Template):
 
     # def resolve(self, hdu ,**kws):
     resolve = Alias('resolve_path')
-    
+
     def resolve_path(self, hdu=None, frames=(), partial=False, **kws):
         subs = self.get_subs(hdu, frames, partial, **kws)
         return self.sub(partial, **subs, **kws)
@@ -238,7 +206,7 @@ class Template(Template):
         if not partial and (missing & ({'HDU', 'DATE', 'E'})):
             assert hdu
 
-        for grouping, (key, attr) in GROUPING.items():
+        for _, (key, attr) in GROUPING.items():
             if hdu and key in missing:
                 subs[key] = op.AttrGetter(attr)(hdu)
 
@@ -285,68 +253,72 @@ class Template(Template):
 
 # ---------------------------------------------------------------------------- #
 
-class PathConfig(ConfigNode):  # AttributeAutoComplete
+class PathManager:  # AttributeAutoComplete
     """
     Filesystem trse helper. Attributes `files` and `folders` point to the full
     system paths for pipeline data products.
     """
 
-    @classmethod
-    def from_config(cls, root, output, config):
+    # @classmethod
+    def __init__(self, root, output, config):
 
         # input / output root paths
         root = Path(root).resolve()
         output = root / output
 
+        # create nodes
+        self.files = ConfigNode()
+        self.folders = ConfigNode()
+        self.templates = ConfigNode()
+
         # split folder / filenames from config
-        # create root node
-        node = cls()
-        attrs = [('files', 'filename'), ('folders', 'folder')]
-        remapped_keys = DictNode()
         # catch both singular and plural form keywords
+        remapped_keys = DictNode()
+        attrs = [('files', 'filename'), ('folders', 'folder')]
         for (key, term), s in itt.product(attrs, ('', 's')):
             found = config.find(term + s, True, remapped_keys[key])
             for keys, val in found.flatten().items():
-                node[(key, *keys)] = val
+                getattr(self, key)[keys] = val
+
+        self.folders['output'] = ''
+        # get template key subs and prefix them with output path where needed
+        substitutions = resolve_internal_path_refs(self.folders, **SECTION_ALIASES)
+        substitutions = {key: str(val if val.is_absolute() else output / val)
+                         for key, val in substitutions.map(Path).items()}
+        self.subs = substitutions
 
         # read in paths, fill templates
-        node.resolve_paths(output)
+        self.resolve_paths(output)
 
         # add root
-        node.folders['root'] = node.folders['input'] = root
+        self.folders['root'] = self.folders['input'] = root
 
         # update config!
         # for (kind, *orignal), new in remapped_keys.flatten().items():
-        #     config[tuple(orignal)] = node[(kind, *new)]
+        #     config[tuple(orignal)] = self[(kind, *new)]
 
         # isolate the file template patterns
-        templates = node.files.select(values=lambda v: '$' in str(v))
+        templates = self.files.select(values=lambda v: '$' in str(v))
         # sort sections
         section_order = ('info', 'samples', 'tracking', 'lightcurves')
         templates = templates.sorted(section_order).map(str).map(Template)
         for section, tmp in templates.flatten().items():
-            node[('templates', tmp.get_identifiers()[0], *section)] = tmp
+            self.templates[(tmp.get_identifiers()[0], *section)] = tmp
 
         # make readonly
-        node.freeze()
+        for node in ('files', 'folders', 'templates'):
+            getattr(self, node).freeze()
 
-        return node
-
-    # def __repr__(self):
-    #     return dicts.pformat(self, rhs=self._relative_to_output)
+    def __repr__(self):
+        return (f'{type(self).__name__}('
+                f'folders={self.folders.size()}, '
+                f'files={self.files.size()}, '
+                f'templates={self.templates.size()})')
 
     # def _relative_to_output(self, path):
     #     print('ROOT', self._root(), '-' * 88, sep='\n')
     #     out = self._root().folders.output
     #     return f'/{path.relative_to(out)}' if out in path.parents else path
-
-    # @cached.
-    # @property
-    # def _section_folders(self):
-    #     return DictNode(self.folders.reshape(Partial(remove)(o, 'folder')))
-
-        # return [key[:(-1 if key[-1] == 'folder' else None)]
-        # for key in self.folders.flatten().keys()]
 
     def create(self, ignore=()):
         logger.debug('Checking for missing folders in output tree.')
@@ -366,17 +338,21 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
                     '\n    '.join(map(str, required)))
 
         for path in required:
+            if '$' in str(path):
+                raise ValueError(f'Unresolved template key in {path}.')
+
             logger.debug('Creating folder: {}.', path)
             path.mkdir(parents=True)
 
     def resolve_paths(self, output):
+
         # resolve files / folders
         self.resolve_folders(output)
         self.resolve_files()
         # All paths resolved as far as possbile (barring $HDU $DATE templates)
 
         # ensure we have unique path to each folder node
-        folders = DictNode()
+        folders = ConfigNode()
         for section, folder in self.folders.flatten().items():
             if section in self.files:
                 section = (*section, 'folder')
@@ -386,33 +362,34 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         parents = DictNode(self.files.map(Path.parent.fget))
         parents = parents.reshape(Partial(replace)(o, 'filename', 'folder'))
         folders.update(parents)
-        self['folders'] = folders
+        self.folders = folders
 
     def resolve_folders(self, output):
         # resolve internal folder references $HDU etc. Prefix paths when needed.
 
         # path $ substitutions
         folders = self.folders
-        folders['output'] = ''
-        substitutions = resolve_internal_path_refs(folders, **_section_aliases)
 
-        # Convert folders to absolute paths
-        folders = folders.map(sub, substitutions)
-        self['folders'] = _prefix_paths(folders, output)
+        # paths, parents = folders.split('folder')
+        for key, folder in folders.flatten().items():
+            folders[key] = folder = Path(sub(folder, self.subs))
+            if not folder.is_absolute():
+                parent = output
+                if 'folder' not in key:
+                    parent = folders.get((key[0], 'folder'), output)
+
+                folders[key] = parent / folder
 
     def resolve_files(self):
         # convert filenames to absolute paths where necessary
 
+        # sub internal path refs
+        files = self.files.map(sub, self.subs).map(Path)
+
         # find config sections where 'filename' given as relative path, and
         # there is also a 'folder' given in the same group. Prefix the filename
         # with the folder path.
-
-        # sub internal path refs
-        substitutions = get_internal_path_refs(self.folders, **_section_aliases)
-
-        files = self.files.map(sub, substitutions).map(Path)
         needs_prefix = files.filter(values=Path.is_absolute)
-
         for section, path in needs_prefix.flatten().items():
             if prefix := self.get_folder(section):
                 files[section] = prefix / path
@@ -420,7 +397,8 @@ class PathConfig(ConfigNode):  # AttributeAutoComplete
         # make sure everything converted to full path
         assert len(files.filter(values=Path.is_absolute)) == 0
 
-        self['files'] = files
+        # update state
+        self.files = files
 
     def get_folder(self, section):
         if folder := self.folders.get((*section, 'folder')):

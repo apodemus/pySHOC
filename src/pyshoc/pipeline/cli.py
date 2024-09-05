@@ -90,9 +90,11 @@ def get_root(files_or_folder, _level=0):
 
 
 def resolve_output(output, root):
-    out = cfg._prefix_paths(output, root)
-    logger.info('Output root: {}.', out)
-    return out
+    output = Path(output)
+    if not output.is_absolute():
+        output = root / output
+    logger.info('Output root: {}.', output)
+    return output
 
 
 def resolve_aperture(_ctx, _param, value):
@@ -175,7 +177,7 @@ def setup(root, output, overwrite, use_cache, config, verbose):
 
     # ------------------------------------------------------------------------ #
     # path helper
-    paths = cfg.PathConfig.from_config(root, output, config)
+    paths = cfg.PathManager(root, output, config)
     paths.create(ignore='calibration')
 
     # add log file sink
