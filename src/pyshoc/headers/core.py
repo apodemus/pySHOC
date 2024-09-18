@@ -60,7 +60,7 @@ class Header(Header):
         """check which keys actually need to be updated"""
         to_update = {}
         for key, val in info.items():
-            if self.get(key, None) != val:
+            if self.get(key) != val:
                 to_update[key] = val
             else:
                 logger.debug('{!r} will not be updated.', key)

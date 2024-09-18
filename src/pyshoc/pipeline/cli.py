@@ -189,7 +189,7 @@ def setup(root, output, overwrite, use_cache, config, verbose):
     rcParams['savefig.directory'] = output
 
     # set detection algorithm
-    if algorithm := config.detection.get('algorithm', None):
+    if algorithm := config.detection.get('algorithm'):
         HDU.detection.algorithm = algorithm
 
     # update cache locations

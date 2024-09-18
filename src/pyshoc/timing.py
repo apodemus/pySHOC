@@ -337,7 +337,7 @@ class TimeDelta(time.TimeDelta):
 #         # embed(header="Embedded interpreter at 'timing.py':271")
 
 #         # if isinstance(val, cls):
-#         #     opts = dict(format=kws.get('format', None),
+#         #     opts = dict(format=kws.get('format'),
 #         #                          copy=kws.get('copy', False))
 #         #     return val.replicate(**opts)
 
@@ -686,12 +686,12 @@ class Timing(LoggingMixin):
         if self.trigger.is_gps_loop:
             # GPS triggered
             # self.t0_flag = '*'
-            if delta := self.header.get('GPS-INT', None):
+            if delta := self.header.get('GPS-INT'):
                 return int(delta) / 1000 - self.dead
 
         # For TRIGGER 'Internal' or 'External Start' EXPOSURE stores the actual
         # correct exposure time
-        elif exp := self.header.get('EXPOSURE', None):
+        elif exp := self.header.get('EXPOSURE'):
             return exp
 
         return UnknownTime

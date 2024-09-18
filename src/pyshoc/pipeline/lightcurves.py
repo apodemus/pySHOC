@@ -271,8 +271,8 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
         # resolve filenames from templated paths
         key = grouping, *_ = tuple(key)
         key = (cfg.GROUPING[grouping][0], *key, 'filename')
-        tmp = (self.output_templates.get(key, None) or
-               self.output_templates.get(key[:-1], None))
+        tmp = (self.output_templates.get(key) or 
+               self.output_templates.get(key[:-1]))
         if tmp:
             return tmp.resolve_paths(section=('lightcurves', grouping),
                                      partial=True)
