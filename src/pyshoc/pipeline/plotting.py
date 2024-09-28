@@ -80,7 +80,7 @@ class PlotManager(LoggingMixin):
     def add_task(self, task, tab,
                  filenames=(), overwrite=False,
                  figure=None, add_axes=False, replace=False,
-                 *args, **kws):
+                 args=(), **kws):
 
         # check if plotting is active
         if not self.active:
@@ -117,8 +117,7 @@ class PlotManager(LoggingMixin):
             # Future task
             self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
                              tab, task)
-
-            self.gui[tab].add_task(task, *args, **kws)
+            self.gui[tab].add_task(task, *ensure.tuple(args), **kws)
             return task
 
         # execute task
