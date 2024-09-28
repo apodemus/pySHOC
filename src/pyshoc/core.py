@@ -27,7 +27,7 @@ from motley.table.attrs import AttrTable, AttrColumn as Column
 from obstools.image.hdu import ImageHDU
 from obstools.image.noise import StdDev
 from obstools.sites.saao import telescopes as tel
-from obstools.math.stats import median_scaled_median
+from obstools.stats import median_scaled_median
 from obstools.utils import convert_skycoords, get_coords_named
 from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 from recipes.containers import ensure

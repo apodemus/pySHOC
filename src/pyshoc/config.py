@@ -103,7 +103,7 @@ def load(file=None):
 
     # plot config
     rcParams.update({
-        'font.size':        config.plotting.font['size'],
+        'font.size':        config.plotting.font.size,
         'axes.labelweight': config.plotting.axes.labelweight,
         'image.cmap':       config.plotting.cmap
     })
@@ -311,9 +311,9 @@ class PathManager:  # AttributeAutoComplete
 
     def __repr__(self):
         return (f'{type(self).__name__}('
-                f'folders={self.folders.size()}, '
-                f'files={self.files.size()}, '
-                f'templates={self.templates.size()})')
+                f'folders={self.folders._size()}, '
+                f'files={self.files._size()}, '
+                f'templates={self.templates._size()})')
 
     # def _relative_to_output(self, path):
     #     print('ROOT', self._root(), '-' * 88, sep='\n')

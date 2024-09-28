@@ -199,8 +199,8 @@ def setup(root, output, overwrite, use_cache, config, verbose):
         cache_path =  paths.folders.cache / PYENV
         enable_local_caching({
             # get_hdu_image_products: paths.folders.cache / 'image-samples.pkl'
-            HDU.get_sample_image:              cache_path / 'sample-images.pkl',
-            HDU.detection._algorithm.__call__: cache_path / 'source-regions.pkl'
+            HDU.get_sample_image:               cache_path / 'sample-images.pkl',
+            HDU.detection.algorithm._detect:    cache_path / 'source-regions.pkl'
         })
 
     return paths, overwrite

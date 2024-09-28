@@ -328,7 +328,7 @@ def _overview_products_table(overview, paths):
 def _overview_products_hstack(overview, paths):
 
     # get overview products
-    overview = overview.filter('logging')
+    overview = overview.prune('logging')
 
     # header edits
     to_remove = ('Overview', )
@@ -371,7 +371,7 @@ def _overview_products_hstack(overview, paths):
 def _write_overview_products_table(overview, paths, filename=None, sheet=None,
                                    overwrite=True):
     #
-    out = overview.filter(('spreadsheets', 'logging')).sorted(['info'])
+    out = overview.prune(('spreadsheets', 'logging')).sorted(['info'])
     headers = _prepare_headers(out, {}, ('plots', ), {}, '{}', 0, title_lookup='header')
     tbl = Table.from_dict(out.reshape(headers.get),
                           title='Overview Data Products ',
