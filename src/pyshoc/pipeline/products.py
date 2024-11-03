@@ -98,10 +98,11 @@ def replace_from(lookup, keys, level, at=None, fallback=None):
     return tuple(keys)
 
 
-def insert_from(lookup, key, level, insert=0):
+def insert_from(lookup, key, level, insert=0, condition=None):
 
     if new := lookup.get(key[level]):
-        return (*key[:insert], *ensure.list(new), *key[insert:])
+        if condition and condition(key):
+            return (*key[:insert], *ensure.list(new), *key[insert:])
 
     return key
 
@@ -245,7 +246,7 @@ def _get_templates(paths, key):
 
     # Get template tree
     tmp = paths.templates[key].copy()
-    tmp = tmp.filter(('tracking', 'plots'))  # FIXME
+    tmp = tmp.prune(('tracking', 'plots'))  # FIXME
     tmp, lcs = tmp.split('lightcurves')
     lcs = lcs.map(op.AttrGetter('template'))
 
@@ -419,13 +420,14 @@ def _hdu_products_table(run, paths):
     products, templates = _get_hdu_products(run, paths)
 
     # remove verbose keys
-    to_remove = ('filename', 'concat', 'by_file', 'by_date')
+    to_remove = ('filename', 'concat', 'by_file', 'by_date', 'plot')
 
     fixups = (
         # get section title
         Partial(replace_from)(SPECTRAL, o, -2, 0),
         # add level header for time series
-        Partial(insert_from)({'lightcurves': 'ts'}, o, 0, -1)
+        Partial(insert_from)({'lightcurves': 'ts'}, o, 0, -1,
+                             lambda keys: 'corner' not in keys)
     )
 
     # get relative paths
@@ -455,7 +457,7 @@ def _hdu_products_table(run, paths):
         **cfg.console.tables.products
     )
 
-    tbl.headers_header_block[:, 0] = ('Input', '', '', 'HDU')
+    tbl.headers_header_block[[0, -1], 0] = ('Input',  'HDU')
     return tbl
 
 
