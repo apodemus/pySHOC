@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 # third-party
 import numpy as np
 from scipy import stats
+from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.time import Time
@@ -24,24 +26,23 @@ from pyxides import Grouped, OfType
 from pyxides.vectorize import MethodMapper, repeat
 from motley.utils import vstack
 from motley.table.attrs import AttrTable, AttrColumn as Column
-from obstools.image.hdu import ImageHDU
-from obstools.image.noise import StdDev
-from obstools.sites.saao import telescopes as tel
-from obstools.stats import median_scaled_median
-from obstools.utils import convert_skycoords, get_coords_named
-from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
-from recipes.containers import ensure
 from recipes.oo.temp import temporary
 from recipes.functionals import raises
 from recipes.pprint.mapping import pformat
+from recipes.containers import ensure
 from recipes.pprint.formatters import Decimal
 from recipes.introspect import get_caller_name
 from recipes.oo.property import ForwardProperty
 from recipes.string import named_items, strings, sub
+from obstools.image.hdu import ImageHDU
+from obstools.image.noise import CCDNoiseModel
+from obstools.stats import median_scaled_median
+from obstools.sites.saao import telescopes as tel
+from obstools.utils import convert_skycoords, get_coords_named
+from obstools.campaign import PhotCampaign, FilenameHelper as _FilenameHelper
 
 # relative
-from . import headers
-from . import config as cfg
+from . import headers, config as cfg
 from .pprint import BraceContract
 from .readnoise import readNoiseTables
 from .timing import Timing, Trigger, hms, to_sec
@@ -345,7 +346,7 @@ class FilenameHelper(_FilenameHelper):
             eg. '0010' in 'SHA_20200729.0010.fits'
         """
         return self.path.suffixes[0].lstrip('.')
-    
+
     @property
     def roll(self):
         nr, *suf, ext = self.path.suffixes
@@ -546,6 +547,10 @@ class HDU(ImageHDU, Messenger):
         # diffraction limit 1.9m
         return DIFF_LIMS.get(self.telescope)
 
+    @lazyproperty
+    def noise_model(self):
+        return CCDNoiseModel(gain=self.readout.preAmpGain, readout=self.readout.noise)
+
     def get_server_path(self, server=cfg.remote.server):
         if None in (self.file.path, self.telescope):
             return
@@ -606,8 +611,6 @@ class HDU(ImageHDU, Messenger):
         return coords
 
     def _set_coords(self, coords):
-        from astropy.coordinates import SkyCoord
-
         self._coords = coo = SkyCoord(coords, unit=('h', 'deg'))
         self.header.update(
             OBJRA=coo.ra.to_string('hourangle', sep=':', precision=1),
@@ -843,7 +846,9 @@ class HDU(ImageHDU, Messenger):
                 pass
             elif func is np.median:
                 # std = self.noise_model.std_of_median(self.data)
-                hdu.noise_model = StdDev(self.noise_model.std_of_median(self.data))
+                hdu.noise_model = self.noise_model.__class__(
+                    self.noise_model.readout / len(self.data) ** 2
+                    )
             else:
                 raise ValueError('Please provide function to compute uncertainty.')
 
