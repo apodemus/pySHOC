@@ -21,7 +21,7 @@ from mpl_multitab import QtWidgets
 import motley
 from pyxides.vectorize import repeat
 from scrawl.image import plot_image_grid
-from obstools.image import SkyImage
+from obstools.image import SkyImage, ImageRegistry
 from obstools.modelling import int2tup
 from obstools.phot.tracking import SourceTracker
 import obstools.lightcurves as lcs
@@ -41,7 +41,7 @@ from ..config import SAVE_KWS, Template, _is_special
 from . import products, lightcurves as lc
 from .logging import logger
 from .calibrate import calibrate
-from .plotting import PlotManager, save_figure
+from .plotting import PlotManager
 
 
 # ---------------------------------------------------------------------------- #
@@ -225,13 +225,19 @@ def _plot_image(image, *args, **kws):
     return image.plot(*args, **kws)
 
 
+def _image_plot_task(plotter, **kws):
+    factory = plotter.task_factory(SkyImage.plot)
+    return factory(fig=o,
+                   **{**dict(regions=cfg.samples.plots.contours,
+                             labels=cfg.samples.plots.labels,
+                             coords='pixel',
+                             use_blit=False),
+                      **kws})
+
+
 def _plot_sample_images(run, samples, path_template, overwrite, plotter, replace):
 
-    task = plotter.task_factory(_plot_image)(fig=o,
-                                             regions=cfg.samples.plots.contours,
-                                             labels=cfg.samples.plots.labels,
-                                             coords='pixel',
-                                             use_blit=False)
+    task = _image_plot_task(plotter)
 
     section = cfg.samples.tab
     for hdu in run.sort_by('t.t0'):
@@ -249,8 +255,8 @@ def _plot_sample_images(run, samples, path_template, overwrite, plotter, replace
 
             # plot
             if plotter.should_plot([filename], overwrite):
-                yield plotter.add_task(task, key, filename, overwrite, image=image,
-                                       replace=replace)
+                yield plotter.add_task(task, key, filename, overwrite,
+                                       args=(image,), replace=replace)
 
     if plotter.gui:
         plotter.gui[section].link_focus()
@@ -883,6 +889,65 @@ class Pipeline(SlotHelper):
 
         return tracker
 
+    # ------------------------------------------------------------------------ #
+    def _lucky(self, hdu, wcs, overwrite=None):
+
+        paths = self.paths
+        plotter = self.plotter
+        tracker = self.trackers[hdu.file.name]
+        templates = paths.templates.HDU.tracking
+        lucky_plot_task = _image_plot_task(plotter)
+
+        # Lucky imaging
+        fitsfile = paths.templates.HDU.tracking.lucky.filename.resolve(hdu)
+        if not fitsfile.exists() or overwrite:
+            tracker.lucky_image(hdu.calibrated, wcs, fitsfile,
+                                **cfg.tracking.lucky.params)
+
+        # Source detection on lucky image
+        lucky = fits.open(fitsfile)
+        lucky = SkyImage.from_image(lucky[1].data, hdu.fov, hdu.pixel_scale,
+                                    **{**cfg.tracking.lucky.detection})
+
+        # plot
+        plotfiles = templates.lucky.plots.image.resolve_paths(hdu)
+        if plotter.should_plot(plotfiles, overwrite):
+            tab = (*tab, *get_tab_key(hdu))
+            plotter.add_task(lucky_plot_task, tab, plotfiles, overwrite,
+                             args=(lucky, ),
+                             **cfg.tracking.lucky.plots.image.prune('filename'))
+
+        return lucky
+
+    def lucky(self, overwrite=None):
+        logger.section('Lucky Imaging')
+        
+        run = self.campaign
+        # reg = self.registry._reg
+        wcss = self.registry.wcss or self.registry.build_wcs(run)
+        overwrite = self.overwrite if overwrite is None else overwrite
+
+        lucky_images = [self._lucky(hdu, wcs, overwrite)
+                        for hdu, wcs in zip(self.campaign, wcss)]
+
+        # Get segmentation from lucky images
+
+        # Relabel lucky segments for consistency accross files
+        lucky_reg = ImageRegistry(lucky_images, params=self.registry._reg.params)
+        lucky_reg.register()
+        target_xy = self.registry._trans_to_image(1).transform(
+            self.registry.target_coords_pixel)
+        target_label, = lucky_reg.classifier.predict([target_xy])
+        lucky_reg.relabel(target_label + 1)
+
+        logger.success('Registered lucky images.')
+        
+        spanning = set.intersection(*map(set, lucky_reg.labels_per_image))
+        spanning = sorted(map(int, spanning))
+        logger.info('Sources: {} span all observations.', spanning)
+
+        return lucky_reg, spanning
+    
     # ---------------------------------------------------------------------------- #
     # Time Series Analysis
 
@@ -932,6 +997,10 @@ class Pipeline(SlotHelper):
         # Source Tracking
         labels, spanning = self.track(top, cfg.tracking.get('overwrite'), njobs)
 
+        # ------------------------------------------------------------------------ #
+        # Lucky images
+        lucky_reg, spanning = self.lucky(cfg.tracking.lucky.get('overwrite'))
+        
         # ------------------------------------------------------------------------ #
         # Photometry
 
