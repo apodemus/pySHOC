@@ -54,32 +54,9 @@ class PlotManager(LoggingMixin):
 
         return overwrite or any(not p.exists() for p in paths) or self.gui
 
-    def get_figure(self, tab, fig, replace=False, **kws):
-
-        # Create figure if needed, add to ui tab if active
-        if self.gui:
-            if tab:
-                do = ('add', 'replace')[replace]
-                caller = getattr(self.gui, f'{do}_tab')
-                tab = caller(tab, fig=fig, **kws)
-                return tab.figure
-
-            logger.debug('GUI active, but no tab. Figure will not be embedded.')
-
-        if fig:
-            assert isinstance(fig, Figure)
-            return fig
-
-        if plt := sys.modules.get('matplotlib.pyplot'):
-            logger.debug('pyplot active, launching figure {}.', tab)
-            return plt.figure(**kws)
-
-        logger.debug('No GUI, creating figure. {}.', tab)
-        return Figure(**kws)
-
-    def add_task(self, task, tab,
+    def add_task(self, task, tab, # id_,
                  filenames=(), overwrite=False,
-                 figure=None, add_axes=False, replace=False,
+                 figure=None, add_axes=False, embed=True, replace=False,
                  args=(), **kws):
 
         # check if plotting is active
@@ -104,7 +81,7 @@ class PlotManager(LoggingMixin):
 
         # create the task
         fig_kws = task.fig_kws
-        task = PlotTask(self, task, tab, filenames, overwrite)
+        task = PlotTask(self.gui if embed else None, task, tab, filenames, overwrite)
         self.tasks[tab] = task
 
         # next line will generate figure to fill the tab, we have to replace it
@@ -113,7 +90,7 @@ class PlotManager(LoggingMixin):
                                  **fig_kws)
         self.figures[tab] = figure
 
-        if self.gui and self.gui.delay:
+        if embed and self.gui and self.gui.delay:
             # Future task
             self.logger.info('Plotting delayed: Adding plot callback for {}: {}.',
                              tab, task)
@@ -223,8 +200,8 @@ class PlotTaskWrapper(_TaskBase):
     """
     This class wraps the plotting task. It handles the figure initialization and
     will ensure the correct keywords get passed to the figure creation and
-    plotting methods. Also handles the case for plot methods that create their 
-    own figures.
+    plotting methods respectively. Also handles the case for plot methods that
+    create their own figures.
     """
 
     def __init__(self, gui, func, *args, **kws):
@@ -253,7 +230,7 @@ class PlotTaskWrapper(_TaskBase):
             args = (*self.args, *args)
             kws = {**self._get_kws({list(self._keywords).pop(): figure}), **kws}
 
-        # Now run the task
+        # Next run the task
         func = self.__wrapped__
 
         self.logger.opt(lazy=True).info(
@@ -281,10 +258,10 @@ class PlotTaskWrapper(_TaskBase):
 class PlotTask(slots.SlotHelper, LoggingMixin):
 
     __slots__ = (
-        'manager', 'task', 'tab', 'filenames', 'result', 'overwrite', 'save_kws'
+        'gui', 'task', 'tab', 'filenames', 'result', 'overwrite', 'save_kws'
     )
 
-    def __init__(self, manager, task, tab, filenames=(), overwrite=False, **save_kws):
+    def __init__(self, gui, task, tab, filenames=(), overwrite=False, **save_kws):
         #
         self.logger.debug('Creating {0.__name__} for {1}.', type(self), task)
 
@@ -315,11 +292,32 @@ class PlotTask(slots.SlotHelper, LoggingMixin):
         # art
         return self.result
 
+    def _get_figure(self, tab, fig, replace=False, **kws):
+
+        # Create figure if needed, add to ui tab if active
+        if self.gui:
+            do = ('add', 'replace')[replace]
+            caller = getattr(self.gui, f'{do}_tab')
+            tab = caller(tab, fig=fig, **kws)
+            return tab.figure
+            # logger.debug('GUI active, but no tab. Figure will not be embedded.')
+
+        if fig:
+            assert isinstance(fig, Figure)
+            return fig
+
+        if plt := sys.modules.get('matplotlib.pyplot'):
+            logger.debug('pyplot active, launching figure {}.', tab)
+            return plt.figure(**kws)
+
+        logger.debug('No GUI, creating figure. {}.', tab)
+        return Figure(**kws)
+
     def get_figure(self, figure=None, figsize=None, add_axes=False,
                    replace=False, **kws):
 
         #
-        figure = self.manager.get_figure(self.tab, figure, replace, figsize=figsize, **kws)
+        figure = self._get_figure(self.tab, figure, replace, figsize=figsize, **kws)
 
         if add_axes:
             if figure.axes:
@@ -328,7 +326,7 @@ class PlotTask(slots.SlotHelper, LoggingMixin):
                 figure.add_subplot()
 
         # resize if requested (normally handled by ui)
-        if not self.manager.gui and figsize:
+        if not self.gui and figsize:
             self.logger.info('Resizing figure: {}', figsize)
             figure.set_size_inches(figsize)
 
