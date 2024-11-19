@@ -38,7 +38,7 @@ from recipes.functionals.partial import Partial, PlaceHolder as o
 from .. import Campaign, config as cfg
 from ..timing import TimeDelta
 from ..config import SAVE_KWS, Template, _is_special
-from . import products, lightcurves as lc
+from . import products, tsa
 from .logging import logger
 from .calibrate import calibrate
 from .plotting import PlotManager

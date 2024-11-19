@@ -1,7 +1,5 @@
 
 # std
-from IPython import embed
-from scrawl.corner import corner
 from pathlib import Path
 
 # third-party
@@ -36,6 +34,7 @@ LightCurve = lcs.LightCurve
 
 
 def get_metadata(obj, section='Observing Info', **kws):
+
     # Campaign
     if isinstance(obj, Campaign):
         save = get_metadata(obj[0], **kws)
@@ -76,6 +75,8 @@ def from_tracker(tracker, hdu):
 # Outlier flagging
 
 # @update_defaults(CONFIG.by_file.flagged.params)
+
+
 def flag_outliers(ts, nwindow, noverlap, method='gESD', **kws):
     # TODO: move to tsa.ts.outliers
 
@@ -103,6 +104,9 @@ def flag_outliers(ts, nwindow, noverlap, method='gESD', **kws):
 # Cross calibration
 def rescale(ts, ref=1, metadata=None):
 
+    from IPython import embed
+    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':108")
+
     t, flux, sigma = ts
 
     # Scale by median flux of reference source
@@ -111,11 +115,9 @@ def rescale(ts, ref=1, metadata=None):
         metadata['Flux scale'] = fm
 
     if sigma is not None:
-        sigma = sigma / fm + sigma.mean(0) / sigma.shape[1]
+        # add uncertainty in mean
+        sigma = sigma / fm + sigma.mean(0) / sigma.shape[0]
 
-    from IPython import embed
-    embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':115")
-    
     return LightCurve(t,
                       np.ma.MaskedArray(flux.data / fm, flux.mask),
                       sigma)
@@ -144,11 +146,11 @@ def rescale(ts, ref=1, metadata=None):
 
 
 # @update_defaults(CONFIG.by_file.diff.params)
-def _diff_smooth_tvr(ts, nwindow, noverlap, smoothing):
-    # smoothed differential phot
-    sm = tsa.smooth.tv.MovingWindowSmoother(nwindow, noverlap)
-    s = sm(ts.t, ts.x, smoothing)
-    return ts - np.atleast_2d(s) + 1
+# def _diff_smooth_tvr(ts, nwindow, noverlap, smoothing):
+#     # smoothed differential phot
+#     sm = tsa.smooth.tv.MovingWindowSmoother(nwindow, noverlap)
+#     s = sm(ts.t, ts.x, smoothing)
+#     return ts - np.atleast_2d(s) + 1
 
 
 # ---------------------------------------------------------------------------- #
@@ -170,21 +172,7 @@ def concatenate(files, **kws):
     # data = zip(*(produce(section, compute, paths[section], None, hdu, overwrite)
     #              for hdu in campaign))
 
-    try:
-        data, meta = zip(*(read(filename) for filename in files))
-    except Exception as err:
-        import sys
-        import textwrap
-        from IPython import embed
-        from better_exceptions import format_exception
-        embed(header=textwrap.dedent(
-            f"""\
-                Caught the following {type(err).__name__} at 'lightcurves.py':201:
-                %s
-                Exception will be re-raised upon exiting this embedded interpreter.
-                """) % '\n'.join(format_exception(*sys.exc_info()))
-        )
-        raise
+    data, meta = zip(*(read(filename) for filename in files))
 
     # data
     bjd, rflux, rsigma = map(np.ma.hstack, data)
@@ -230,7 +218,8 @@ KNOWN_STEPS = {**TSA, **SDE, **DIAGNOSTICS}
 
 class Pipeline(slots.SlotHelper, LoggingMixin):
 
-    __slots__ = ('campaign', 'config', 'groupings', 'steps',  'results')
+    __slots__ = ('campaign', 'config', 'groupings', 'steps', 'output_templates',
+                 'results', 'overwrite', 'plotter')
 
     def __init__(self, campaign, config, infiles=(), output_templates=(),
                  overwrite=False, plotter=True):
@@ -243,12 +232,22 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
         self.output_templates = output_templates
         self.overwrite = bool(overwrite)
 
-        for grouping, todo in groupings.filter(('folder', 'filename')).items():
-            # resolve filenames from templated paths
+        # re-assign concat section
+        groupings = groupings.prune(('folder', 'filename'))
+        grouping_keys = list(groupings)
+
+        concat, _ = groupings.find('concat').flatten(2).popitem()
+        target_group = grouping_keys[grouping_keys.index(concat[0]) + 1]
+        groupings[target_group] = {'concat': groupings.pop(concat),
+                                   **groupings[target_group]}
+
+        for grouping, todo in groupings.items():
+            # group campaign files
             _, attr = cfg.GROUPING[grouping]
             self.groupings[grouping] = campaign.group_by(attr).sorted()
 
-            for step, config in todo.filter('formats').items():
+            # iterate through steps for file grouping
+            for step, config in todo.prune('formats').items():
                 section = (grouping, step)
 
                 # init ReductionStep
@@ -282,8 +281,8 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
     #     # resolve filenames from templated paths
     #     key = grouping, *_ = tuple(key)
     #     key = (cfg.GROUPING[grouping][0], *key, 'filename')
-    #     return (self.output_templates.get(key, None) or
-    #             self.output_templates.get(key[:-1], None))
+    #     return (self.output_templates.get(key) or
+    #             self.output_templates.get(key[:-1]))
 
     def add_step(self, section, infiles, config):
 
@@ -304,7 +303,7 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
                 f'Unknown reduction step: {step!r} for grouping: {grouping!r}.'
                 f'The following steps are recognised:\n'
                 f'Time Series Analysis: {tuple(TSA)}\n'
-                f'Spectral Density Esitmators: {tuple(SDE)}\n'
+                f'Spectral Density Estimators: {tuple(SDE)}\n'
                 f'Diagnostics:  {tuple(DIAGNOSTICS)}'
             )
 
@@ -369,6 +368,10 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
             except Exception as err:
                 logger.exception('Lightcurve pipeline failed at step: {!r}; '
                                  'group: {}', step, gid)
+                
+                # from IPython import embed
+                # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':369")
+                
                 raise err
 
             previous = (grouping, *step)
@@ -392,7 +395,7 @@ class Pipeline(slots.SlotHelper, LoggingMixin):
             # add task
             year, day = date.split('-', 1)
             tab = (*self.config.tab, year, day, step)
-            manager.add_task(task, tab, filename, overwrite, None, False, ts)
+            manager.add_task(task, tab, filename, overwrite, args=(ts,))
 
             if ui := manager.gui:
                 ui[tab[:-2]].link_focus()
@@ -414,7 +417,7 @@ def sort_load_order(path, preference):
 class ReductionStep(PartialTask):
 
     # __wrapper__ = ReductionTask
-    _load_order_prefered = ('npz', 'txt')
+    _load_order_preferred = ('npz', 'txt')
 
     def __init__(self, func, infile=None, outfiles=(), output_class=LightCurve, /,
                  section=(), overwrite=False, metadata=(), plot=None,  *args, **kws):
@@ -442,42 +445,8 @@ class ReductionStep(PartialTask):
         if tmp:
             section = ('lightcurves', *self.section)
             return sorted(tmp.resolve_paths(hdu, section, **kws),
-                          key=Partial(sort_load_order)(o, self._load_order_prefered))
+                          key=Partial(sort_load_order)(o, self._load_order_preferred))
         return []
-
-    def load_or_compute(self, obs, data=None, load_kws=(), *args, **kws):
-
-        hdu = obs[0]
-        datafiles = [o.resolve_path(hdu) for o in self.templates.output]
-
-        load_kws = load_kws or {}
-        for path in datafiles:
-            if path.exists() and not self.overwrite:
-                logger.info('Loading lightcurve for {} from {}.', hdu, path)
-                return self.output_class.load(path, **load_kws)
-
-        # Load input data
-        if data is None:
-            infiles = self.resolve_paths(self.templates.input, hdu)
-            if infiles and (infile := infiles[0]).exists():
-                data = self.output_class.load(infile, **load_kws)
-            else:
-                raise FileNotFoundError(repr(str(infile)))
-
-        # Compute
-        logger.opt(lazy=True).debug('Computing: {0}.',
-                                    lambda: ppr.caller(self.__wrapped__))
-
-        for path in datafiles:
-            logger.opt(lazy=True).debug(
-                'File {0[0]!s} {0[1]}.',
-                lambda: (path, (f"will be {('created', 'overwritten')[self.overwrite]}"
-                                if path.exists() else 'does not exist'))
-            )
-
-        # Do compute for step
-        return super().__call__(data, *args, **kws)
-        
 
     def __call__(self, obs, data=None, load_kws=(), *args, **kws):
 
@@ -489,7 +458,7 @@ class ReductionStep(PartialTask):
         # if '20130212.010' in obs[0].file.name:
         #     from IPython import embed
         #     embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':480")
-        
+
         hdu = obs[0]
         self.templates.output
         out = [o.resolve_path(hdu) for o in self.templates.output]
@@ -501,14 +470,18 @@ class ReductionStep(PartialTask):
         if not isinstance(result, self.output_class):
             result = self.output_class(*result)
 
+        # aggregate meta data
+        metadata = ConfigNode(self.metadata)
+        if metadata and (processed := metadata.pop('description')):
+            have_desc = 'description' in result.metadata
+            key = ('description', ('Processing', self.section[-1]))[have_desc]
+            metadata[key] = processed
+            metadata = get_metadata(hdu, **metadata)
+
         # save text
-        if self.metadata is not False:
-            for path in out:
-                if self.overwrite or not path.exists():
-                    # if path.suffix == '.npz':
-                    # from IPython import embed
-                    # embed(header="Embedded interpreter at 'src/pyshoc/pipeline/lightcurves.py':485")
-                    result.save(path, **get_metadata(hdu, **self.metadata))
+        for path in out:
+            if self.overwrite or not path.exists():
+                result.save(path, **metadata)
 
         # plot
         if self.plot is not False:
@@ -541,6 +514,43 @@ class ReductionStep(PartialTask):
                     raise
 
         return result
+
+    def load_or_compute(self, obs, data=None, load_kws=(), *args, **kws):
+
+        hdu = obs[0]
+        datafiles = [o.resolve_path(hdu) for o in self.templates.output]
+
+        load_kws = load_kws or {}
+        for path in datafiles:
+            if path.exists() and not self.overwrite:
+                logger.info('Loading lightcurve for {} from {}.', hdu, path)
+                return self.output_class.load(path, **load_kws)
+
+        # Load input data
+        if data is None:
+            infiles = self.resolve_paths(self.templates.input, hdu)
+            if infiles:
+                if (infile := infiles[0]).exists():
+                    data = self.output_class.load(infile, **load_kws)
+                else:
+                    raise FileNotFoundError(repr(str(infile)))
+            else:
+                raise ValueError('No input file template provided, require data:'
+                                 f' {self.section}')
+
+        # Compute
+        logger.opt(lazy=True).debug('Computing: {0}.',
+                                    lambda: ppr.caller(self.__wrapped__))
+
+        for path in datafiles:
+            logger.opt(lazy=True).debug(
+                'File {0[0]!s} {0[1]}.',
+                lambda: (path, (f"will be {('created', 'overwritten')[self.overwrite]}"
+                                if path.exists() else 'does not exist'))
+            )
+
+        # Do compute for step
+        return super().__call__(data, *args, **kws)
 
 
 # def lag_scatter(x, ):
